@@ -1,0 +1,101 @@
+{
+  "theme_strategy": "dark-only",
+  "typography": {
+    "fonts": [
+      {
+        "family": "Cormorant Garamond",
+        "type": "serif",
+        "usage": "Brand name, major headings (H1, H2), gallery titles. It brings the luxury, editorial feel.",
+        "import": "@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&display=swap');"
+      },
+      {
+        "family": "Outfit",
+        "type": "sans",
+        "usage": "UI elements, body text, control labels, prompts. Provides clean, geometric readability.",
+        "import": "@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');"
+      }
+    ],
+    "rules": [
+      "Never use default generic fonts like Inter or Arial.",
+      "Headlines (Cormorant Garamond) must use tight letter spacing (tracking-tight) and be set in Regular or Medium weight.",
+      "UI Labels (Outfit) should be small (text-xs or text-sm) and slightly tracked out (tracking-wide) for uppercase labels.",
+      "Primary headings max size is text-5xl."
+    ]
+  },
+  "colors": {
+    "background": "#050505",
+    "surface": "#121212",
+    "surface_glass": "rgba(255, 255, 255, 0.03)",
+    "border": "rgba(255, 255, 255, 0.08)",
+    "primary_accent": "#D4AF37",
+    "primary_accent_hover": "#F0C74A",
+    "text_primary": "#F5F5F5",
+    "text_secondary": "#A1A1A1",
+    "rules": [
+      "Backgrounds must be void black or very dark charcoal. Do not use pure black (#000000); use #050505.",
+      "Gold accents (#D4AF37) must be used sparingly for primary actions (Generate button, active states, active tab borders).",
+      "Do NOT use gradients for backgrounds. Rely on solid dark colors and glassmorphism.",
+      "DO NOT use teal green or teal blue."
+    ]
+  },
+  "visual_enhancers": {
+    "glassmorphism": "Use 'backdrop-blur-xl bg-white/[0.02] border border-white/5' for panels, control sections, and modal cards.",
+    "borders": "Keep borders extremely subtle. 1px solid rgba(255,255,255,0.08).",
+    "shadows": "Ambient diffuse shadows 'shadow-[0_8px_32px_rgba(0,0,0,0.4)]'.",
+    "noise": "Add a subtle SVG noise overlay fixed to the screen to eliminate digital flatness, opacity 2-3%."
+  },
+  "grids_layouts": {
+    "main_app": "h-screen w-screen overflow-hidden flex.",
+    "three_column": "Use 'react-resizable-panels' to create Left Sidebar (250px), Center Workspace (flex-1), Right Controls (350px).",
+    "canvas": "The center workspace must have generous padding (p-8 or p-12). Images should be displayed using CSS Grid (1-4 output count) taking maximum available height while maintaining aspect ratio.",
+    "control_panel": "Dense but optical layout. Group settings (Scene, Outfit, Format) using Accordions or sleek divided sections. No 'cards' in the control panel, just flat sections with subtle dividers."
+  },
+  "components_instructions": {
+    "buttons": "Primary buttons: bg-[#D4AF37] text-black font-medium hover:bg-[#F0C74A]. Secondary: bg-white/5 border border-white/10 hover:bg-white/10 text-white.",
+    "inputs": "bg-black/50 border border-white/10 text-white placeholder:text-white/30 focus:border-[#D4AF37]/50 focus:ring-1 focus:ring-[#D4AF37]/50. Use transparent or very dark backgrounds.",
+    "panels": "The resizable handles should be 1px or 2px wide, colored transparent but showing a subtle line on hover.",
+    "scrollbars": "Custom minimal scrollbars for panels: 4px width, transparent track, thumb-white/10."
+  },
+  "motion": {
+    "transitions": "Use spring animations for hover states. 0.3s ease for color changes. Add transition to specific properties, never 'all'.",
+    "loading": "For AI image generation loading state, do NOT use a generic spinner. Use a slow, pulsing glass overlay on the placeholder, and an elegant progress bar at the top or bottom of the canvas."
+  },
+  "image_urls": {
+    "male_reference_1": {
+      "url": "https://images.unsplash.com/photo-1506794778202-cad84cf45f1d",
+      "description": "Male portrait for Identity Pack."
+    },
+    "male_reference_2": {
+      "url": "https://images.unsplash.com/photo-1600603406200-5b2a104684ac",
+      "description": "Male portrait for Identity Pack."
+    },
+    "female_reference": {
+      "url": "https://images.pexels.com/photos/37468749/pexels-photo-37468749.jpeg",
+      "description": "Female portrait for Identity Pack."
+    },
+    "generated_scene_chania": {
+      "url": "https://images.pexels.com/photos/13900750/pexels-photo-13900750.jpeg",
+      "description": "Generated output example for 'Chania Old Town' scene."
+    }
+  },
+  "instructions_to_main_agent": {
+    "general": "Build a desktop-first Lumina AI Studio. Force dark mode. Implement 3-column resizable layout using react-resizable-panels. The overall feel should be high-end, slow, precise, and luxurious.",
+    "fonts": "Update globals.css/index.css to import 'Cormorant Garamond' and 'Outfit'. Configure them in tailwind.config.js.",
+    "icons": "Use lucide-react but set strokeWidth={1} or {1.25} to make them look thin and premium.",
+    "login_page": "Create an elegant single-owner login screen. Deep background, centered glass card. No 'sign up' link, just login.",
+    "identity_packs": "UI for managing and uploading up to 5 reference photos per pack. Use grid for face thumbnails.",
+    "new_generation": "Center canvas displays a grid (1x1, 1x2, or 2x2) of the output. The right control panel has the intricate form (Prompt textarea, Presets for Scene and Clothing, Aspect ratio toggles).",
+    "gallery": "A masonry or strict grid view of past generations with hover actions (favorite, download).",
+    "testing": "Add data-testid attributes to all interactive elements."
+  },
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Do NOT center align generic App containers. Maintain strict layout.",
+    "NEVER use emojis for icons. Use lucide-react thin stroke icons.",
+    "Use 2-3x more spacing (p-6, p-8) than standard SaaS templates.",
+    "Apply backdrop-blur-xl and low opacity borders (border-white/10) to create depth without gradients.",
+    "Ensure 'data-testid' is present on interactive elements.",
+    "Do not use generic 'card' component everywhere. Rely on subtle borders and layout density.",
+    "Ensure the Tailwind Config handles the custom fonts and color variables.",
+    "Add transition for hover states but NEVER transition: all."
+  ]
+}
