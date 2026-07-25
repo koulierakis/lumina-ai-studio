@@ -27,6 +27,15 @@ sudo supervisorctl restart frontend
 Open the local frontend URL and log in with the credentials configured in
 `backend/.env`.
 
+### Local port-8000 troubleshooting
+
+The automated suite never uses port 8000. If local development has duplicate
+listeners, inspect them with `netstat -ano | findstr :8000`, stop only the
+processes you own, then start one backend instance from `backend/` with
+`python -m uvicorn server:app --host 127.0.0.1 --port 8000`. Verify
+`GET /api/health` and then `POST /api/auth/login` using the credentials in the
+local backend `.env`. Avoid starting multiple reloaders for the same port.
+
 ## Owner credentials
 
 Configured via environment variables in `backend/.env`:
@@ -42,7 +51,66 @@ Failed logins are limited to 5 attempts per client in 15 minutes by default.
 Tune this with `LOGIN_MAX_FAILURES`, `LOGIN_WINDOW_SECONDS`, and
 `LOGIN_BLOCK_SECONDS`.
 
+## Video Studio
+
+The Video Studio now exposes all supported generation modes and advanced
+settings, provides lifecycle progress and controls, and includes a searchable,
+sortable private library with favorites, rename, preview, download, duplicate,
+and delete actions. The bundled mock provider produces animated GIF previews;
+real adapters can return MP4/WebM through the same provider contract.
+
+Video Library folders are owner-private organizational locations; collections
+are independent reusable groups and support multiple collection memberships per
+video. Empty folders and collections persist as explicit Video Studio records.
+
+- Private image-to-motion workspace at `/studio/video-studio`.
+- Upload an image, describe the movement, choose 3/5/8 seconds and vertical or
+  horizontal output, then preview, download, or delete saved results.
+- The `backend/video_providers` contract keeps engines replaceable. The included
+  `mock` engine produces a local animated GIF motion preview with no credentials;
+  future adapters can return MP4/WebM without changing the user interface.
+
 ## Phase 1 features (implemented)
+
+## Control Center
+
+The default route is `/studio/dashboard`: a private, premium workspace overview
+with immediate access to every Lumina studio. It shows current tasks, recent
+gallery files, active generation jobs, video-project count, provider readiness,
+system messages, and context-aware next actions. Its widget registry is ready
+for later user-customizable layout preferences.
+
+## Central platform foundation
+
+LUMINA now has a shared module registry used by the primary navigation, an
+owner-private Projects foundation at `/studio/projects`, and central APIs for
+workspace overview, cross-module job aggregation, owner-private search, and
+safe settings readiness. The platform never returns secret values; provider and
+security diagnostics expose only readiness state.
+
+Projects now support status, archive/restore, tags, descriptions, linked work,
+notes, exports and a private activity history. Workspace Search is debounced and
+grouped by result type; Settings separates safe editable preferences from
+read-only diagnostics.
+
+Shared platform services now include owner-private Media Library metadata,
+unified Jobs Center aggregation, persisted notifications, and a Ctrl+K command
+palette that searches modules and private workspace results.
+
+Shared navigation now exposes Media Library, Jobs Center, and Notifications as
+authenticated central pages.
+
+## Developer Center (local only)
+
+Open `http://127.0.0.1:3000/studio/developer` after signing in. The page is
+available only to the LUMINA owner and monitors local application activity:
+system health, repository changes, local test/build tasks, retained sanitized
+logs, and active media jobs. It never observes remote Codex or ChatGPT cloud
+task execution.
+
+The Developer Center can run only predefined local actions: backend tests,
+frontend tests, frontend production build, Python compilation, backend/frontend
+health checks, and repository refresh. It cannot accept arbitrary commands.
 
 - Private single-owner login (JWT, 30-day sessions)
 - **Identity Packs**: create, upload up to 5 reference photos (drag & drop or picker),
@@ -195,6 +263,18 @@ Utility
 ## Environment variables
 
 See `.env.example`. All secrets stay server-side.
+
+### Video Studio providers
+
+Video Studio defaults to the local `mock` provider and remains usable without paid credentials. A production Luma Dream Machine adapter is included for asynchronous native MP4 generation. Set `VIDEO_PROVIDER=luma` and `LUMA_API_KEY` only in `backend/.env`; the key is never returned by the API or sent to the frontend. Luma supports text-to-video and image-to-video in this adapter. Image-to-video additionally requires `LUMA_IMAGE_URL_BASE`, a controlled HTTPS CDN prefix serving immutable source images by filename. The provider catalog exposes only configured providers and their modes, resolutions, durations, aspect ratios, output formats, cancellation and input limits. Provider video URLs are downloaded and stored privately in LUMINA before a job completes.
+
+Luma usage and billing are the responsibility of the Luma account that owns `LUMA_API_KEY`. Keep the mock provider for local testing; it produces an animated GIF, not an MP4/WebM.
+
+### Voice Studio
+
+Voice Studio provides authenticated audio jobs, private audio storage, favorites, tags, folders and collections. The default local mock engine creates a valid WAV preview (24 kHz mono) for development. The provider-neutral catalog reserves ElevenLabs, OpenAI, Google, Azure and Cartesia adapters without exposing credentials. Real speech, transcription, cloning and audio-processing adapters require provider credentials and production verification before they are enabled.
+
+Voice Packs are owner-private, consent-gated records for voice samples. Creating one requires an ownership declaration; samples are stored privately and are removed with the pack. ElevenLabs is the selected future cloning adapter and HeyGen the selected future talking-face adapter, but neither is connected or verified in this workspace.
 
 ## Storage layout
 

@@ -10,6 +10,14 @@ import Gallery from './pages/Gallery';
 import ComingSoon from './pages/ComingSoon';
 import Editor from './pages/Editor';
 import EditorLanding from './pages/EditorLanding';
+import VideoStudio from './pages/VideoStudio';
+import Dashboard from './pages/Dashboard';
+import DeveloperCenter from './pages/DeveloperCenter';
+import VoiceStudio from './pages/VoiceStudio';
+import WorkspaceCenter from './pages/WorkspaceCenter';
+import ProjectDetail from './pages/ProjectDetail';
+import PlatformHub from './pages/PlatformHub';
+import CodeCreator from './pages/CodeCreator';
 
 export default function App() {
   return (
@@ -28,7 +36,7 @@ export default function App() {
             }}
           />
           <Routes>
-            <Route path="/" element={<Navigate to="/studio/generate" replace />} />
+            <Route path="/" element={<Navigate to="/studio/dashboard" replace />} />
             <Route path="/login" element={<Login />} />
             <Route
               path="/studio"
@@ -38,16 +46,30 @@ export default function App() {
                 </RequireAuth>
               }
             >
-              <Route index element={<Navigate to="generate" replace />} />
+              <Route index element={<Navigate to="dashboard" replace />} />
+              <Route path="dashboard" element={<Dashboard />} />
+              <Route path="developer" element={<DeveloperCenter />} />
+              <Route path="code-creator" element={<CodeCreator />} />
               <Route path="generate" element={<Generate />} />
               <Route path="identity" element={<IdentityPacks />} />
               <Route path="gallery" element={<Gallery />} />
+              <Route path="media-library" element={<PlatformHub mode="media" />} />
+              <Route path="jobs" element={<PlatformHub mode="jobs" />} />
+              <Route path="notifications" element={<PlatformHub mode="notifications" />} />
               <Route path="editor" element={<EditorLanding />} />
               <Route path="editor/:mediaId" element={<Editor />} />
-              <Route path="projects" element={<ComingSoon title="Projects" />} />
-              <Route path="settings" element={<ComingSoon title="Settings" />} />
+              <Route path="video-studio" element={<VideoStudio />} />
+              <Route path="voice-studio" element={<VoiceStudio />} />
+              <Route path="projects" element={<WorkspaceCenter mode="projects" />} />
+              <Route path="projects/:projectId" element={<ProjectDetail />} />
+              <Route path="documents" element={<ComingSoon title="Documents" />} />
+              <Route path="finance" element={<ComingSoon title="JSA Finance" />} />
+              <Route path="research" element={<ComingSoon title="Internet Research" />} />
+              <Route path="automations" element={<ComingSoon title="Automations" />} />
+              <Route path="settings" element={<WorkspaceCenter mode="settings" />} />
+              <Route path="search" element={<WorkspaceCenter mode="search" />} />
             </Route>
-            <Route path="*" element={<Navigate to="/studio/generate" replace />} />
+            <Route path="*" element={<Navigate to="/studio/dashboard" replace />} />
           </Routes>
         </AuthProvider>
       </BrowserRouter>

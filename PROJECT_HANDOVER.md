@@ -5,6 +5,13 @@ up and continue it without any hidden state.
 
 ## Repository normalization (2026-07-24)
 
+Video Studio provider metadata is safe to expose to the client: it contains
+only capabilities and never credentials. The built-in mock engine returns
+`image/gif` animated previews; it must not be represented as MP4 or WebM.
+Folders and collections are persisted in `lumina_video_library_organizations`.
+Folders are single-location assignments on a job; collection memberships are a
+list of organization IDs and can be empty or shared by multiple videos.
+
 `C:\Users\User\Desktop\LUMINA` is the single project root. The former nested
 `lumina-ai-studio-main` tree was audited, merged, and removed. Its authoritative
 backend, tests, authentication hardening, and documentation were preserved;
@@ -15,7 +22,36 @@ and frontend environment examples, and a pre-change inventory in
 `NORMALIZATION_BACKUP_MANIFEST.md`. Local secrets and generated media remain
 untracked. The original archive is preserved under `backups/`.
 
+## Control Center
+
+The authenticated default route is `/studio/dashboard`. It is a workspace
+overview built from existing private APIs: gallery, jobs, video projects,
+providers, and health. Its tool registry lives in
+`frontend/src/dashboard/model.js`; add new studios there to keep the Control
+Center as Lumina's main entry point.
+
+## Developer Center
+
+The authenticated local Developer Center is available at
+`http://127.0.0.1:3000/studio/developer`. Backend routes under `/api/developer`
+are owner-only. It uses SSE through an authenticated fetch stream, with polling
+as a fallback. `backend/developer_center.py` contains the only allowed local
+development commands and retains a redacted, bounded local history in
+`.lumina-developer-history.json`.
+
+The service monitors local LUMINA activity only. It cannot inspect remote Codex,
+ChatGPT, or other cloud task execution.
+
 ## 1. What is implemented (Phase 1 + Sprint 2, verified working)
+
+### Video Studio
+- `/studio/video-studio` accepts an image, motion prompt, duration, and format.
+- Jobs and results remain private to the owner; users can monitor, preview,
+  download, list, and delete their generated results.
+- `backend/video_providers/base.py` is the provider contract. The default mock
+  needs no credentials and produces animated GIF previews. Register a provider
+  adapter and set `VIDEO_PROVIDER` to connect a real MP4/WebM video service;
+  provider credentials remain backend environment variables.
 
 ### Phase 1 (previously shipped)
 - **Private single-owner authentication** (JWT, 30-day sessions).
@@ -220,3 +256,27 @@ pages are explicit `Coming Soon` placeholders.
 
 Requires external API key: only `EMERGENT_LLM_KEY` (provided by Emergent
 Universal Key). No other third-party keys are used.
+## Video Studio: Luma integration
+
+The real-provider-ready adapter is `backend/video_providers/luma_provider.py`, registered as `luma` alongside the default local `mock` provider. Configure `LUMA_API_KEY` and switch `VIDEO_PROVIDER=luma` in the backend environment. Configure `LUMA_IMAGE_URL_BASE` as a controlled HTTPS CDN prefix before enabling Luma image-to-video; LUMINA's authenticated media route is intentionally not exposed publicly for this integration. The adapter persists the provider job identifier/status in technical job metadata, polls it with a bounded timeout, downloads a completed native file to private storage, and keeps the UI lifecycle provider-neutral. Real generation, preview and download require a credentialed Luma account and should be smoke-tested before declaring the integration operational.
+## Voice Studio
+
+Voice Studio is available at `/studio/voice-studio`. Its backend contract is in `VoiceJob` and `backend/voice_providers`; `VOICE_PROVIDER=mock` safely produces a valid locally stored WAV without credentials. Future providers must implement the same provider catalog/capability pattern and retain all credentials server-side. Audio jobs and library records are owner-private and use the existing media storage endpoint.
+
+Voice Pack APIs are under `/api/voice/packs`. They enforce owner scope and require explicit consent plus an ownership declaration on create. ElevenLabs and HeyGen configuration placeholders are documented only; no paid integration has been enabled or verified.
+# Central platform update
+
+- Shared module registry: `frontend/src/platform/moduleRegistry.js` is the
+  navigation source of truth for the central workspace.
+- Projects are now owner-private persisted records at `/api/projects` and
+  `/studio/projects`.
+- `/api/workspace/overview`, `/api/workspace/search`, and
+  `/api/settings/readiness` are central, authenticated platform endpoints.
+- Projects now include archive state, tags, cover/export references and activity;
+  preferences are persisted through `/api/settings/preferences` without exposing
+  environment secrets.
+- Control Center now consumes `/api/workspace/overview` as its primary source.
+  The known port-8000 duplicate-listener condition is local runtime state only;
+  central tests are intentionally independent of it.
+- Shared central APIs include `/api/media-library`, `/api/workspace/jobs`, and
+  `/api/notifications`; all retain owner filters and never return secret values.

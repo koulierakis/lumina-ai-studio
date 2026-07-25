@@ -23,6 +23,11 @@ def _ext_from_mime(mime: str) -> str:
         "image/jpeg": ".jpg",
         "image/jpg": ".jpg",
         "image/webp": ".webp",
+        "image/gif": ".gif",
+        "video/mp4": ".mp4",
+        "video/webm": ".webm",
+        "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
+        "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac",
     }.get(mime.lower(), ".png")
 
 

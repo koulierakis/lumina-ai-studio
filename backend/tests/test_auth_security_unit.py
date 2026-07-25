@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import bcrypt
+from dotenv import dotenv_values
+from pathlib import Path
+import pytest
 
 from auth import verify_credentials
 from login_limiter import LoginRateLimiter
@@ -32,6 +35,17 @@ def test_plaintext_password_remains_backward_compatible(monkeypatch):
 
     assert verify_credentials("owner@example.com", "legacy-password")
     assert not verify_credentials("owner@example.com", "wrong")
+
+
+def test_backend_env_owner_credentials_are_accepted(monkeypatch):
+    config = dotenv_values(Path(__file__).resolve().parents[1] / ".env")
+    if not config.get("OWNER_EMAIL") or not config.get("OWNER_PASSWORD"):
+        pytest.skip("Local owner credentials are not configured.")
+    monkeypatch.setenv("OWNER_EMAIL", config["OWNER_EMAIL"])
+    monkeypatch.setenv("OWNER_PASSWORD", config["OWNER_PASSWORD"])
+    monkeypatch.delenv("OWNER_PASSWORD_HASH", raising=False)
+    assert verify_credentials(config["OWNER_EMAIL"], config["OWNER_PASSWORD"])
+    assert not verify_credentials(config["OWNER_EMAIL"], "invalid-password")
 
 
 def test_limiter_blocks_then_expires_and_success_clears():

@@ -23,8 +23,12 @@ env/
 .pytest_cache/
 .pytest_tmp/
 .pytest*/
+.developer_*_run/
+.developer_*_test/
+.developer_*/
 .coverage
 .coverage.*
+.lumina-developer-history.json
 htmlcov/
 
 # JavaScript
@@ -58,6 +62,7 @@ test_reports/
 dump.rdb
 *.sqlite
 *.sqlite3
+.lumina-runtime/
 
 # Generated and uploaded media
 backend/storage/generated/*
@@ -86,3 +91,6 @@ Desktop.ini
 .cache/
 .ac/
 memory/test_credentials.md
+
+# Applications created by LUMINA Code Creator
+backend/generated_projects/

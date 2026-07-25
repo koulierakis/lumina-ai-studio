@@ -128,6 +128,25 @@ class TestHealthAndAuth:
         assert r.status_code == 200
         assert r.json()["email"].lower() == EMAIL
 
+    def test_developer_center_requires_owner_authentication(self, api_client):
+        r = api_client.get(f"{API}/developer/overview", timeout=10)
+        assert r.status_code in (401, 403)
+
+    def test_developer_center_owner_can_read_local_overview(self, api_client, auth_headers):
+        r = api_client.get(f"{API}/developer/overview", headers=auth_headers, timeout=20)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert "health" in data and "repository" in data and "scope" in data
+
+    def test_developer_center_rejects_arbitrary_task(self, api_client, auth_headers):
+        r = api_client.post(
+            f"{API}/developer/tasks",
+            headers=auth_headers,
+            json={"task_type": "arbitrary-shell-command"},
+            timeout=10,
+        )
+        assert r.status_code == 400
+
     @pytest.mark.parametrize("path", [
         "/identity-packs", "/gallery", "/providers", "/jobs",
     ])

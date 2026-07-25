@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { PanelGroup, Panel, PanelResizeHandle } from 'react-resizable-panels';
+import CommandPalette from './CommandPalette';
 
 export default function StudioLayout() {
   return (
@@ -13,6 +14,7 @@ export default function StudioLayout() {
         <Panel minSize={40} className="h-full">
           <div className="h-full w-full">
             <Outlet />
+            <CommandPalette />
           </div>
         </Panel>
       </PanelGroup>

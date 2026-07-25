@@ -7,14 +7,22 @@ from __future__ import annotations
 import os
 import hmac
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import bcrypt
 import jwt
+from dotenv import load_dotenv
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 _bearer = HTTPBearer(auto_error=False)
+
+# Authentication is also imported by local maintenance commands and tests.
+# Load the backend-owned configuration here so credential verification never
+# relies on another module having imported the application first. Existing
+# process environment values remain authoritative for deployment overrides.
+load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
 
 def _secret() -> str:
