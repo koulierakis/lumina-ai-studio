@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Dict, Type
 
 from .base import (
+    ErrorKind,
     GeneratedImage,
     GenerationInput,
     ImageProvider,
@@ -55,6 +56,7 @@ def get_provider(name: str | None = None) -> ImageProvider:
 
 __all__ = [
     "ImageProvider",
+    "ErrorKind",
     "GenerationInput",
     "GeneratedImage",
     "ProviderCapabilities",

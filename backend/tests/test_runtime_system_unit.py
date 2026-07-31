@@ -75,3 +75,25 @@ def test_build_system_status_shape(monkeypatch):
     assert status["backend"]["status"] == "ok"
     assert status["coding_model"]["installed"] is True
     assert "warnings" in status
+
+
+def test_build_system_status_ready_without_ollama(monkeypatch):
+    monkeypatch.setattr(
+        runtime_info,
+        "check_ollama",
+        lambda cfg=None: {"online": False, "model": "qwen2.5-coder:7b", "installed": False, "models": []},
+    )
+    monkeypatch.setattr(
+        runtime_info,
+        "check_frontend",
+        lambda cfg=None: {"reachable": True, "url": "http://localhost:3000/"},
+    )
+    monkeypatch.setattr(runtime_info, "load_runtime_state", lambda: {"warnings": [], "services": {}})
+    monkeypatch.setattr(runtime_info, "detect_node_version", lambda: "20.0.0")
+
+    status = runtime_info.build_system_status(active_jobs=0)
+
+    assert status["system_ready"] is True
+    assert status["overall_readiness"] == "ready"
+    assert status["ollama"]["status"] == "offline"
+    assert "Local AI (Ollama) is offline." in status["warnings"]

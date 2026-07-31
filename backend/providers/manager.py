@@ -181,6 +181,7 @@ class ProviderManager:
         started = time.perf_counter()
         attempted: list[str] = []
         failures: list[dict] = []
+        failure_exceptions: list[ProviderError] = []
 
         for index, provider in enumerate(candidates):
             for attempt in range(max_attempts):
@@ -201,6 +202,7 @@ class ProviderManager:
                     )
                 except ProviderError as exc:
                     await self._mark_failure(exc)
+                    failure_exceptions.append(exc)
                     failures.append(exc.safe_summary())
                     logger.warning("provider=%s kind=%s attempt=%s", provider.name, exc.kind, attempt + 1)
                     retry_same = exc.retryable and attempt + 1 < max_attempts
@@ -226,19 +228,26 @@ class ProviderManager:
                         safe_message="Provider request failed.",
                     )
                     await self._mark_failure(wrapped)
+                    failure_exceptions.append(wrapped)
                     failures.append(wrapped.safe_summary())
                     logger.exception("Unexpected provider failure: %s", provider.name)
                     if not auto_fallback or index == len(candidates) - 1:
                         break
 
         message = "; ".join(f"{f['provider']}: {f['safe_message']}" for f in failures)
+        quota_failure = next((f for f in failures if f.get("kind") == ErrorKind.QUOTA.value), None)
+        quota_exception = next((exc for exc in failure_exceptions if exc.kind == ErrorKind.QUOTA), None)
+        preferred_failure = quota_failure or (failures[0] if failures else None)
+        preferred_exception = quota_exception or (failure_exceptions[0] if failure_exceptions else None)
         raise ProviderError(
-            "manager",
-            message or "All providers failed.",
-            kind=ErrorKind.UNAVAILABLE,
-            retryable=False,
-            safe_message=message or "All providers failed.",
-        )
+            str(preferred_failure.get("provider") if preferred_failure else "manager"),
+            str(preferred_failure.get("safe_message") if preferred_failure else (message or "All providers failed.")),
+            kind=ErrorKind.QUOTA if quota_failure else ErrorKind.UNAVAILABLE,
+            retryable=bool(quota_failure),
+            status_code=quota_failure.get("status_code") if quota_failure else None,
+            safe_message=str(preferred_failure.get("safe_message") if preferred_failure else (message or "All providers failed.")),
+            retry_after_seconds=quota_failure.get("retry_after_seconds") if quota_failure else None,
+        ) from preferred_exception
 
     async def generate_result(self, spec: GenerationInput, requested: str | None = None) -> ProviderRoutingResult:
         return await self._route(

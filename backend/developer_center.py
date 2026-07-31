@@ -33,6 +33,14 @@ TASKS: dict[str, dict[str, Any]] = {
     "backend_health": {"label": "Check backend health", "scope": "backend"},
     "frontend_health": {"label": "Check frontend health", "scope": "frontend"},
     "repository_status": {"label": "Refresh repository status", "scope": "repository"},
+    "runtime_scan": {"label": "Scan AI Runtime", "scope": "runtime"},
+    "runtime_validate_providers": {"label": "Validate Runtime providers", "scope": "runtime"},
+    "runtime_repair": {"label": "Repair Runtime configuration", "scope": "runtime"},
+    "runtime_missing_models": {"label": "Detect missing Runtime models", "scope": "runtime"},
+    "runtime_dependencies": {"label": "Verify Runtime dependencies", "scope": "runtime"},
+    "runtime_diagnostics": {"label": "Run Runtime diagnostics", "scope": "runtime"},
+    "runtime_report": {"label": "Generate Runtime report", "scope": "runtime"},
+    "talking_portrait_scan": {"label": "Scan Talking Portrait Studio", "scope": "runtime"},
 }
 
 
@@ -65,6 +73,10 @@ def task_command(task_type: str) -> tuple[list[str], Path] | None:
         return ([sys.executable, "-m", "compileall", "-q", "."], REPO_ROOT / "backend")
     if task_type == "repository_status":
         return (["git", "status", "--short"], REPO_ROOT)
+    if task_type in {"runtime_scan", "runtime_validate_providers", "runtime_repair", "runtime_missing_models", "runtime_dependencies", "runtime_diagnostics", "runtime_report"}:
+        return ([sys.executable, "-m", "ai_runtime.admin", task_type], REPO_ROOT / "backend")
+    if task_type == "talking_portrait_scan":
+        return ([sys.executable, "-c", "from talking_portrait_providers import talking_portrait_catalog; import json; print(json.dumps(talking_portrait_catalog(), indent=2))"], REPO_ROOT / "backend")
     return None
 
 
@@ -173,9 +185,11 @@ class DeveloperTaskManager:
             raise KeyError(task_id)
         if task["status"] == "queued":
             task.update({"status": "cancelled", "finished_at": utc_now(), "output_summary": "Cancelled before starting."})
-        elif task["status"] == "running" and task_id in self.processes:
+        elif task["status"] == "running":
             task["status"] = "cancelled"
-            self.processes[task_id].terminate()
+            process = self.processes.get(task_id)
+            if process:
+                process.terminate()
         else:
             raise ValueError("This task can no longer be cancelled.")
         self._persist(); self._emit("task", task); self._log("warning", "tasks", f"Cancelled: {task['label']}")

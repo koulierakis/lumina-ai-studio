@@ -28,6 +28,9 @@ def _ext_from_mime(mime: str) -> str:
         "video/webm": ".webm",
         "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
         "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac",
+        "application/pdf": ".pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+        "text/plain": ".txt", "text/html": ".html", "text/markdown": ".md",
     }.get(mime.lower(), ".png")
 
 

@@ -1,7 +1,7 @@
 """Pydantic models for Lumina AI Desktop."""
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 import uuid
 
@@ -51,6 +51,7 @@ class MediaAsset(BaseModel):
     tags: List[str] = Field(default_factory=list)
     folder: str = ""
     collection_ids: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -96,11 +97,21 @@ class IdentityPack(BaseModel):
 # ---------- Generation ----------
 class GenerationRequest(BaseModel):
     identity_pack_id: Optional[str] = None
+    project_id: Optional[str] = None
     prompt: str
     negative_prompt: Optional[str] = ""
     scene: Optional[str] = ""
     outfit: Optional[str] = ""
     aspect_ratio: str = "1:1"  # 9:16 | 16:9 | 1:1 | 4:5 | 3:2
+    resolution: str = "1024"
+    quality: str = "standard"
+    seed: Optional[int] = None
+    mode: str = "text-to-image"
+    identity_lock: str = "high"
+    style_reference_id: Optional[str] = None
+    composition_reference_id: Optional[str] = None
+    reference_media_ids: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
     count: int = 1  # 1..4
     provider: Optional[str] = None  # defaults to env IMAGE_PROVIDER
 
@@ -113,12 +124,20 @@ class GenerationJob(BaseModel):
     status: str = "queued"  # queued | processing | completed | failed
     provider: str = "gemini"
     identity_pack_id: Optional[str] = None
+    project_id: Optional[str] = None
     prompt: str = ""
     negative_prompt: str = ""
     scene: str = ""
     outfit: str = ""
     aspect_ratio: str = "1:1"
+    resolution: str = "1024"
+    quality: str = "standard"
+    seed: Optional[int] = None
+    mode: str = "text-to-image"
+    identity_lock: str = "high"
     count: int = 1
+    progress: int = 0
+    estimated_seconds_remaining: Optional[int] = None
     output_media_ids: List[str] = Field(default_factory=list)
     error: Optional[str] = None
     selected_provider: Optional[str] = None
@@ -140,12 +159,15 @@ class GalleryItem(BaseModel):
     media_id: str
     job_id: Optional[str] = None
     identity_pack_id: Optional[str] = None
+    project_id: Optional[str] = None
     prompt: str = ""
     scene: str = ""
     outfit: str = ""
     aspect_ratio: str = "1:1"
     provider: str = "gemini"
     favorite: bool = False
+    tags: List[str] = Field(default_factory=list)
+    collection_ids: List[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
 
 
@@ -177,6 +199,33 @@ class Project(BaseModel):
 
 
 
+class PhotoCollection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str
+    description: str = ""
+    media_ids: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class PhotoBatchJob(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    status: str = "queued"
+    source_media_ids: List[str] = Field(default_factory=list)
+    operations: Dict[str, Any] = Field(default_factory=dict)
+    output_media_ids: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
 # ---------- AI Edit Jobs ----------
 class AiEditJob(BaseModel):
     """A background AI edit job (Gemini edit) applied to an existing source media."""
@@ -188,9 +237,13 @@ class AiEditJob(BaseModel):
     provider: str = "gemini"
     tool: str = "retouch"  # one of the AI tool keys (retouch, enhance, upscale, ...)
     source_media_id: str
+    project_id: Optional[str] = None
     identity_pack_id: Optional[str] = None
     instruction: str = ""
+    identity_lock: str = "high"
     mask_media_id: Optional[str] = None  # if a mask was provided
+    reference_media_ids: List[str] = Field(default_factory=list)
+    export_options: Dict[str, Any] = Field(default_factory=dict)
     output_media_id: Optional[str] = None
     error: Optional[str] = None
     selected_provider: Optional[str] = None
@@ -206,7 +259,7 @@ class AiEditJob(BaseModel):
 
 # ---------- Video Projects ----------
 class VideoProject(BaseModel):
-    """Simple CapCut-style video project owned by the single owner."""
+    """Professional non-destructive video project owned by the single owner."""
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(default_factory=new_id)
@@ -214,12 +267,56 @@ class VideoProject(BaseModel):
     name: str = "Untitled Video"
     aspect_ratio: str = "16:9"    # 9:16 | 16:9 | 1:1 | 4:5
     fps: int = 30                 # 24 | 25 | 30
-    resolution: str = "1080p"     # 720p | 1080p
+    resolution: str = "1080p"     # 720p | 1080p | 2K | 4K
+    version: int = 1
+    tags: List[str] = Field(default_factory=list)
+    favorite: bool = False
+    collection_ids: List[str] = Field(default_factory=list)
+    history: List[dict] = Field(default_factory=list)
+    ai_generation_history: List[dict] = Field(default_factory=list)
+    template_ids: List[str] = Field(default_factory=list)
     # Freeform state blob managed by the frontend (clips, text overlays,
     # music, voice-over, adjustments). Kept as-is so the editor evolves
     # without schema migrations.
     state: dict = Field(default_factory=dict)
     exported_media_id: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class VideoTemplate(BaseModel):
+    """Reusable personal/company/brand/AI-generated video template."""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str
+    scope: str = "personal"  # personal | company | brand | ai-generated
+    brief: str = ""
+    favorite: bool = False
+    brand_id: Optional[str] = None
+    template: dict = Field(default_factory=dict)
+    usage_count: int = 0
+    preference_score: float = 0.0
+    tags: List[str] = Field(default_factory=list)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class VideoBrandKit(BaseModel):
+    """Company branding assets and defaults for the Video Studio."""
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str = "Company Brand"
+    logos: List[str] = Field(default_factory=list)
+    colors: List[str] = Field(default_factory=lambda: ["#D4AF37", "#0B0B0F"])
+    fonts: List[str] = Field(default_factory=lambda: ["Inter", "Playfair Display"])
+    intro_media_id: Optional[str] = None
+    outro_media_id: Optional[str] = None
+    watermark_media_id: Optional[str] = None
+    animations: List[str] = Field(default_factory=lambda: ["fade", "slide-up"])
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
 
@@ -287,7 +384,14 @@ class VoiceJob(BaseModel):
     mode: str = "text-to-speech"
     text: str = ""
     voice: str = "lumina"
+    style: str = "podcast"
+    preset_id: Optional[str] = None
+    personal_model_id: Optional[str] = None
     output_format: str = "wav"
+    sample_rate: int = 48000
+    bit_depth: int = 24
+    bitrate: str = "192k"
+    loudness_lufs: float = -16
     source_media_id: Optional[str] = None
     output_media_id: Optional[str] = None
     error: Optional[str] = None
@@ -300,6 +404,109 @@ class VoiceJob(BaseModel):
     retry_of: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
+
+
+class VoiceProfile(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    voice_identity: dict = Field(default_factory=dict)
+    speaking_profile: dict = Field(default_factory=dict)
+    singing_profile: dict = Field(default_factory=dict)
+    emotion_profiles: List[dict] = Field(default_factory=list)
+    vocal_range: dict = Field(default_factory=dict)
+    accent_profile: dict = Field(default_factory=dict)
+    pronunciation_profile: dict = Field(default_factory=dict)
+    breathing_profile: dict = Field(default_factory=dict)
+    quality_score: int = 82
+
+
+class PersonalVoiceModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str = "Personal Voice Model"
+    status: str = "active"
+    profile: VoiceProfile = Field(default_factory=VoiceProfile)
+    approved_recording_ids: List[str] = Field(default_factory=list)
+    improvement_events: List[dict] = Field(default_factory=list)
+    version: int = 1
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class VoiceProjectVersion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    label: str = "Initial version"
+    state: dict = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+
+
+class VoiceProject(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    title: str = "Untitled voice project"
+    project_type: str = "production"
+    status: str = "draft"
+    state: dict = Field(default_factory=dict)
+    versions: List[VoiceProjectVersion] = Field(default_factory=list)
+    collection_ids: List[str] = Field(default_factory=list)
+    tags: List[str] = Field(default_factory=list)
+    favorite: bool = False
+    autosaved_at: Optional[str] = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class VoicePreset(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    name: str
+    category: str
+    description: str
+    chain: List[str] = Field(default_factory=list)
+    settings: dict = Field(default_factory=dict)
+    export: dict = Field(default_factory=dict)
+
+
+class VoiceRecordingSession(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    title: str = "Untitled recording"
+    microphone_label: str = "Default microphone"
+    quality_preset: str = "studio"
+    duration_seconds: float = 0
+    sample_rate: int = 48000
+    bit_depth: int = 24
+    monitoring_enabled: bool = True
+    waveform: List[float] = Field(default_factory=list)
+    media_id: Optional[str] = None
+    take_history: List[dict] = Field(default_factory=list)
+    approved_for_model: bool = False
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class VoiceExportRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    project_id: Optional[str] = None
+    job_id: Optional[str] = None
+    format: str = "wav"
+    sample_rate: int = 48000
+    bit_depth: int = 24
+    bitrate: str = "192k"
+    loudness_lufs: float = -16
+    metadata: dict = Field(default_factory=dict)
+
+
+class VideoVoiceIntegrationRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    video_project_id: Optional[str] = None
+    audio_media_id: Optional[str] = None
+    action: str = "replace-narration"
+    lip_sync_preparation: bool = True
+    metadata: dict = Field(default_factory=dict)
 
 
 class VoiceLibraryOrganization(BaseModel):
@@ -371,5 +578,58 @@ class TalkingFaceJob(BaseModel):
     consent_at: Optional[str] = None
     ownership_declaration: str = ""
     metadata: dict = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class TalkingPortraitJob(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    status: str = "queued"  # queued | preparing | processing | rendering | completed | failed | cancelled | installing
+    progress: int = 0
+    estimated_seconds_remaining: Optional[int] = None
+    provider: str = "liveportrait"
+    portrait_media_id: Optional[str] = None
+    audio_media_id: Optional[str] = None
+    output_media_id: Optional[str] = None
+    output_mime_type: Optional[str] = None
+    identity_lock: bool = True
+    natural_blinking: bool = True
+    head_motion: float = 0.35
+    expression_intensity: float = 0.55
+    fps: int = 25
+    resolution: str = "512"
+    seed: Optional[int] = None
+    title: str = "Talking portrait"
+    error: Optional[str] = None
+    cancelled_at: Optional[str] = None
+    retry_of: Optional[str] = None
+    favorite: bool = False
+    tags: List[str] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class TalkingPortraitInstallJob(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    install_job_id: Optional[str] = None
+    owner_email: str
+    provider: str = "liveportrait"
+    status: str = "queued"
+    stage: str = "preflight"
+    progress: int = 0
+    step: str = "Queued"
+    current_message: str = "Queued"
+    log: List[str] = Field(default_factory=list)
+    recent_log_lines: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    error_code: Optional[str] = None
+    full_user_safe_error: Optional[str] = None
+    metadata: dict = Field(default_factory=dict)
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)

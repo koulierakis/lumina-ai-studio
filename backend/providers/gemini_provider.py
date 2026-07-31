@@ -163,6 +163,38 @@ def _extract_error_json(body: str) -> dict:
     return {}
 
 
+def _safe_gemini_error(exc: BaseException) -> ProviderError | None:
+    """Map Gemini SDK HTTP failures to a safe serializable ProviderError."""
+    status_code = None
+    for attr in ("status_code", "status", "code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            status_code = value
+            break
+    message = str(exc)
+    lowered = message.lower()
+    if status_code == 429 or "resource_exhausted" in lowered or "quota" in lowered:
+        return ProviderError(
+            "gemini",
+            "Gemini image generation quota is exhausted.",
+            kind=ErrorKind.QUOTA,
+            retryable=True,
+            status_code=429,
+            safe_message="Gemini image generation quota is exhausted. Select another provider or enable quota and retry.",
+            retry_after_seconds=46 if "retry" in lowered else None,
+        )
+    if status_code in {401, 403}:
+        return ProviderError(
+            "gemini",
+            "Gemini image credentials are invalid or missing.",
+            kind=ErrorKind.AUTH,
+            retryable=False,
+            status_code=status_code,
+            safe_message="Gemini image credentials are invalid or missing.",
+        )
+    return None
+
+
 def _redact_headers(headers: object) -> object:
     if headers is None:
         return None
@@ -400,6 +432,9 @@ class GeminiImageProvider(ImageProvider):
                 )
             except Exception as exc:
                 _print_gemini_http_diagnostics(exc=exc)
+                safe = _safe_gemini_error(exc)
+                if safe:
+                    raise safe from exc
                 raise
             return _extract_image(response)
 
@@ -416,6 +451,8 @@ class GeminiImageProvider(ImageProvider):
 
         for result in results:
             if isinstance(result, Exception):
+                if isinstance(result, ProviderError):
+                    raise result
                 errors.append(str(result))
             else:
                 output.append(result)
@@ -499,6 +536,9 @@ class GeminiImageProvider(ImageProvider):
                 )
             except Exception as exc:
                 _print_gemini_http_diagnostics(exc=exc)
+                safe = _safe_gemini_error(exc)
+                if safe:
+                    raise safe from exc
                 raise
             return _extract_image(response)
 

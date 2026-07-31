@@ -51,6 +51,17 @@ class ProviderError(RuntimeError):
         }
         return labels.get(self.kind, "Provider request failed.")
 
+    def availability_state(self) -> str:
+        if self.kind == ErrorKind.AUTH:
+            return "missing_credentials"
+        if self.kind == ErrorKind.QUOTA:
+            return "quota_exhausted"
+        if self.kind in {ErrorKind.RATE_LIMIT, ErrorKind.TIMEOUT, ErrorKind.UNAVAILABLE}:
+            return "temporarily_unavailable"
+        if self.kind == ErrorKind.UNSUPPORTED:
+            return "unsupported_operation"
+        return "unavailable"
+
     def safe_summary(self) -> dict[str, Any]:
         return {
             "provider": self.provider,
@@ -59,6 +70,7 @@ class ProviderError(RuntimeError):
             "safe_message": self.public_message(),
             "retry_after_seconds": self.retry_after_seconds,
             "kind": self.kind.value,
+            "availability_state": self.availability_state(),
         }
 
 
@@ -176,6 +188,12 @@ class GenerationInput:
     scene: str = ""
     outfit: str = ""
     aspect_ratio: str = "1:1"
+    resolution: str = "1024"
+    quality: str = "standard"
+    seed: Optional[int] = None
+    mode: str = "text-to-image"
+    identity_lock: str = "high"
+    metadata: dict[str, Any] = field(default_factory=dict)
     count: int = 1
     model: Optional[str] = None
     reference_images: List[bytes] = field(default_factory=list)

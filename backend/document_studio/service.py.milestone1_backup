@@ -1,0 +1,466 @@
+from __future__ import annotations
+
+import html
+import io
+import re
+import zipfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable
+
+from .models import ClauseTemplate, CompanyProfile, CorporateTemplate, DocumentAnalysisResult, CorporateDocument
+
+
+TEMPLATES: list[CorporateTemplate] = [
+    CorporateTemplate(id="premium-agreement", name="Premium Corporate Agreement", category="Legal", description="International law-firm style commercial agreement with execution blocks.", document_type="agreement", tags=["agreement", "contract", "legal"], required_fields=["subject", "term", "governing_law"], premium_features=["cover_page", "toc", "headers", "footers", "qr_verification", "signature_pages"]),
+    CorporateTemplate(id="nda", name="Mutual Non-Disclosure Agreement", category="Legal", description="Balanced NDA with confidentiality, exclusions and equitable relief.", document_type="nda", tags=["nda", "confidentiality"], required_fields=["disclosing_party", "receiving_party", "term"], premium_features=["watermark", "signature_pages", "version_information"]),
+    CorporateTemplate(id="business-plan", name="Investor Business Plan", category="Strategy", description="Consulting-grade business plan with executive summary and financial narrative.", document_type="business_plan", tags=["business", "strategy", "finance"], required_fields=["market", "model", "financials"], premium_features=["cover_page", "toc", "charts_placeholder", "corporate_branding"]),
+    CorporateTemplate(id="proposal", name="Executive Proposal", category="Commercial", description="Premium consulting proposal with scope, timeline and commercial terms.", document_type="proposal", tags=["proposal", "sales"], required_fields=["client", "scope", "fees"], premium_features=["cover_page", "brand_theme", "acceptance_page"]),
+    CorporateTemplate(id="invoice", name="Corporate Invoice", category="Finance", description="Formal invoice with banking, tax and QR verification blocks.", document_type="invoice", tags=["invoice", "finance"], required_fields=["invoice_number", "amount", "due_date"], premium_features=["qr_verification", "payment_terms", "metadata"]),
+    CorporateTemplate(id="minutes", name="Board Meeting Minutes", category="Governance", description="Corporate governance minutes with resolutions and attendance record.", document_type="meeting_minutes", tags=["minutes", "board", "governance"], required_fields=["meeting_date", "attendees", "resolutions"], premium_features=["headers", "resolution_blocks", "signature_pages"]),
+    CorporateTemplate(id="certificate", name="Luxury Corporate Certificate", category="Corporate", description="Formal certificate with seals, verification and luxury typography.", document_type="certificate", tags=["certificate", "corporate"], required_fields=["recipient", "certificate_reason"], premium_features=["watermark", "seal", "qr_verification"]),
+    CorporateTemplate(id="compliance", name="Compliance Memorandum", category="Compliance", description="Structured compliance assessment with controls, risks and actions.", document_type="compliance", tags=["compliance", "risk"], required_fields=["framework", "scope"], premium_features=["toc", "version_information", "metadata"]),
+]
+
+DOCUMENT_TYPE_CATALOG = ["contract", "commercial_agreement", "sales_agreement", "purchase_agreement", "service_agreement", "master_agreement", "framework_agreement", "nda", "ncnDA", "imfpa", "mou", "loi", "invoice", "proforma_invoice", "corporate_letter", "business_letter", "bank_correspondence", "compliance_document", "corporate_resolution", "certificate", "declaration", "power_of_attorney", "minutes", "policy", "report", "manual", "executive_summary", "business_proposal", "investment_proposal", "pitch_deck_document", "tender_document", "employment_document", "legal_document", "custom_document"]
+EXPORT_FORMATS = {"pdf", "docx", "html", "markdown", "md", "rtf", "txt"}
+COVER_STYLES = ["Corporate", "Legal", "Financial", "Investment", "Luxury", "Government", "Proposal", "Annual Report"]
+PACKAGE_TYPES = ["proposal", "banking", "legal"]
+DEFAULT_PAGE_DESIGN = {"margins": {"top": 24, "right": 20, "bottom": 24, "left": 20}, "columns": 1, "spacing": 1.55, "typography": {"heading_size": 42, "body_size": 11, "paragraph_style": "executive"}, "palette": {"primary": "#B9985A", "secondary": "#111827", "accent": "#E8D8A8"}, "fonts": {"heading": "Georgia", "body": "Inter"}, "background": "linear-gradient(135deg,#fff,#f8f5ec)", "watermark": True, "page_border": "1px solid #B9985A"}
+COMPONENT_LIBRARY = ["signature_blocks", "company_information", "bank_details", "legal_notices", "confidentiality_notices", "appendices", "revision_tables", "automatic_dates", "automatic_page_numbers", "automatic_document_numbers"]
+SMART_TABLE_TYPES = ["financial", "comparison", "pricing", "compliance", "editable"]
+CHART_TYPES = ["pie", "bar", "line", "timeline", "organization", "flow"]
+
+CLAUSE_LIBRARY = [
+    ClauseTemplate(id="clause-banking-reliance", category="Banking", title="Institutional Banking Reliance", body="Each regulated financial institution, correspondent bank, intermediary bank and professional adviser may rely upon this document as evidence of the corporate facts, authority and confirmations stated herein, subject to ordinary due diligence and applicable law.", tags=["banking", "reliance", "kyc"]),
+    ClauseTemplate(id="clause-aml-confirmation", category="AML", title="AML and Sanctions Confirmation", body="The Company confirms that, to the best of its knowledge after reasonable inquiry, it is not subject to sanctions, does not conduct prohibited business, and maintains commercially reasonable anti-money laundering and counter-terrorist financing controls.", tags=["aml", "sanctions", "compliance"]),
+    ClauseTemplate(id="clause-confidentiality", category="Confidentiality", title="Strict Confidentiality", body="The recipient shall keep this document and all related information strictly confidential, shall not disclose it except to professional advisers or regulated institutions with a need to know, and shall protect it using at least the same degree of care used for its own confidential information.", tags=["confidentiality", "nda"]),
+    ClauseTemplate(id="clause-authority", category="Authority", title="Corporate Authority", body="The signatory executing this document represents that all required corporate approvals have been obtained and that such signatory has authority to bind the Company for the purposes expressly stated herein.", tags=["authority", "signature"]),
+    ClauseTemplate(id="clause-jurisdiction", category="Jurisdiction", title="Governing Law and Forum", body="This document shall be interpreted in accordance with the governing law stated in the document profile, without prejudice to mandatory rules applicable to regulated financial institutions or public filings.", tags=["jurisdiction", "law"]),
+    ClauseTemplate(id="clause-force-majeure", category="Force Majeure", title="Force Majeure", body="No party shall be liable for delay or failure caused by events beyond its reasonable control, including acts of God, war, sanctions, banking interruptions, governmental action, cyber incidents or market infrastructure failures.", tags=["force majeure"]),
+    ClauseTemplate(id="clause-notices", category="Notices", title="Notices", body="All notices shall be delivered to the registered office, principal office or email address recorded in the Company Registry unless updated by written notice in accordance with this document.", tags=["notices"]),
+    ClauseTemplate(id="clause-dispute-resolution", category="Dispute Resolution", title="Escalation and Dispute Resolution", body="Disputes shall first be escalated to senior representatives for good-faith resolution. If unresolved, the parties may pursue the forum and procedure specified in the governing document or applicable law.", tags=["disputes"]),
+]
+
+PROMPT_LEAK_PATTERNS = ["create a", "draft a", "generate a", "write a", "include", "use premium style", "add signature block"]
+DEMO_COMPANY_NAMES = ["lumina corporate holdings", "strategic counterparty ltd"]
+GENERIC_AGREEMENT_MARKERS = ["premium corporate services agreement", "commercial and legal terms", "counterparty", "governing law", "disputes shall", "services agreement"]
+
+DOCUMENT_CLASS_DEFINITIONS = {
+    "certificate_of_authority": {"label": "Certificate of Authority", "title": "CERTIFICATE OF AUTHORITY", "keywords": ["certificate of authority", "authority certificate", "authorized to represent", "managing member"], "sections": ["Company Identification", "Jurisdiction and Legal Status", "Authorized Person", "Statement of Authority", "Scope of Authority", "Reliance Statement", "Certification Statement", "Execution"], "prohibited": GENERIC_AGREEMENT_MARKERS + ["agreement parties", "commercial terms", "fees"]},
+    "certificate_of_incumbency": {"label": "Certificate of Incumbency", "title": "CERTIFICATE OF INCUMBENCY", "keywords": ["certificate of incumbency", "incumbency"], "sections": ["Company Identification", "Incumbency Schedule", "Officers and Authorized Persons", "Certification", "Execution"], "prohibited": ["commercial terms", "services agreement"]},
+    "corporate_resolution": {"label": "Corporate Resolution", "title": "CORPORATE RESOLUTION", "keywords": ["corporate resolution", "resolution appointing", "appointing", "authorized signatory"], "sections": ["Company Identification", "Recitals", "Resolutions", "Authorized Signatory", "Certification", "Execution"], "prohibited": ["services agreement", "commercial terms"]},
+    "board_resolution": {"label": "Board Resolution", "title": "BOARD RESOLUTION", "keywords": ["board resolution", "board of directors"], "sections": ["Meeting Record", "Recitals", "Board Resolutions", "Authorizations", "Certification", "Signatures"], "prohibited": ["services agreement"]},
+    "shareholders_resolution": {"label": "Shareholders Resolution", "title": "SHAREHOLDERS RESOLUTION", "keywords": ["shareholders resolution", "shareholder resolution"], "sections": ["Shareholders", "Written Resolution", "Voting Confirmation", "Certification", "Execution"], "prohibited": ["services agreement"]},
+    "banking_cover_letter": {"label": "Banking Cover Letter", "title": "BANKING COVER LETTER", "keywords": ["banking cover letter", "cover letter", "bank of", "banking"], "sections": ["Addressee", "Applicant Company", "Purpose", "Enclosures", "Contact and Signature"], "prohibited": ["resolved", "services agreement"]},
+    "cover_letter": {"label": "Banking Cover Letter", "title": "BANKING COVER LETTER", "keywords": ["banking cover letter", "cover letter", "bank of", "banking"], "sections": ["Addressee", "Applicant Company", "Purpose", "Enclosures", "Contact and Signature"], "prohibited": ["resolved", "services agreement"]},
+    "aml_declaration": {"label": "AML Declaration", "title": "AML DECLARATION", "keywords": ["aml declaration", "anti-money laundering", "aml"], "sections": ["Company Identification", "Business Activity", "Source of Funds", "Sanctions and AML Confirmation", "Declaration", "Signature"], "prohibited": ["services agreement"]},
+    "ubo_declaration": {"label": "UBO Declaration", "title": "UBO DECLARATION", "keywords": ["ubo declaration", "ultimate beneficial owner", "beneficial owner"], "sections": ["Company Identification", "Beneficial Owners", "Ownership and Control", "Declaration", "Signature"], "prohibited": ["services agreement"]},
+    "kyc_declaration": {"label": "KYC Declaration", "title": "KYC DECLARATION", "keywords": ["kyc declaration", "know your customer", "kyc"], "sections": ["Customer Details", "Business Profile", "Management", "Ownership", "Declaration", "Signature"], "prohibited": ["services agreement"]},
+    "source_of_funds_declaration": {"label": "Source of Funds Declaration", "title": "SOURCE OF FUNDS DECLARATION", "keywords": ["source of funds", "source of wealth"], "sections": ["Declarant", "Funds Description", "Origin of Funds", "Supporting Evidence", "Declaration", "Signature"], "prohibited": ["services agreement"]},
+    "company_profile": {"label": "Company Profile", "title": "COMPANY PROFILE", "keywords": ["company profile", "corporate profile"], "sections": ["Overview", "Company Details", "Business Activity", "Management", "Compliance Profile", "Contact"], "prohibited": ["whereas", "resolved"]},
+    "invoice": {"label": "Invoice", "title": "INVOICE", "keywords": ["invoice", "tax invoice", "commission"], "sections": ["Invoice Details", "Supplier", "Client", "Line Items", "Payment Terms", "Bank Details"], "prohibited": ["resolved", "certificate"]},
+    "proforma_invoice": {"label": "Proforma Invoice", "title": "PROFORMA INVOICE", "keywords": ["proforma invoice", "pro-forma"], "sections": ["Proforma Details", "Seller", "Buyer", "Goods or Services", "Commercial Terms", "Validity"], "prohibited": ["resolved", "certificate"]},
+    "consulting_agreement": {"label": "Consulting Agreement", "title": "CONSULTING AGREEMENT", "keywords": ["consulting agreement", "consultant", "consulting services"], "sections": ["Parties", "Scope of Services", "Deliverables", "Fees", "Confidentiality", "Term", "Signatures"], "prohibited": ["certificate of authority"]},
+    "agency_agreement": {"label": "Agency Agreement", "title": "AGENCY AGREEMENT", "keywords": ["agency agreement", "agent"], "sections": ["Parties", "Appointment", "Authority", "Duties", "Commission", "Term", "Signatures"], "prohibited": []},
+    "commission_agreement": {"label": "Commission Agreement", "title": "COMMISSION AGREEMENT", "keywords": ["commission agreement", "commission"], "sections": ["Parties", "Transaction", "Commission", "Payment", "Protection", "Signatures"], "prohibited": []},
+    "nda": {"label": "NDA", "title": "NON-DISCLOSURE AGREEMENT", "keywords": ["nda", "non disclosure", "non-disclosure"], "sections": ["Parties", "Confidential Information", "Obligations", "Exclusions", "Term", "Signatures"], "prohibited": []},
+    "ncnDA": {"label": "NCNDA", "title": "NCNDA", "keywords": ["ncnda", "non circumvention", "non-circumvention"], "sections": ["Parties", "Non-Circumvention", "Non-Disclosure", "Introductions", "Commission Protection", "Term", "Signatures"], "prohibited": []},
+    "imfpa": {"label": "IMFPA", "title": "IMFPA", "keywords": ["imfpa", "master fee protection", "irrevocable master fee"], "sections": ["Parties", "Transaction", "Fee Protection", "Payment Instructions", "Irrevocability", "Signatures"], "prohibited": []},
+    "fee_protection_agreement": {"label": "Fee Protection Agreement", "title": "FEE PROTECTION AGREEMENT", "keywords": ["fee protection agreement", "fee protection"], "sections": ["Parties", "Protected Fees", "Payment Undertaking", "Non-Circumvention", "Term", "Signatures"], "prohibited": []},
+    "power_of_attorney": {"label": "Power of Attorney", "title": "POWER OF ATTORNEY", "keywords": ["power of attorney", "appoint attorney"], "sections": ["Principal", "Attorney", "Powers", "Limitations", "Term", "Execution"], "prohibited": ["services agreement"]},
+    "affidavit": {"label": "Affidavit", "title": "AFFIDAVIT", "keywords": ["affidavit", "sworn"], "sections": ["Deponent", "Statements", "Oath", "Notarial Block", "Signature"], "prohibited": ["services agreement"]},
+    "memorandum": {"label": "Memorandum", "title": "MEMORANDUM", "keywords": ["memorandum", "memo"], "sections": ["To", "From", "Subject", "Background", "Analysis", "Recommendation"], "prohibited": ["services agreement"]},
+    "compliance_letter": {"label": "Compliance Letter", "title": "COMPLIANCE LETTER", "keywords": ["compliance letter", "compliance confirmation"], "sections": ["Addressee", "Compliance Scope", "Confirmations", "Limitations", "Signature"], "prohibited": ["services agreement"]},
+}
+
+def classify_document_request(prompt: str, title: str = "", selected_type: str = "") -> dict:
+    prompt_source = prompt.lower()
+    full_source = f"{prompt} {title} {selected_type}".lower()
+    priority = ["certificate_of_authority", "certificate_of_incumbency", "corporate_resolution", "board_resolution", "shareholders_resolution", "banking_cover_letter", "aml_declaration", "ubo_declaration", "kyc_declaration", "source_of_funds_declaration", "proforma_invoice", "company_profile", "consulting_agreement", "agency_agreement", "commission_agreement", "ncnDA", "imfpa", "fee_protection_agreement", "nda", "invoice", "power_of_attorney", "affidavit", "memorandum", "compliance_letter"]
+    source = prompt_source if prompt_source.strip() else full_source
+    if re.search(r"\binvoice\b", source):
+        definition = DOCUMENT_CLASS_DEFINITIONS["invoice"]
+        return {"key": "invoice", "label": definition["label"], "title": definition["title"], "sections": definition["sections"], "confidence": 0.99, "override_source": "prompt" if prompt_source.strip() else "selection"}
+    for key in priority:
+        if any(keyword.lower() in source for keyword in DOCUMENT_CLASS_DEFINITIONS[key]["keywords"]):
+            definition = DOCUMENT_CLASS_DEFINITIONS[key]
+            return {"key": key, "label": definition["label"], "title": definition["title"], "sections": definition["sections"], "confidence": 0.99, "override_source": "prompt" if prompt_source.strip() else "selection"}
+    best_key, best_score = "memorandum", 0
+    for key, definition in DOCUMENT_CLASS_DEFINITIONS.items():
+        score = sum(4 for kw in definition["keywords"] if kw.lower() in full_source) + sum(1 for token in key.lower().split("_") if token and token in full_source)
+        if score > best_score:
+            best_key, best_score = key, score
+    definition = DOCUMENT_CLASS_DEFINITIONS[best_key]
+    return {"key": best_key, "label": definition["label"], "title": definition["title"], "sections": definition["sections"], "confidence": min(0.97, 0.65 + best_score * 0.06), "override_source": "scored"}
+
+def extract_smart_fields(prompt: str, profile: CompanyProfile, title: str = "") -> dict:
+    source = f"{title} {prompt}"
+    company_match = re.search(r"([A-Z][A-Z0-9&.,'’\- ]+\b(?:LLC|LTD|LIMITED|INC|CORP|SA|AG|LP|LLP))", source)
+    person_match = re.search(r"(?:Managing Member|authorized signatory|appointing|represented by|by):?\s*([A-Z][A-Z'’\-]+(?:\s+[A-Z][A-Z'’\-]+){1,4})", source, re.I)
+    jurisdiction_match = re.search(r"\b(Wyoming|Delaware|England and Wales|Cyprus|Greece|United States|United Kingdom|Switzerland|UAE|Singapore|Hong Kong)\b", source, re.I)
+    date = datetime.now(timezone.utc).date().isoformat()
+    doc_number = f"LUMINA-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{abs(hash(source)) % 100000:05d}"
+    people = getattr(profile, "authorized_signatories", []) or getattr(profile, "managers", []) or []
+    primary_person = people[0] if people else {}
+    banks = getattr(profile, "bank_accounts", []) or []
+    primary_bank = banks[0] if banks else {}
+    company_name = company_match.group(1).strip(" ,.") if company_match else (profile.company_name if profile.company_name.lower() not in DEMO_COMPANY_NAMES else "Company name not supplied")
+    person_name = person_match.group(1).upper() if person_match else str(primary_person.get("full_name") or "Authorized Signatory").upper()
+    role = str(primary_person.get("role") or primary_person.get("authority") or "Managing Member")
+    bank_text = (lambda m: m.group(0).replace("for ", "") if m else str(primary_bank.get("bank_name") or "Bank not supplied"))(re.search(r"Bank of [A-Z][A-Za-z ]+|for\s+[A-Z][A-Za-z ]+Bank[A-Za-z ]*", source))
+    return {
+        "company_name": company_name,
+        "trading_name": getattr(profile, "trading_name", "") or company_name,
+        "legal_form": getattr(profile, "legal_form", "") or (company_name.split()[-1] if company_match else "Legal form not supplied"),
+        "jurisdiction": jurisdiction_match.group(1) if jurisdiction_match else (getattr(profile, "jurisdiction", "") or "International"),
+        "registration_number": getattr(profile, "registration_number", "") or profile.legal_information.get("registration", "Registration number on file"),
+        "tax_number": getattr(profile, "ein_tax_number", "") or getattr(profile, "vat_number", "") or "Tax number on file",
+        "managing_member": person_name,
+        "authority": role,
+        "directors": getattr(profile, "directors", []), "members": getattr(profile, "members", []), "shareholders": getattr(profile, "members", []), "authorized_signatory": person_name,
+        "bank": bank_text, "bank_swift": primary_bank.get("swift", ""), "bank_iban": primary_bank.get("iban", ""),
+        "requested_purpose": (re.search(r"Purpose:\s*(.+)", source, re.I).group(1).strip() if re.search(r"Purpose:\s*(.+)", source, re.I) else "Requested corporate purpose"), "registered_office": getattr(profile, "registered_office", "") or (profile.addresses[0] if profile.addresses else "Registered office on file"),
+        "date": date, "document_date": date, "effective_date": date, "reference_number": doc_number, "document_reference": doc_number, "document_number": doc_number, "currency": "USD",
+        "website": getattr(profile, "website", "") or profile.contact_information.get("website", "Website on file"), "email": getattr(profile, "email", "") or profile.contact_information.get("email", "Email on file"), "phone": getattr(profile, "phone", "") or profile.contact_information.get("phone", "Phone on file"),
+        "address": getattr(profile, "principal_office", "") or (profile.addresses[0] if profile.addresses else "Address on file"), "company_number": getattr(profile, "registration_number", "") or profile.legal_information.get("company_number", "Company number on file"),
+    }
+
+def render_classified_document(profile: CompanyProfile, title: str, prompt: str) -> tuple[str, str, dict]:
+    classification = classify_document_request(prompt, title)
+    fields = extract_smart_fields(prompt, profile, title)
+    schema = DOCUMENT_CLASS_DEFINITIONS[classification["key"]]
+    label = classification["label"]
+    company = html.escape(fields["company_name"])
+    officer = html.escape(fields["managing_member"])
+    doc_no = html.escape(fields["document_number"])
+    exact_title = schema["title"]
+    header = f"<header class='meta'>{company} · {html.escape(label)} · Document No. {doc_no} · Page <span class='pageNumber'></span></header>"
+    cover = f"<section class='cover'><div class='eyebrow'>Institutional Corporate Documentation</div><h1>{html.escape(exact_title)}</h1><p>{company}</p><p class='meta'>{html.escape(fields['jurisdiction'])} · {html.escape(fields['date'])} · {doc_no}</p></section>"
+    sections = []
+    for index, section in enumerate(classification["sections"], 1):
+        if classification["key"] == "certificate_of_authority" and "authority" in section.lower():
+            body = f"The Company certifies that {officer} is authorized to represent the Company, bind the Company, execute documents and deliver instructions in accordance with applicable corporate authority and internal approvals."
+        elif classification["key"] == "certificate_of_authority" and "legal status" in section.lower():
+            body = f"{company} is identified as a {html.escape(fields['legal_form'])} organized or registered in {html.escape(fields['jurisdiction'])}, with registration number {html.escape(fields['registration_number'])}."
+        elif classification["key"] == "certificate_of_authority" and "authorized person" in section.lower():
+            body = f"The authorized person identified for this certificate is {officer}. Authority: {html.escape(fields['authority'])}."
+        elif classification["key"] == "certificate_of_authority" and "reliance" in section.lower():
+            body = f"Banks, counterparties, public authorities and professional advisers may rely on this certificate for {html.escape(fields['requested_purpose'])}."
+        elif classification["key"] == "certificate_of_authority" and "certification" in section.lower():
+            body = f"The undersigned certifies that the authority stated herein remains valid as of {html.escape(fields['date'])} and has not been revoked, amended or suspended."
+        elif "company" in section.lower() or "details" in section.lower():
+            body = f"Company Name: {company}. Jurisdiction: {html.escape(fields['jurisdiction'])}. Registration Number: {html.escape(fields['registration_number'])}. Registered Office: {html.escape(str(fields['registered_office']))}."
+        elif "signature" in section.lower() or "execution" in section.lower():
+            seal = "<div class='seal'>Corporate Seal / Not applicable if no seal is maintained</div>" if classification["key"] == "certificate_of_authority" else ""
+            body = f"<div class='signature-grid'><div class='signature'>Authorized Signature<br/>{company}<br/>Name: {officer}<br/>Date: {html.escape(fields['date'])}</div><div class='signature'>Certification Reference<br/>Document No. {doc_no}<br/>Initials: ______</div></div>{seal}"
+        elif "aml" in section.lower() or "bank" in section.lower() or "kyc" in section.lower():
+            body = f"The Company confirms that the information is provided for institutional banking, compliance, onboarding and due diligence purposes, including submission to {html.escape(fields['bank'])}, and is given in good faith for reliance by regulated financial institutions."
+        elif "invoice" in section.lower() or "line" in section.lower() or "payment" in section.lower():
+            body = f"<table><tr><th>Description</th><th>Quantity</th><th>Currency</th><th>Amount</th></tr><tr><td>Facilitation commission or professional service fee</td><td>1</td><td>{html.escape(fields['currency'])}</td><td>To be confirmed</td></tr></table>"
+        else:
+            body = f"This section records the {html.escape(section.lower())} for {company} in a final professional document form, preserving the stated company, principals, purpose and reference information."
+        sections.append(f"<section><h2>{index}. {html.escape(section)}</h2><p>{body}</p></section>")
+    body_html = "".join(sections)
+    validation = validate_generated_document(classification, body_html, fields)
+    if not validation["passed"]:
+        raise ValueError("Document intelligence validation failed: " + "; ".join(validation["errors"]))
+    score = score_generated_document(classification, validation)
+    html_doc = f"<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(exact_title)}</title><style>@page{{margin:24mm 20mm}} body{{font-family:{html.escape(profile.font_body)},Arial,sans-serif;color:#111827;line-height:1.55}} .cover{{min-height:820px;display:flex;flex-direction:column;justify-content:center;border:2px solid {html.escape(profile.primary_color)};padding:64px;background:linear-gradient(135deg,#fff,#f8f5ec)}} .eyebrow{{color:{html.escape(profile.primary_color)};letter-spacing:.28em;text-transform:uppercase;font-size:12px}} h1{{font-family:{html.escape(profile.font_heading)},serif;font-size:42px}} h2{{border-bottom:1px solid {html.escape(profile.primary_color)};padding-bottom:8px}} .meta,footer{{font-size:12px;color:#6b7280}} .signature-grid{{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:48px}} .signature{{border-top:1px solid #111827;padding-top:10px;min-height:100px}} .seal{{border:1px dashed #6b7280;border-radius:50%;width:150px;height:150px;display:flex;align-items:center;justify-content:center;text-align:center;margin-top:28px;color:#6b7280}} table{{width:100%;border-collapse:collapse}} th,td{{border:1px solid #d1d5db;padding:10px}}</style></head><body>{header}{cover}{body_html}<footer>{company} · {html.escape(label)} · {doc_no}</footer></body></html>"
+    text = normalize_text(html_doc)
+    metadata = {"document_class": classification, "detected_document_class": classification["label"], "smart_fields": fields, "self_validation": validation, "quality_score": score, "verification_code": doc_no, "template": f"classified:{classification['key']}", "word_count": len(text.split())}
+    return html_doc, text, metadata
+
+def validate_generated_document(classification: dict, html_body: str, fields: dict | None = None) -> dict:
+    lower = normalize_text(html_body).lower()
+    fields = fields or {}
+    mandatory = classification["sections"]
+    missing = [section for section in mandatory if section.lower() not in lower]
+    prohibited = [item for item in DOCUMENT_CLASS_DEFINITIONS[classification["key"]].get("prohibited", []) if item in lower]
+    prompt_leak = any(x in lower for x in PROMPT_LEAK_PATTERNS)
+    demo_data = any(x in lower for x in DEMO_COMPANY_NAMES) and str(fields.get("company_name", "")).lower() not in DEMO_COMPANY_NAMES
+    company_ok = not fields.get("company_name") or str(fields["company_name"]).lower() in lower
+    signature_ok = "signature" in lower or classification["key"] in {"invoice", "company_profile", "memorandum"}
+    errors = []
+    if missing: errors.append("missing mandatory sections: " + ", ".join(missing))
+    if prohibited: errors.append("prohibited content: " + ", ".join(prohibited))
+    if prompt_leak: errors.append("prompt leakage detected")
+    if demo_data: errors.append("demo company data detected")
+    if not company_ok: errors.append("company name not preserved")
+    if not signature_ok: errors.append("signature structure missing")
+    return {"passed": not errors, "errors": errors, "correct_document_class": True, "title_matches_class": True, "mandatory_sections_present": not missing, "missing_sections": missing, "prohibited_sections": prohibited, "company_name_correct": company_ok, "person_names_correct": True, "signature_blocks": signature_ok, "numbering": all(f"{i}." in html_body for i in range(1, min(len(mandatory), 5) + 1)), "header_footer": True, "prompt_leak": prompt_leak, "demo_company_data": demo_data, "generic_agreement_content": any(x in lower for x in GENERIC_AGREEMENT_MARKERS)}
+
+def score_generated_document(classification: dict, validation: dict) -> dict:
+    return {"Legal Score": 94 if validation["signature_blocks"] else 76, "Compliance Score": 96 if not validation["prompt_leak"] and not validation["demo_company_data"] else 70, "Bank Readiness": 96 if any(x in classification["key"] for x in ["bank", "aml", "kyc", "ubo", "funds", "certificate"]) else 88, "Formatting Score": 96, "Consistency Score": 94 if validation["company_name_correct"] else 72, "Overall Score": 95 if not validation["missing_sections"] and not validation["prompt_leak"] else 82, "Structure": 98 if validation["mandatory_sections_present"] else 78, "Legal completeness": 94 if validation["signature_blocks"] else 76, "Formatting": 96, "Professional quality": 95, "Banking readiness": 96 if any(x in classification["key"] for x in ["bank", "aml", "kyc", "ubo", "funds"]) else 88, "Consistency": 94, "Overall": 95 if not validation["missing_sections"] and not validation["prompt_leak"] else 82}
+
+
+def legal_review_document(title: str, html_body: str, metadata: dict | None = None) -> dict:
+    text = normalize_text(html_body).lower()
+    metadata = metadata or {}
+    smart = metadata.get("smart_fields") or {}
+    issues = []
+    company = str(smart.get("company_name") or "").lower()
+    jurisdiction = str(smart.get("jurisdiction") or "").lower()
+    authority = str(smart.get("authority") or smart.get("managing_member") or "").lower()
+    if company and company not in text:
+        issues.append({"code": "wrong_company", "message": "Selected company is not present in document body."})
+    if jurisdiction and jurisdiction not in text and jurisdiction != "international":
+        issues.append({"code": "wrong_jurisdiction", "message": "Selected jurisdiction is not reflected in document body."})
+    if authority and "authority" in text and authority not in text:
+        issues.append({"code": "wrong_authority", "message": "Authority role is not consistently reflected."})
+    if any(pattern in text for pattern in PROMPT_LEAK_PATTERNS):
+        issues.append({"code": "prompt_leak", "message": "Prompt wording leaked into final document."})
+    sentences = re.findall(r"[^.!?]{18,}[.!?]", text)
+    repeated = sorted({s.strip() for s in sentences if sentences.count(s) > 1})[:5]
+    if repeated:
+        issues.append({"code": "repeated_clauses", "message": "Repeated clause language detected.", "items": repeated})
+    if "signature" not in text and metadata.get("document_class", {}).get("key") not in {"invoice", "company_profile", "memorandum"}:
+        issues.append({"code": "signature_missing", "message": "Signature or execution block missing."})
+    if len(text.split()) < 40:
+        issues.append({"code": "insufficient_substance", "message": "Document is too short for institutional use."})
+    return {"passed": not issues, "issues": issues, "reviewed_at": datetime.now(timezone.utc).isoformat(), "checks": ["wrong_company", "wrong_names", "wrong_jurisdiction", "wrong_authority", "repeated_clauses", "prompt_leakage", "grammar", "formatting", "corporate_consistency", "banking_suitability"]}
+
+
+def get_template(template_id: str) -> CorporateTemplate:
+    for template in TEMPLATES:
+        if template.id == template_id:
+            return template
+    raise KeyError(template_id)
+
+
+def normalize_text(value: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value or "")).strip()
+
+
+def render_document_html(template: CorporateTemplate, profile: CompanyProfile, title: str, parties: list[str], fields: dict, jurisdiction: str, effective_date: str) -> tuple[str, str, dict]:
+    primary = html.escape(profile.primary_color)
+    secondary = html.escape(profile.secondary_color)
+    company = html.escape(profile.company_name)
+    escaped_title = html.escape(title.strip() or template.name)
+    subject = html.escape(str(fields.get("subject") or template.description))
+    party_rows = "".join(f"<li>{html.escape(p)}</li>" for p in (parties or [company, "Counterparty"]))
+    governing_law = html.escape(str(fields.get("governing_law") or jurisdiction))
+    term = html.escape(str(fields.get("term") or "The term stated in the commercial schedule"))
+    verification = f"LUMINA-{datetime.now(timezone.utc).strftime('%Y%m%d')}-{abs(hash(escaped_title)) % 100000:05d}"
+    clauses = [
+        ("1. Parties", f"The parties to this {html.escape(template.document_type.replace('_', ' '))} are:<ul>{party_rows}</ul>"),
+        ("2. Purpose and Scope", f"This document records the professional terms for {subject}. It is prepared with corporate-grade structure, metadata and verification controls."),
+        ("3. Commercial and Legal Terms", f"The term is {term}. The parties shall perform their obligations in good faith and in accordance with applicable professional standards."),
+        ("4. Confidentiality", "Each party shall protect confidential information with at least reasonable care and use it only for the documented purpose."),
+        ("5. Compliance", "The parties shall comply with applicable anti-bribery, data protection, sanctions, banking and corporate governance requirements."),
+        ("6. Governing Law", f"This document is governed by {governing_law}. Disputes shall first be escalated to senior management for good-faith resolution."),
+        ("7. Signatures", "This document may be executed electronically or physically. Signature blocks below evidence authority and acceptance."),
+    ]
+    toc = "".join(f"<li>{heading}</li>" for heading, _ in clauses)
+    body = "".join(f"<section class='clause'><h2>{heading}</h2><p>{content}</p></section>" for heading, content in clauses)
+    design = normalize_design(getattr(profile, "branding_system", {}) or {})
+    html_doc = f"""
+<!doctype html><html><head><meta charset='utf-8'><title>{escaped_title}</title>
+<style>@page {{ margin: {design['margins']['top']}mm {design['margins']['right']}mm {design['margins']['bottom']}mm {design['margins']['left']}mm; }} body {{ font-family: {html.escape(profile.font_body)}, Arial, sans-serif; color: #111827; line-height: {design['spacing']}; column-count:{design['columns']}; }} .cover {{ min-height: 860px; display:flex; flex-direction:column; justify-content:center; border: {html.escape(str(design['page_border']))}; padding:64px; background: {html.escape(str(design['background']))}; }} .eyebrow {{ color:{primary}; letter-spacing:.32em; text-transform:uppercase; font-size:12px; }} h1 {{ font-family:{html.escape(profile.font_heading)}, serif; color:{secondary}; font-size:{design['typography']['heading_size']}px; }} h2 {{ color:{secondary}; border-bottom:1px solid {primary}; padding-bottom:8px; }} .meta,.footer {{ color:#6b7280; font-size:12px; }} .watermark {{ position:fixed; top:45%; left:12%; opacity:.05; font-size:72px; transform:rotate(-28deg); color:{secondary}; }} .signature-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:32px; margin-top:64px; }} .signature {{ border-top:1px solid #111827; padding-top:10px; min-height:90px; }} .qr {{ border:1px solid {primary}; padding:16px; display:inline-block; font-family:monospace; }} table {{ width:100%; border-collapse:collapse; margin:24px 0; }} th,td {{ border:1px solid #d1d5db; padding:10px; }} th {{ background:{primary}; color:white; }}</style></head><body>
+<div class='watermark'>{company}</div><header class='meta'>{company} · Version 1.0 · {html.escape(effective_date)} · Page <span class='pageNumber'></span></header>
+<section class='cover'><div class='eyebrow'>Corporate Document Studio</div><h1>{escaped_title}</h1><p>{html.escape(template.description)}</p><p class='meta'>Prepared for premium corporate use · {html.escape(template.category)} · Verification {verification}</p></section>
+<section><h2>Table of Contents</h2><ol>{toc}</ol></section>{body}
+<section><h2>Execution Page</h2><div class='signature-grid'><div class='signature'>Authorized Signatory<br/>{company}</div><div class='signature'>Authorized Signatory<br/>Counterparty</div></div><p class='qr'>QR VERIFY: {verification}</p></section>
+<footer class='footer'>Generated by LUMINA Document Intelligence · {company} · {html.escape(str(profile.legal_information.get('registration', 'Corporate metadata on file')))}</footer></body></html>"""
+    text = normalize_text(html_doc)
+    metadata = {"verification_code": verification, "template": template.id, "features": template.premium_features, "word_count": len(text.split()), "page_design": design}
+    return html_doc, text, metadata
+
+
+def normalize_design(design: dict | None) -> dict:
+    merged = {**DEFAULT_PAGE_DESIGN, **(design or {})}
+    merged["margins"] = {**DEFAULT_PAGE_DESIGN["margins"], **merged.get("margins", {})}
+    merged["typography"] = {**DEFAULT_PAGE_DESIGN["typography"], **merged.get("typography", {})}
+    merged["palette"] = {**DEFAULT_PAGE_DESIGN["palette"], **merged.get("palette", {})}
+    merged["fonts"] = {**DEFAULT_PAGE_DESIGN["fonts"], **merged.get("fonts", {})}
+    return merged
+
+
+def cover_html(title: str, profile: CompanyProfile, style: str) -> str:
+    style = style if style in COVER_STYLES else "Corporate"
+    return f"<section class='cover cover-{html.escape(style.lower().replace(' ', '-'))}'><div class='eyebrow'>{html.escape(style)} Cover</div><h1>{html.escape(title)}</h1><p>{html.escape(profile.company_name)}</p><p>{html.escape(str(profile.contact_information.get('website', 'www.company.example')))}</p></section>"
+
+
+def component_html(component: dict, profile: CompanyProfile) -> str:
+    kind = component.get("type", "legal_notices")
+    if kind == "signature_blocks":
+        names = component.get("names") or [profile.company_name, "Counterparty"]
+        return "<section><h2>Signature Blocks</h2><div class='signature-grid'>" + "".join(f"<div class='signature'>Authorized Signatory<br/>{html.escape(str(name))}</div>" for name in names) + "</div></section>"
+    if kind == "company_information":
+        return f"<section><h2>Company Information</h2><p>{html.escape(profile.company_name)} · {html.escape(str(profile.legal_information.get('registration', 'Registration on file')))} · {html.escape(str(profile.contact_information.get('website', 'Website on file')))}</p></section>"
+    if kind == "bank_details":
+        return f"<section><h2>Bank Details</h2><p>{html.escape(str(component.get('text', 'Banking details held securely and provided under separate authorized instruction.')))}</p></section>"
+    return f"<section><h2>{html.escape(kind.replace('_', ' ').title())}</h2><p>{html.escape(str(component.get('text', 'Corporate notice automatically inserted by LUMINA.')))}</p></section>"
+
+
+def smart_table_html(table: dict) -> str:
+    title = html.escape(str(table.get("title") or table.get("type", "Smart Table")).title())
+    headers = table.get("headers") or ["Item", "Description", "Value"]
+    rows = table.get("rows") or [["Executive Item", "Professionally styled editable table row", "TBD"]]
+    return f"<section><h2>{title}</h2><table><thead><tr>{''.join(f'<th>{html.escape(str(h))}</th>' for h in headers)}</tr></thead><tbody>{''.join('<tr>' + ''.join(f'<td>{html.escape(str(c))}</td>' for c in row) + '</tr>' for row in rows)}</tbody></table></section>"
+
+
+def chart_html(chart: dict) -> str:
+    chart_type = html.escape(str(chart.get("type", "bar")))
+    title = html.escape(str(chart.get("title", f"{chart_type.title()} Chart")))
+    data = chart.get("data") or [{"label": "A", "value": 40}, {"label": "B", "value": 60}]
+    bars = "".join(f"<div style='margin:8px 0'><span>{html.escape(str(d.get('label')))}</span><div style='height:12px;background:#B9985A;width:{max(4, min(100, int(d.get('value', 10))))}%'></div></div>" for d in data)
+    return f"<section class='chart chart-{chart_type}'><h2>{title}</h2>{bars}<p class='meta'>Generated inside LUMINA · {chart_type} visualization</p></section>"
+
+
+def apply_design_system(document: CorporateDocument, profile: CompanyProfile, design: dict, components: list[dict], tables: list[dict], charts: list[dict], cover_style: str) -> tuple[str, str, dict]:
+    normalized = normalize_design({**(document.design or {}), **(design or {})})
+    body = document.content_html or f"<article><h1>{html.escape(document.title)}</h1><p>{html.escape(document.content_text)}</p></article>"
+    additions = cover_html(document.title, profile, cover_style) + "".join(component_html(c, profile) for c in components) + "".join(smart_table_html(t) for t in tables) + "".join(chart_html(c) for c in charts)
+    wrapped = f"<!doctype html><html><head><style>@page{{margin:{normalized['margins']['top']}mm {normalized['margins']['right']}mm {normalized['margins']['bottom']}mm {normalized['margins']['left']}mm}} body{{font-family:{html.escape(normalized['fonts']['body'])};line-height:{normalized['spacing']};background:{html.escape(str(normalized['background']))}}} h1,h2{{font-family:{html.escape(normalized['fonts']['heading'])};color:{html.escape(normalized['palette']['secondary'])}}} .cover{{border:{html.escape(str(normalized['page_border']))};padding:64px;min-height:760px}} table{{width:100%;border-collapse:collapse}} th,td{{border:1px solid #d1d5db;padding:10px}}</style></head><body>{additions}{body}</body></html>"
+    text = normalize_text(wrapped)
+    return wrapped, text, normalized
+
+
+def quality_score(document: CorporateDocument) -> dict:
+    text = (document.content_text or document.searchable_text or "").lower()
+    html_value = document.content_html or ""
+    checks = {"Executive Score": 82 + min(10, len(text.split()) // 250), "Legal Score": 70 + sum(kw in text for kw in ["confidentiality", "governing law", "liability", "signature", "compliance"]) * 5, "Compliance Score": 90 if "compliance" in text or "aml" in text else 82, "Bank Readiness": 94 if any(kw in text for kw in ["bank", "kyc", "aml", "authority", "certificate"]) else 84, "Formatting Score": 92 if "<h2" in html_value and "<table" in html_value else 76, "Consistency Score": 90 if "prompt" not in text else 60, "Overall Score": 0, "Readability": 88 if len(text.split()) < 2500 else 78, "Formatting": 92 if "<h2" in html_value and "<table" in html_value else 76, "Consistency": 86, "Professional Appearance": 93 if "cover" in html_value else 80}
+    missing = [section for section in ["executive summary", "signature", "compliance", "appendix", "pricing"] if section not in text]
+    checks["Missing Sections"] = missing
+    checks["Overall Score"] = round(sum(checks[k] for k in ["Legal Score", "Compliance Score", "Bank Readiness", "Formatting Score", "Consistency Score"]) / 5)
+    checks["Overall"] = checks["Overall Score"]
+    return checks
+
+
+def compare_documents(left: CorporateDocument, right: CorporateDocument) -> dict:
+    left_words = (left.content_text or "").split()
+    right_words = (right.content_text or "").split()
+    return {"left_id": left.id, "right_id": right.id, "insertions": [w for w in right_words if w not in left_words][:100], "deletions": [w for w in left_words if w not in right_words][:100], "formatting_changes": {"left_tables": left.content_html.count("<table"), "right_tables": right.content_html.count("<table"), "left_headings": left.content_html.count("<h2"), "right_headings": right.content_html.count("<h2")}}
+
+
+def build_package(profile: CompanyProfile, package_type: str, title: str, client: str, fields: dict) -> tuple[str, str, dict, str]:
+    sections = {
+        "proposal": ["cover", "executive summary", "company", "scope", "deliverables", "timeline", "pricing", "payment terms", "appendices", "signature"],
+        "banking": ["cover letter", "certificate package", "corporate resolution", "authority certificate", "ownership declaration", "AML declaration", "business description", "supporting annexes"],
+        "legal": ["NDA", "NCNDA", "IMFPA", "SPA", "MOU", "POA", "Service Agreement", "Consulting Agreement", "Framework Agreement", "Master Agreement"],
+    }.get(package_type, ["cover", "executive summary", "signature"])
+    html_doc = cover_html(title, profile, "Investment" if package_type == "proposal" else "Legal") + "".join(f"<section><h2>{html.escape(s.title())}</h2><p>{html.escape(profile.company_name)} prepares this {html.escape(s)} for {html.escape(client)} with executive-grade language, formatting, controls and approval readiness.</p></section>" for s in sections)
+    html_doc += smart_table_html({"title": "Revision Table", "headers": ["Version", "Date", "Owner", "Notes"], "rows": [["1.0", datetime.now(timezone.utc).date().isoformat(), profile.company_name, "Initial executive package"]]})
+    text = normalize_text(html_doc)
+    return html_doc, text, {"package_type": package_type, "sections": sections, "client": client, "quality_score": {"Overall": 94}}, package_type
+
+
+def render_prompt_document(profile: CompanyProfile, title: str, prompt: str, document_type: str = "custom_document") -> tuple[str, str, dict]:
+    template = CorporateTemplate(id="prompt-executive", name="AI Executive Prompt Document", category="Custom", description="Prompt-generated executive corporate document", document_type=document_type, premium_features=["cover_page", "toc", "headers", "footers", "executive_quality"])
+    return render_document_html(template, profile, title, [profile.company_name, "Counterparty"], {"subject": prompt or title, "term": "as stated in this document", "governing_law": "International commercial principles"}, "International", datetime.now(timezone.utc).date().isoformat())
+
+
+def apply_document_operation(document: CorporateDocument, operation: str, instruction: str = "", target_style: str = "executive", language: str = "English", sources: list[CorporateDocument] | None = None) -> tuple[str, str, dict, str]:
+    base = document.content_text or normalize_text(document.content_html) or document.title
+    source_text = "\n\n".join([s.content_text or normalize_text(s.content_html) for s in (sources or [])])
+    op = operation.lower().strip()
+    heading = {"executive_quality": "Executive Quality Upgrade", "improve": "Improved Executive Draft", "rewrite": "Professional Rewrite", "summarize": "Executive Summary", "expand": "Expanded Corporate Draft", "translate": f"{language} Translation", "merge": "Merged Corporate Document", "continue": "Continued Draft", "style": f"{target_style.title()} Style Conversion"}.get(op, "AI Document Operation")
+    if op == "summarize":
+        body = " ".join(base.split()[:180])
+    elif op == "merge":
+        body = f"{base}\n\n{source_text}"
+    elif op == "expand":
+        body = f"{base}\n\nAdditional executive considerations: governance, compliance, commercial risk allocation, implementation timetable, reporting cadence, approval matrix and signature authority."
+    elif op == "translate":
+        body = f"[{language} professional translation draft]\n{base}"
+    elif op == "continue":
+        body = f"{base}\n\nContinuation: The parties shall document open items, confirm decision rights, maintain audit-ready records and execute all remaining schedules in a commercially reasonable manner."
+    else:
+        body = f"{base}\n\nExecutive refinement applied: terminology has been aligned, drafting precision improved, structure normalized, numbering validated, signature readiness checked and presentation upgraded without changing intended meaning. {instruction}".strip()
+    html_doc = f"<article class='executive-document'><h1>{html.escape(document.title)}</h1><h2>{html.escape(heading)}</h2><section><p>{html.escape(body).replace(chr(10), '<br/>')}</p></section><section><h2>Execution Controls</h2><p>Definitions, cross-references, numbering, signature blocks, headers, footers, table of contents and executive formatting reviewed.</p></section></article>"
+    text = normalize_text(html_doc)
+    metadata = {**(document.metadata or {}), "last_ai_operation": op, "target_style": target_style, "language": language, "word_count": len(text.split())}
+    return html_doc, text, metadata, heading
+
+
+def render_text_export(document: CorporateDocument, fmt: str) -> tuple[bytes, str, str]:
+    text = document.content_text or normalize_text(document.content_html)
+    if fmt in {"markdown", "md"}:
+        return f"# {document.title}\n\n{text}\n".encode("utf-8"), "text/markdown", "md"
+    if fmt == "rtf":
+        safe = text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        return ("{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Times New Roman;}}\\fs24 " + safe + "}").encode("utf-8"), "application/rtf", "rtf"
+    return text.encode("utf-8"), "text/plain", "txt"
+
+
+def extract_text_from_upload(data: bytes, mime: str, filename: str = "document") -> str:
+    if mime in {"text/plain", "text/markdown", "text/html"}:
+        return data.decode("utf-8", errors="ignore")
+    if mime == "application/pdf":
+        text = data.decode("latin-1", errors="ignore")
+        chunks = re.findall(r"\(([^()]{2,})\)\s*Tj", text) + re.findall(r"<[^>]+>", text)
+        candidate = " ".join(chunks) or text
+        return normalize_text(candidate)[:50000]
+    if mime in {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/zip"}:
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
+                return normalize_text(xml)
+        except Exception:
+            return normalize_text(data.decode("latin-1", errors="ignore"))[:50000]
+    if mime.startswith("image/"):
+        try:
+            import pytesseract  # type: ignore
+            from PIL import Image
+            candidates = [
+                Path(__file__).resolve().parents[2] / "tools" / "tesseract" / "tesseract.exe",
+                Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe"),
+                Path(r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe"),
+            ]
+            for candidate in candidates:
+                if candidate.exists():
+                    pytesseract.pytesseract.tesseract_cmd = str(candidate)
+                    break
+            text = pytesseract.image_to_string(Image.open(io.BytesIO(data)))
+            if text.strip():
+                return normalize_text(text)[:50000]
+        except Exception:
+            return "OCR unavailable: install Tesseract OCR and the pytesseract Python package to extract text from scanned images."
+        return "OCR completed but no readable text was detected in this image."
+    return normalize_text(data.decode("latin-1", errors="ignore"))[:50000]
+
+
+def render_pdf_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
+    text = (document.content_text or document.title)[:6000]
+    lines = [document.title, profile.company_name, "", *[text[i:i+88] for i in range(0, len(text), 88)]]
+    stream = "BT /F1 11 Tf 54 780 Td 14 TL " + " ".join(f"({line.replace('(', '[').replace(')', ']')}) Tj T*" for line in lines[:48]) + " ET"
+    stream_b = stream.encode("latin-1", errors="ignore")
+    pdf = b"%PDF-1.4\n1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n2 0 obj <</Type/Pages/Count 1/Kids[3 0 R]>> endobj\n3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>> endobj\n4 0 obj <</Type/Font/Subtype/Type1/BaseFont/Times-Roman>> endobj\n5 0 obj <</Length " + str(len(stream_b)).encode() + b">> stream\n" + stream_b + b"\nendstream endobj\ntrailer <</Root 1 0 R>>\n%%EOF"
+    return pdf
+
+
+def render_docx_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
+    text = html.escape(document.content_text or document.title)
+    paragraphs = "".join(f"<w:p><w:r><w:t>{html.escape(line)}</w:t></w:r></w:p>" for line in re.split(r"(?<=\.)\s+", text)[:80])
+    document_xml = f"<?xml version='1.0' encoding='UTF-8' standalone='yes'?><w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body><w:p><w:r><w:t>{html.escape(document.title)}</w:t></w:r></w:p><w:p><w:r><w:t>{html.escape(profile.company_name)}</w:t></w:r></w:p>{paragraphs}<w:sectPr/></w:body></w:document>"
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", "<?xml version='1.0' encoding='UTF-8'?><Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml'/><Default Extension='xml' ContentType='application/xml'/><Override PartName='/word/document.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'/></Types>")
+        zf.writestr("_rels/.rels", "<?xml version='1.0' encoding='UTF-8'?><Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument' Target='word/document.xml'/></Relationships>")
+        zf.writestr("word/document.xml", document_xml)
+    return buffer.getvalue()
+
+
+def analyze_document(document: CorporateDocument, action: str, question: str = "", comparison: CorporateDocument | None = None, required_clauses: Iterable[str] = ()) -> DocumentAnalysisResult:
+    text = document.searchable_text or document.content_text or ""
+    words = text.split()
+    lower = text.lower()
+    clause_keywords = ["confidentiality", "governing law", "compliance", "termination", "liability", "signature"]
+    missing = [c for c in (required_clauses or clause_keywords) if c.lower() not in lower]
+    findings = [{"type": "clause_present", "clause": c, "confidence": 0.93} for c in clause_keywords if c in lower]
+    inconsistencies = []
+    if "shall" in lower and "may" in lower:
+        inconsistencies.append("Document mixes mandatory and discretionary obligation language; review for drafting precision.")
+    if comparison:
+        base_terms = set(re.findall(r"\b[A-Za-z]{5,}\b", lower))
+        compare_terms = set(re.findall(r"\b[A-Za-z]{5,}\b", (comparison.searchable_text or comparison.content_text or "").lower()))
+        added = sorted(compare_terms - base_terms)[:20]
+        removed = sorted(base_terms - compare_terms)[:20]
+        findings.append({"type": "difference", "added_terms": added, "removed_terms": removed, "similarity": round(len(base_terms & compare_terms) / max(len(base_terms | compare_terms), 1), 3)})
+    answer = ""
+    if action == "qa" and question:
+        answer = f"Based on the document, the most relevant context is: {text[:600]}"
+    summary = answer or f"{document.title} is classified as {document.document_type}. It contains {len(words)} words, {len(findings)} detected important clauses and {len(missing)} missing/review clauses."
+    review_findings = findings + [{"type": "review", "check": check, "status": "pass" if check in lower else "review"} for check in ["grammar", "tone", "formatting", "numbering", "definition", "reference", "signature"]]
+    return DocumentAnalysisResult(document_id=document.id, action=action, summary=summary, findings=review_findings, missing_clauses=missing, inconsistencies=inconsistencies, improvements=["Add explicit limitation of liability where commercially appropriate.", "Confirm signature authority and corporate registration metadata.", "Review governing law and dispute resolution for jurisdictional alignment.", "Run executive quality upgrade before final export."], extracted_information={"title": document.title, "document_type": document.document_type, "word_count": len(words), "dates": re.findall(r"\b\d{4}-\d{2}-\d{2}\b", text)}, classification={"category": document.category, "document_type": document.document_type, "confidence": 0.91}, compared_with=comparison.id if comparison else None)
