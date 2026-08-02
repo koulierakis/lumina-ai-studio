@@ -1,0 +1,16 @@
+description: LUMINA local coding model regression suite
+providers:
+  - id: ollama:qwen2.5-coder:7b
+    config:
+      apiBaseUrl: http://127.0.0.1:11434
+prompts:
+  - file://prompts/coding-agent.md
+
+tests:
+  - vars:
+      task: "Explain which files should be inspected before changing FastAPI authentication. Do not modify code."
+    assert:
+      - type: contains
+        value: "auth"
+      - type: not-contains
+        value: "git reset --hard"

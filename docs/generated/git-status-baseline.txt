@@ -1,0 +1,99 @@
+﻿ M .gitignore
+ M backend/auth.py
+ M backend/document_studio/models.py
+ M backend/document_studio/router.py
+ M backend/server.py
+ M frontend/.env.example
+ M frontend/package-lock.json
+ M frontend/package.json
+ M frontend/src/App.js
+ M frontend/src/components/StudioLayout.jsx
+ M frontend/src/developer/model.js
+ M frontend/src/editor/Sprint3Panels.jsx
+ M frontend/src/editor/pipeline.js
+ M frontend/src/editor/state.js
+ M frontend/src/index.css
+ M frontend/src/lib/api.js
+ M frontend/src/pages/Editor.jsx
+ M frontend/src/pages/EditorLanding.jsx
+ M frontend/src/pages/Generate.jsx
+ M frontend/src/pages/VideoEditor.jsx
+ M frontend/src/pages/VideoStudio.jsx
+ M frontend/src/pages/VoiceStudio.jsx
+ M frontend/src/pages/VoiceStudio.test.jsx
+ M frontend/src/platform/moduleRegistry.js
+ M frontend/src/video/Timeline.jsx
+ M frontend/src/video/model.js
+ M frontend/yarn.lock
+ M launcher/lumina/config.py
+ M launcher/lumina/detect.py
+ M launcher/lumina/errors.py
+ M launcher/lumina/readiness.py
+ M launcher/lumina/services.py
+ M launcher/lumina_launcher.py
+ M launcher/tests/test_runtime_manager.py
+?? $null
+?? .github/
+?? .lumina/
+?? .pre-commit-config.yaml
+?? AI_AGENT_RULES.md
+?? _local_models/
+?? _tools/
+?? backend/auth.py.backup_20260801_200957
+?? docker-compose-error.txt
+?? docker-compose.dev.yml
+?? docs/
+?? frontend/lumina_talking_portrait_preview_existing.js
+?? frontend/lumina_talking_portrait_ui_trace.js
+?? frontend/src/App.js.backup_20260801_200957
+?? frontend/src/components/GlobalErrorBoundary.jsx
+?? frontend/src/components/StudioLayout.jsx.backup_20260801_202414
+?? frontend/src/components/documentstudio/
+?? frontend/src/components/layout/
+?? frontend/src/documents/
+?? frontend/src/editor/state.test.js
+?? frontend/src/hooks/ContextMenu.jsx
+?? frontend/src/hooks/DocumentCard.jsx
+?? frontend/src/hooks/DocumentGrid.jsx
+?? frontend/src/hooks/DocumentList.jsx
+?? frontend/src/hooks/DocumentStudio.jsx
+?? frontend/src/hooks/FolderTree.jsx
+?? frontend/src/hooks/Pagination.jsx
+?? frontend/src/hooks/PreviewPane.jsx
+?? frontend/src/hooks/ResizableLayout.jsx
+?? frontend/src/hooks/Sidebar.jsx
+?? frontend/src/hooks/TagChips.jsx
+?? frontend/src/hooks/Toolbar.jsx
+?? frontend/src/hooks/VirtualizedDocumentGrid.jsx
+?? frontend/src/hooks/frontendsrchooksuseTags.js
+?? frontend/src/hooks/useDocuments.js
+?? frontend/src/hooks/useFolders.js
+?? frontend/src/lib/api.test.js
+?? frontend/src/lib/errorDetails.js
+?? frontend/src/lib/errorDetails.test.js
+?? frontend/src/pages/CorporateRegistry.jsx
+?? frontend/src/pages/DocumentStudio.jsx
+?? frontend/src/pages/DocumentStudio.jsx.backup_20260801_113312
+?? frontend/src/pages/DocumentStudio.jsx.bak_20260801_184002
+?? frontend/src/pages/DocumentStudio.jsx.greek_ui_backup_20260731_222807
+?? frontend/src/pages/DocumentStudioSidebar.jsx
+?? frontend/src/photoStudio/
+?? frontend/src/runtime/
+?? frontend/src/talkingPortrait/
+?? frontend/src/video/model.test.js
+?? frontend/src/voice/
+?? infra/
+?? launcher/windows/Check_LUMINA_LAN.ps1
+?? launcher/windows/Disable_LUMINA_LAN.ps1
+?? launcher/windows/Enable_LUMINA_LAN.ps1
+?? launcher/windows/Start_LUMINA.bat
+?? launcher/windows/Start_LUMINA_LAN.bat
+?? launcher/windows/Start_LUMINA_LAN.vbs
+?? package-lock.json
+?? package.json
+?? playable_release_evidence/
+?? promptfooconfig.yaml
+?? prompts/
+?? pyproject.toml
+?? runtime/
+?? scripts/

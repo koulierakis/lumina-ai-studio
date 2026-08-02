@@ -1,0 +1,322 @@
+{
+  "generated_at": "2026-08-02T07:48:46.506674+00:00",
+  "total_code_files": 391,
+  "files_by_extension": {
+    ".py": 229,
+    ".js": 56,
+    ".jsx": 106
+  },
+  "files_by_area": {
+    "_local_models": 120,
+    "_tools": 1,
+    "backend": 88,
+    "frontend": 162,
+    "launcher": 14,
+    "playable_release_evidence": 2,
+    "scripts": 4
+  },
+  "top_dependencies": [
+    [
+      "react",
+      104
+    ],
+    [
+      "__future__",
+      103
+    ],
+    [
+      "os",
+      97
+    ],
+    [
+      "typing",
+      61
+    ],
+    [
+      "lucide-react",
+      59
+    ],
+    [
+      "torch",
+      57
+    ],
+    [
+      "pathlib",
+      53
+    ],
+    [
+      "numpy",
+      46
+    ],
+    [
+      "@/lib",
+      42
+    ],
+    [
+      "..",
+      40
+    ],
+    [
+      "cv2",
+      38
+    ],
+    [
+      "json",
+      38
+    ],
+    [
+      "time",
+      36
+    ],
+    [
+      "sys",
+      36
+    ],
+    [
+      ".",
+      30
+    ],
+    [
+      "subprocess",
+      27
+    ],
+    [
+      "datetime",
+      27
+    ],
+    [
+      "asyncio",
+      24
+    ],
+    [
+      "dataclasses",
+      19
+    ],
+    [
+      "math",
+      19
+    ],
+    [
+      "glob",
+      17
+    ],
+    [
+      "sonner",
+      17
+    ],
+    [
+      "utils",
+      16
+    ],
+    [
+      "collections",
+      16
+    ],
+    [
+      "io",
+      16
+    ],
+    [
+      "shutil",
+      16
+    ],
+    [
+      "argparse",
+      16
+    ],
+    [
+      "models",
+      16
+    ],
+    [
+      "react-router-dom",
+      16
+    ],
+    [
+      "logging",
+      15
+    ],
+    [
+      "uuid",
+      15
+    ],
+    [
+      "re",
+      15
+    ],
+    [
+      "util",
+      14
+    ],
+    [
+      "PIL",
+      13
+    ],
+    [
+      "base",
+      13
+    ],
+    [
+      "pytest",
+      12
+    ],
+    [
+      "onnxruntime",
+      10
+    ],
+    [
+      "tqdm",
+      10
+    ],
+    [
+      "random",
+      10
+    ],
+    [
+      "enum",
+      10
+    ],
+    [
+      "pydantic",
+      10
+    ],
+    [
+      "src",
+      9
+    ],
+    [
+      "requests",
+      9
+    ],
+    [
+      "tempfile",
+      9
+    ],
+    [
+      "urllib",
+      9
+    ],
+    [
+      "server",
+      9
+    ],
+    [
+      "copy",
+      8
+    ],
+    [
+      "fastapi",
+      8
+    ],
+    [
+      "@/components",
+      8
+    ],
+    [
+      "class-variance-authority",
+      8
+    ]
+  ],
+  "largest_files": [
+    {
+      "path": "backend/server.py",
+      "bytes": 203925
+    },
+    {
+      "path": "backend/code_builder/patch_service.py",
+      "bytes": 145941
+    },
+    {
+      "path": "backend/code_builder/planning_service.py",
+      "bytes": 133790
+    },
+    {
+      "path": "backend/code_builder/task_service.py",
+      "bytes": 122863
+    },
+    {
+      "path": "backend/code_builder/build_service.py",
+      "bytes": 106009
+    },
+    {
+      "path": "backend/code_builder/repository_service.py",
+      "bytes": 104449
+    },
+    {
+      "path": "backend/code_builder/ollama_service.py",
+      "bytes": 96633
+    },
+    {
+      "path": "backend/code_builder/router.py",
+      "bytes": 86682
+    },
+    {
+      "path": "backend/talking_portrait_providers/liveportrait_provider.py",
+      "bytes": 60710
+    },
+    {
+      "path": "frontend/src/pages/DocumentStudio.jsx",
+      "bytes": 59065
+    },
+    {
+      "path": "backend/document_studio/service.py",
+      "bytes": 57979
+    },
+    {
+      "path": "_local_models/LivePortrait/src/utils/dependencies/XPose/models/UniPose/deformable_transformer.py",
+      "bytes": 56962
+    },
+    {
+      "path": "backend/code_builder/security.py",
+      "bytes": 54981
+    },
+    {
+      "path": "backend/tests/backend_test.py",
+      "bytes": 47468
+    },
+    {
+      "path": "backend/document_studio/router.py",
+      "bytes": 46948
+    },
+    {
+      "path": "backend/code_builder/backup_service.py",
+      "bytes": 39300
+    },
+    {
+      "path": "frontend/src/pages/Editor.jsx",
+      "bytes": 37546
+    },
+    {
+      "path": "_local_models/LivePortrait/src/gradio_pipeline.py",
+      "bytes": 35008
+    },
+    {
+      "path": "backend/code_builder/models.py",
+      "bytes": 34839
+    },
+    {
+      "path": "_local_models/LivePortrait/src/live_portrait_pipeline.py",
+      "bytes": 33735
+    },
+    {
+      "path": "frontend/src/pages/VideoEditor.jsx",
+      "bytes": 33342
+    },
+    {
+      "path": "_local_models/LivePortrait/src/utils/dependencies/XPose/models/UniPose/transformer_deformable.py",
+      "bytes": 28216
+    },
+    {
+      "path": "_local_models/LivePortrait/src/utils/dependencies/XPose/models/UniPose/swin_transformer.py",
+      "bytes": 28010
+    },
+    {
+      "path": "_local_models/LivePortrait/src/utils/dependencies/XPose/models/UniPose/unipose.py",
+      "bytes": 27433
+    },
+    {
+      "path": "frontend/src/pages/VoiceStudio.jsx",
+      "bytes": 27077
+    }
+  ]
+}

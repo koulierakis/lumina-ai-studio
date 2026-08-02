@@ -94,3 +94,41 @@ memory/test_credentials.md
 
 # Applications created by LUMINA Code Creator
 backend/generated_projects/
+.aider*
+
+# Local runtime and generated evidence
+runtime/
+playable_release_evidence/
+backups/
+docker-compose-error.txt
+
+# Μεγάλα και προσωρινά τοπικά αρχεία
+_tools/ffmpeg/
+_local_models/
+.lumina/runtime/
+docker-compose-error.txt
+backups/
+runtime/
+playable_release_evidence/
+*.bak_*
+
+# Backup αρχεία
+*.backup_*
+*.bak_*
+
+# Windows null file
+
+
+# Τοπικά εργαλεία
+_tools/
+
+
+# Backup αρχεία
+*.backup_*
+*.bak_*
+
+# Windows null file
+
+
+# Τοπικά εργαλεία
+_tools/
