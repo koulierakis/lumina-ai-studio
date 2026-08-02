@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Download, FileText, FolderPlus, Heart, History, Search, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
+import { Download, FileText, Heart, History, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
 import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, documentApi, documentStats, exportDocumentUrl, makeDocumentDownloadHeaders, summarizeDocument } from '../documents/model';
 
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
@@ -164,6 +164,7 @@ export default function DocumentStudio() {
     if (!selected && docs?.[0]) {
       setSelected(docs[0]);
       setEditorHtml(docs[0].content_html || '');
+      await loadVersions(docs[0]);
     }
     setLoading(false);
   }
@@ -214,7 +215,10 @@ export default function DocumentStudio() {
     const updated = await documentApi.update(selected.id, { content_html: editorHtml, content_text: contentText, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
     setSelected(updated);
     await refreshDocuments();
+    await loadVersions(updated);
     toast.success(autosave ? 'Autosaved.' : 'Document saved with version history.');
+    } catch (error) {
+      toast.error(error.message || 'Document save failed.');
     } finally { setBusy(false); setStatusText('Ready'); }
   }
 
@@ -534,11 +538,20 @@ export default function DocumentStudio() {
     }
   }
 
-  async function createFolder() {
-    const name = `Corporate Folder ${folders.length + 1}`;
-    const folder = await documentApi.createFolder({ name });
-    setFolders([...folders, folder]);
-    toast.success('Folder created.');
+  async function createFolder(payload = {}) {
+    const name = String(payload.name || `Corporate Folder ${folders.length + 1}`).trim();
+    if (!name) {
+      toast.error('Folder name is required.');
+      return;
+    }
+    try {
+      const folder = await documentApi.createFolder({ ...payload, name });
+      setFolders((current) => [...current, folder]);
+      setFilters((current) => ({ ...current, folder_id: folder.id }));
+      toast.success('Folder created.');
+    } catch (error) {
+      toast.error(error.message || 'Folder creation failed.');
+    }
   }
 
   async function download(format) {
@@ -546,6 +559,9 @@ export default function DocumentStudio() {
     setBusy(true); setStatusText(`Exporting ${format.toUpperCase()}…`);
     try {
     const response = await fetch(exportDocumentUrl(selected.id, format), { headers: makeDocumentDownloadHeaders() });
+    if (!response.ok) {
+      throw new Error(`${format.toUpperCase()} export failed with status ${response.status}`);
+    }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

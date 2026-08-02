@@ -1,6 +1,11 @@
 # Lumina AI Desktop Studio — Implementation Status
 
 ## Completed in this revision
+- Document Studio hardening: existing documents now preload version history on
+  initial selection, manual saves refresh version history immediately, failed
+  saves and exports surface actionable errors, user-named folder creation
+  updates the active filter, and FastAPI document upload/form route signatures
+  now satisfy Ruff B008 while preserving the same API contract.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -64,6 +69,13 @@
 - Unit tests for fallback and identity capability selection.
 
 ## Validation
+- Document Studio backend import smoke test: passed.
+- Document Studio backend Ruff check: passed for `backend/document_studio/router.py`.
+- Document Studio frontend model tests: 2 passed.
+- Document Studio frontend production build: passed.
+- Existing `backend/tests/test_document_studio_unit.py` passed once before the
+  route-signature correction, then the repository-wide backend test harness
+  could not start its local server on port 8000 in this runtime.
 - Python syntax compilation: passed.
 - Developer Center backend unit tests: 6 passed.
 - Control Center dashboard model tests: 3 passed.

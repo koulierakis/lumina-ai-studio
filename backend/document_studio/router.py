@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from ai_runtime.manager import runtime_manager
 from ai_runtime.schemas import RuntimeJob, RuntimeJobStatus
 from auth import require_owner
@@ -521,8 +523,8 @@ async def save_bank(body: dict, owner: str = Depends(require_owner)) -> BankProf
 @router.post("/companies/{company_id}/upload")
 async def upload_company_asset(
     company_id: str,
-    file: UploadFile = File(...),
-    kind: str = Form("certificate"),
+    file: Annotated[UploadFile, File(...)],
+    kind: Annotated[str, Form()] = "certificate",
     owner: str = Depends(require_owner),
 ) -> dict:
     profile = await _profile(owner, company_id)
@@ -960,13 +962,13 @@ async def update_document(
 
 @router.post("/import", response_model=CorporateDocument)
 async def import_document(
-    file: UploadFile = File(...),
-    title: str = Form(""),
-    category: str = Form("Imported"),
-    tags: str = Form(""),
-    folder_id: str | None = Form(None),
-    country: str = Form("GR"),
-    language: str = Form("el"),
+    file: Annotated[UploadFile, File(...)],
+    title: Annotated[str, Form()] = "",
+    category: Annotated[str, Form()] = "Imported",
+    tags: Annotated[str, Form()] = "",
+    folder_id: Annotated[str | None, Form()] = None,
+    country: Annotated[str, Form()] = "GR",
+    language: Annotated[str, Form()] = "el",
     owner: str = Depends(require_owner),
 ) -> CorporateDocument:
     mime = (file.content_type or "").lower()
