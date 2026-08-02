@@ -6,6 +6,10 @@
   saves and exports surface actionable errors, user-named folder creation
   updates the active filter, and FastAPI document upload/form route signatures
   now satisfy Ruff B008 while preserving the same API contract.
+- Document Studio component integration: the shared documentstudio component
+  barrel now exports the actual toolbar/API modules, and the sidebar folder tree
+  uses stable date/name sorting with valid JavaScript booleans instead of broken
+  Python-style constants.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -73,6 +77,9 @@
 - Document Studio backend Ruff check: passed for `backend/document_studio/router.py`.
 - Document Studio frontend model tests: 2 passed.
 - Document Studio frontend production build: passed.
+- Document Studio component integration rerun: backend unit suite 13 passed,
+  frontend model tests 2 passed, Ruff passed, and frontend production build
+  passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.
