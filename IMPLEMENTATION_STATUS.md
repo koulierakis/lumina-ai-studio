@@ -20,6 +20,10 @@
   can be filtered by collection membership, and batch archive/restore/trash,
   move, tag, metadata and rename-prefix operations now update documents with
   versioned activity metadata from the workspace.
+- Document Studio activity timeline foundation: document-level activity APIs now
+  merge lifecycle/batch metadata with version events, expose filtering, and the
+  workspace displays recent activity with actor, timestamp, action and version
+  details.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -96,6 +100,9 @@
 - Document Studio collections/batch validation: backend unit suite 15 passed,
   Ruff passed for Document Studio backend files and tests, frontend model tests
   3 passed, and frontend production build passed.
+- Document Studio activity timeline validation: backend unit suite 16 passed,
+  Ruff passed, frontend model tests 3 passed, and frontend production build
+  passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

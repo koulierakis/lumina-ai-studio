@@ -63,6 +63,7 @@ export const documentApi = {
   previewUrl: (id) => `${API_BASE}/documents/${id}/preview`,
   remove: (id) => apiDelete(`/documents/${id}`),
   versions: (id) => apiGet(`/documents/${id}/versions`),
+  activity: (id, params = {}) => apiGet(`/documents/${id}/activity`, { params }),
   analyze: (id, payload) => apiPost(`/documents/${id}/analysis`, payload),
   legalReview: (id) => apiPost(`/documents/${id}/legal-review`, {}),
   insertClause: (id, clauseId) => apiPost(`/documents/${id}/clauses/${clauseId}`, {}),

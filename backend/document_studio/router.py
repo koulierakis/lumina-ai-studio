@@ -1246,6 +1246,39 @@ async def list_versions(
     ]
 
 
+@router.get("/{document_id}/activity")
+async def document_activity(
+    document_id: str,
+    owner: str = Depends(require_owner),
+    action: str = "",
+    limit: int = 100,
+) -> dict:
+    document = await _document(document_id, owner)
+    metadata_events = list((document.metadata or {}).get("activity") or [])
+    version_events = [
+        {
+            "at": version.created_at,
+            "type": "version",
+            "action": version.change_note,
+            "actor": owner,
+            "version_id": version.id,
+            "version_number": version.version_number,
+        }
+        async for version_doc in versions_coll.find(
+            {"document_id": document_id, "owner_email": owner}, {"_id": 0}
+        ).sort("created_at", -1)
+        for version in [DocumentVersion(**version_doc)]
+    ]
+    events = [*metadata_events, *version_events]
+    if action.strip():
+        needle = action.strip().lower()
+        events = [event for event in events if needle in str(event.get("action", "")).lower()]
+    events.sort(
+        key=lambda event: str(event.get("at") or event.get("created_at") or ""), reverse=True
+    )
+    return {"document_id": document_id, "events": events[: max(1, min(limit, 200))]}
+
+
 @router.post("/{document_id}/analysis", response_model=DocumentAnalysisResult)
 async def analyze(
     document_id: str, body: DocumentAnalysisRequest, owner: str = Depends(require_owner)

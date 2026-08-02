@@ -560,3 +560,22 @@ def test_document_collection_model_supports_nested_smart_and_saved_sets():
     assert collection.parent_id == "parent-collection"
     assert collection.document_ids == ["doc-1", "doc-2"]
     assert collection.smart_query["tag"] == "kyc"
+
+
+def test_document_activity_metadata_supports_timeline_filtering_shape():
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Timeline Document",
+        metadata={
+            "activity": [
+                {"at": "2026-08-02T10:00:00Z", "type": "batch", "action": "archive"},
+                {"at": "2026-08-02T09:00:00Z", "type": "lifecycle", "action": "approve"},
+            ]
+        },
+    )
+
+    archive_events = [
+        event for event in document.metadata["activity"] if "archive" in event["action"]
+    ]
+
+    assert archive_events[0]["type"] == "batch"

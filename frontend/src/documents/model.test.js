@@ -22,5 +22,6 @@ describe('Document Studio model helpers', () => {
     expect(documentApi.collections).toBeInstanceOf(Function);
     expect(documentApi.createCollection).toBeInstanceOf(Function);
     expect(documentApi.batch).toBeInstanceOf(Function);
+    expect(documentApi.activity).toBeInstanceOf(Function);
   });
 });

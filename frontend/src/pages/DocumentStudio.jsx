@@ -40,6 +40,7 @@ export default function DocumentStudio() {
   const [profile, setProfile] = useState(null);
   const [selected, setSelected] = useState(null);
   const [versions, setVersions] = useState([]);
+  const [activity, setActivity] = useState([]);
   const [analysis, setAnalysis] = useState(null);
   const [quality, setQuality] = useState(null);
   const [compareResult, setCompareResult] = useState(null);
@@ -549,6 +550,8 @@ export default function DocumentStudio() {
   async function loadVersions(document) {
     const payload = await documentApi.versions(document.id);
     setVersions(payload || []);
+    const activityPayload = await documentApi.activity(document.id);
+    setActivity(activityPayload.events || []);
   }
 
   async function toggleFavorite(document) {
@@ -1066,6 +1069,16 @@ export default function DocumentStudio() {
             <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => selected && toggleFavorite(selected)}><Heart className="h-4 w-4" />{selected?.favorite ? 'Αφαίρεση από αγαπημένα' : 'Προσθήκη στα αγαπημένα'}</button>
             <button className="btn secondary disabled:opacity-50" disabled={!selected || documents.length < 2 || busy} onClick={compareWithFirstOther}>Παράλληλη σύγκριση</button>
             {compareResult && <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs"><div>Insertions: {compareResult.insertions.slice(0, 12).join(', ')}</div><div>Deletions: {compareResult.deletions.slice(0, 12).join(', ')}</div><div>Formatting: {JSON.stringify(compareResult.formatting_changes)}</div></div>}
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <div className="mb-2 font-medium text-white">Activity Timeline</div>
+              {activity.length === 0 && <div>No activity loaded.</div>}
+              {activity.slice(0, 12).map((event, index) => (
+                <div key={`${event.version_id || event.at || index}-${index}`} className="border-b border-white/10 py-2 last:border-b-0">
+                  <div className="text-white/80">{event.type || 'activity'} · {event.action || 'updated'}</div>
+                  <div>{event.at || event.created_at || ''} · {event.actor || 'owner'}{event.version_number ? ` · v${event.version_number}` : ''}</div>
+                </div>
+              ))}
+            </div>
             <div className="space-y-2 overflow-visible">
               {versions.length === 0 && <EmptyState title="No versions loaded" text="Select a document or save a version." />}
               {versions.map((version) => <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs space-y-2" key={version.id}><div className="text-white">Version {version.version_number}</div><div className="text-white/50">{version.change_note}</div><div className="flex flex-wrap gap-1">{['restore', 'rename', 'duplicate', 'delete'].map((action) => <button key={action} disabled={busy} className="rounded border border-white/10 px-2 py-1 capitalize text-white/60 transition hover:border-gold hover:text-gold disabled:opacity-40" onClick={() => versionAction(version, action)}>{action}</button>)}</div></div>)}
