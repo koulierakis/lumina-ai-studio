@@ -1,0 +1,89 @@
+import { apiDelete, apiGet, apiPatch, apiPost, apiPut, uploadFormData, API_BASE } from '../lib/api';
+import { runtimeStudioJobPayload } from '../runtime/model';
+
+export const DOCUMENT_TYPES = [
+  'Contracts', 'Commercial Agreements', 'Sales Agreements', 'Purchase Agreements', 'Service Agreements', 'Master Agreements', 'Framework Agreements', 'Non Disclosure Agreements', 'NCNDA', 'IMFPA', 'Memorandum of Understanding', 'Letters of Intent', 'Invoices', 'Proforma Invoices', 'Corporate Letters', 'Business Letters', 'Bank Correspondence', 'Compliance Documents', 'Corporate Resolutions', 'Certificates', 'Declarations', 'Power of Attorney', 'Minutes', 'Policies', 'Reports', 'Manuals', 'Executive Summaries', 'Business Proposals', 'Investment Proposals', 'Pitch Deck Documents', 'Tender Documents', 'Employment Documents', 'Legal Documents', 'Custom Documents',
+];
+
+export const DOCUMENT_CREATION_MODES = ['prompt', 'template', 'uploaded', 'rewrite', 'merge', 'continue', 'translate', 'improve', 'summarize', 'expand', 'style'];
+export const EXPORT_FORMATS = ['pdf', 'docx', 'html', 'markdown', 'rtf', 'txt'];
+
+export const DEFAULT_COMPANY_PROFILE = {
+  company_name: 'Lumina Corporate Holdings',
+  primary_color: '#B9985A',
+  secondary_color: '#111827',
+  accent_color: '#E8D8A8',
+  font_heading: 'Georgia',
+  font_body: 'Inter',
+  signatures: [],
+  addresses: [],
+  contact_information: {},
+  legal_information: {},
+};
+
+export const documentApi = {
+  templates: () => apiGet('/documents/templates'),
+  companies: () => apiGet('/documents/companies'),
+  searchCompanies: (q) => apiGet('/documents/companies/search', { params: { q } }),
+  companyDashboard: (id) => apiGet(`/documents/companies/${id}/dashboard`),
+  updateCompany: (id, payload) => apiPatch(`/documents/companies/${id}`, payload),
+  companyLifecycle: (id, action) => apiPost(`/documents/companies/${id}/${action}`, {}),
+  companyVersions: (id) => apiGet(`/documents/companies/${id}/versions`),
+  restoreCompanyVersion: (id, versionId) => apiPost(`/documents/companies/${id}/versions/${versionId}/restore`, {}),
+  createCompany: (payload) => apiPost('/documents/companies', payload),
+  profile: () => apiGet('/documents/company-profile'),
+  saveProfile: (payload) => apiPut('/documents/company-profile', payload),
+  people: (params = {}) => apiGet('/documents/people', { params }),
+  savePerson: (payload) => apiPost('/documents/people', payload),
+  banks: (params = {}) => apiGet('/documents/banks', { params }),
+  saveBank: (payload) => apiPost('/documents/banks', payload),
+  clauses: (params = {}) => apiGet('/documents/clauses', { params }),
+  saveClause: (payload) => apiPost('/documents/clauses', payload),
+  folders: () => apiGet('/documents/folders'),
+  createFolder: (payload) => apiPost('/documents/folders', payload),
+  list: (params = {}) => apiGet('/documents', { params }),
+  create: (payload) => apiPost('/documents', payload),
+  createPackage: (payload) => apiPost('/documents/packages', payload),
+  classify: (payload) => apiPost('/documents/classify', payload),
+  generate: (payload) => apiPost('/documents/generate', payload),
+  update: (id, payload) => apiPatch(`/documents/${id}`, payload),
+  design: (id, payload) => apiPatch(`/documents/${id}/design`, payload),
+  redesign: (id) => apiPost(`/documents/${id}/redesign`, {}),
+  quality: (id) => apiGet(`/documents/${id}/quality`),
+  compare: (id, rightId) => apiGet(`/documents/${id}/compare/${rightId}`),
+  previewUrl: (id) => `${API_BASE}/documents/${id}/preview`,
+  remove: (id) => apiDelete(`/documents/${id}`),
+  versions: (id) => apiGet(`/documents/${id}/versions`),
+  analyze: (id, payload) => apiPost(`/documents/${id}/analysis`, payload),
+  legalReview: (id) => apiPost(`/documents/${id}/legal-review`, {}),
+  insertClause: (id, clauseId) => apiPost(`/documents/${id}/clauses/${clauseId}`, {}),
+  operate: (id, payload) => apiPost(`/documents/${id}/operate`, payload),
+  versionAction: (id, versionId, payload) => apiPost(`/documents/${id}/versions/${versionId}`, payload),
+  runtimeAnalyzePayload: (id, payload) => runtimeStudioJobPayload('documents', 'llm', { document_id: id, ...payload }),
+  importFile: (file, metadata = {}) => {
+    const form = new FormData();
+    form.append('file', file);
+    Object.entries(metadata).forEach(([key, value]) => form.append(key, value || ''));
+    return uploadFormData('/documents/import', form, { timeout: 60000 });
+  },
+};
+
+export function exportDocumentUrl(documentId, format) {
+  return `${API_BASE}/documents/${documentId}/export/${format}`;
+}
+
+export function makeDocumentDownloadHeaders() {
+  const token = localStorage.getItem('lumina_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export function summarizeDocument(document) {
+  const text = document?.content_text || document?.searchable_text || '';
+  return text.length > 220 ? `${text.slice(0, 220)}…` : text;
+}
+
+export function documentStats(document) {
+  const text = document?.content_text || document?.searchable_text || '';
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+  return { words, versions: document?.version_number || 1, exports: document?.export_media_ids?.length || 0 };
+}

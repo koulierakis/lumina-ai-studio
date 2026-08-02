@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
-from pydantic import BaseModel, ConfigDict, Field
-
 from models import new_id, now_iso
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CompanyProfile(BaseModel):
@@ -27,40 +24,40 @@ class CompanyProfile(BaseModel):
     website: str = ""
     phone: str = ""
     email: str = ""
-    corporate_seal: Optional[str] = None
-    default_signature: Optional[str] = None
-    corporate_logo: Optional[str] = None
+    corporate_seal: str | None = None
+    default_signature: str | None = None
+    corporate_logo: str | None = None
     compliance_notes: str = ""
     short_name: str = ""
     lei: str = ""
     mailing_address: str = ""
-    beneficial_owners: List[dict] = Field(default_factory=list)
-    secretary: List[dict] = Field(default_factory=list)
+    beneficial_owners: list[dict] = Field(default_factory=list)
+    secretary: list[dict] = Field(default_factory=list)
     document_defaults: dict = Field(default_factory=dict)
-    preferred_templates: List[str] = Field(default_factory=list)
-    preferred_clauses: List[str] = Field(default_factory=list)
-    preferred_signatures: List[str] = Field(default_factory=list)
+    preferred_templates: list[str] = Field(default_factory=list)
+    preferred_clauses: list[str] = Field(default_factory=list)
+    preferred_signatures: list[str] = Field(default_factory=list)
     preferred_footer: str = ""
     preferred_banking_language: str = ""
     preferred_governing_law: str = ""
-    certificates: List[dict] = Field(default_factory=list)
+    certificates: list[dict] = Field(default_factory=list)
     compliance_status: str = "Pending"
     archived: bool = False
     deleted: bool = False
-    members: List[dict] = Field(default_factory=list)
-    managers: List[dict] = Field(default_factory=list)
-    directors: List[dict] = Field(default_factory=list)
-    authorized_signatories: List[dict] = Field(default_factory=list)
-    bank_accounts: List[dict] = Field(default_factory=list)
-    wallets: List[dict] = Field(default_factory=list)
-    logo_media_id: Optional[str] = None
+    members: list[dict] = Field(default_factory=list)
+    managers: list[dict] = Field(default_factory=list)
+    directors: list[dict] = Field(default_factory=list)
+    authorized_signatories: list[dict] = Field(default_factory=list)
+    bank_accounts: list[dict] = Field(default_factory=list)
+    wallets: list[dict] = Field(default_factory=list)
+    logo_media_id: str | None = None
     primary_color: str = "#B9985A"
     secondary_color: str = "#111827"
     accent_color: str = "#E8D8A8"
     font_heading: str = "Georgia"
     font_body: str = "Inter"
-    signatures: List[dict] = Field(default_factory=list)
-    addresses: List[dict] = Field(default_factory=list)
+    signatures: list[dict] = Field(default_factory=list)
+    addresses: list[dict] = Field(default_factory=list)
     contact_information: dict = Field(default_factory=dict)
     legal_information: dict = Field(default_factory=dict)
     branding_system: dict = Field(default_factory=dict)
@@ -72,7 +69,7 @@ class CorporatePerson(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=new_id)
     owner_email: str
-    company_profile_id: Optional[str] = None
+    company_profile_id: str | None = None
     full_name: str
     role: str = "Authorized Signatory"
     nationality: str = ""
@@ -82,7 +79,7 @@ class CorporatePerson(BaseModel):
     email: str = ""
     phone: str = ""
     authority: str = ""
-    signature_image: Optional[str] = None
+    signature_image: str | None = None
     initials: str = ""
     relationship_to_company: str = ""
     created_at: str = Field(default_factory=now_iso)
@@ -93,7 +90,7 @@ class BankProfile(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=new_id)
     owner_email: str
-    company_profile_id: Optional[str] = None
+    company_profile_id: str | None = None
     bank_name: str
     branch: str = ""
     swift: str = ""
@@ -113,7 +110,7 @@ class ClauseTemplate(BaseModel):
     title: str
     body: str
     jurisdiction: str = "International"
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
 
@@ -135,7 +132,17 @@ class DocumentFolder(BaseModel):
     id: str = Field(default_factory=new_id)
     owner_email: str
     name: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class DocumentTag(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str
+    color: str = "#B9985A"
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
 
@@ -147,10 +154,10 @@ class CorporateTemplate(BaseModel):
     category: str
     description: str
     document_type: str
-    tags: List[str] = Field(default_factory=list)
-    sections: List[dict] = Field(default_factory=list)
-    required_fields: List[str] = Field(default_factory=list)
-    premium_features: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+    sections: list[dict] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    premium_features: list[str] = Field(default_factory=list)
     design_schema: dict = Field(default_factory=dict)
 
 
@@ -175,27 +182,29 @@ class CorporateDocument(BaseModel):
     title: str
     document_type: str = "agreement"
     category: str = "Legal"
-    folder_id: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
+    folder_id: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    country: str = "GR"
+    language: str = "el"
     favorite: bool = False
     status: str = "draft"
-    template_id: Optional[str] = None
-    company_profile_id: Optional[str] = None
+    template_id: str | None = None
+    company_profile_id: str | None = None
     content_html: str = ""
     content_text: str = ""
     searchable_text: str = ""
     metadata: dict = Field(default_factory=dict)
     design: dict = Field(default_factory=dict)
-    components: List[dict] = Field(default_factory=list)
-    tables: List[dict] = Field(default_factory=list)
-    charts: List[dict] = Field(default_factory=list)
+    components: list[dict] = Field(default_factory=list)
+    tables: list[dict] = Field(default_factory=list)
+    charts: list[dict] = Field(default_factory=list)
     quality_score: dict = Field(default_factory=dict)
     version_number: int = 1
-    imported_media_id: Optional[str] = None
-    export_media_ids: List[str] = Field(default_factory=list)
+    imported_media_id: str | None = None
+    export_media_ids: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
-    autosaved_at: Optional[str] = None
+    autosaved_at: str | None = None
 
 
 class DocumentGenerationRequest(BaseModel):
@@ -203,20 +212,22 @@ class DocumentGenerationRequest(BaseModel):
     title: str
     prompt: str = ""
     creation_mode: str = "template"
-    parties: List[str] = Field(default_factory=list)
+    parties: list[str] = Field(default_factory=list)
     jurisdiction: str = "International"
     effective_date: str = "Upon signature"
     fields: dict = Field(default_factory=dict)
-    tags: List[str] = Field(default_factory=list)
-    folder_id: Optional[str] = None
-    company_profile_id: Optional[str] = None
+    tags: list[str] = Field(default_factory=list)
+    folder_id: str | None = None
+    country: str = "GR"
+    language: str = "el"
+    company_profile_id: str | None = None
 
 
 class DocumentAnalysisRequest(BaseModel):
     action: str = "summarize"
     question: str = ""
-    comparison_document_id: Optional[str] = None
-    required_clauses: List[str] = Field(default_factory=list)
+    comparison_document_id: str | None = None
+    required_clauses: list[str] = Field(default_factory=list)
 
 
 class DocumentOperationRequest(BaseModel):
@@ -224,20 +235,20 @@ class DocumentOperationRequest(BaseModel):
     instruction: str = ""
     target_style: str = "executive"
     language: str = "English"
-    source_document_ids: List[str] = Field(default_factory=list)
+    source_document_ids: list[str] = Field(default_factory=list)
     preserve_meaning: bool = True
 
 
 class VersionActionRequest(BaseModel):
     action: str
-    name: Optional[str] = None
+    name: str | None = None
 
 
 class DocumentDesignRequest(BaseModel):
     design: dict = Field(default_factory=dict)
-    components: List[dict] = Field(default_factory=list)
-    tables: List[dict] = Field(default_factory=list)
-    charts: List[dict] = Field(default_factory=list)
+    components: list[dict] = Field(default_factory=list)
+    tables: list[dict] = Field(default_factory=list)
+    charts: list[dict] = Field(default_factory=list)
     cover_style: str = "Corporate"
 
 
@@ -246,18 +257,18 @@ class PackageBuildRequest(BaseModel):
     title: str = "Executive Package"
     client: str = "Strategic Client"
     fields: dict = Field(default_factory=dict)
-    tags: List[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
 
 
 class DocumentAnalysisResult(BaseModel):
     document_id: str
     action: str
     summary: str
-    findings: List[dict] = Field(default_factory=list)
-    missing_clauses: List[str] = Field(default_factory=list)
-    inconsistencies: List[str] = Field(default_factory=list)
-    improvements: List[str] = Field(default_factory=list)
+    findings: list[dict] = Field(default_factory=list)
+    missing_clauses: list[str] = Field(default_factory=list)
+    inconsistencies: list[str] = Field(default_factory=list)
+    improvements: list[str] = Field(default_factory=list)
     extracted_information: dict = Field(default_factory=dict)
     classification: dict = Field(default_factory=dict)
-    compared_with: Optional[str] = None
+    compared_with: str | None = None
     created_at: str = Field(default_factory=now_iso)
