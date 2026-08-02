@@ -137,6 +137,21 @@ class DocumentFolder(BaseModel):
     updated_at: str = Field(default_factory=now_iso)
 
 
+class DocumentCollection(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str
+    description: str = ""
+    parent_id: str | None = None
+    document_ids: list[str] = Field(default_factory=list)
+    smart_query: dict = Field(default_factory=dict)
+    color: str = "#B9985A"
+    icon: str = "collection"
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
 class DocumentTag(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=new_id)
@@ -183,6 +198,7 @@ class CorporateDocument(BaseModel):
     document_type: str = "agreement"
     category: str = "Legal"
     folder_id: str | None = None
+    collection_ids: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     country: str = "GR"
     language: str = "el"

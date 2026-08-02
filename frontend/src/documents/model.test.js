@@ -19,5 +19,8 @@ describe('Document Studio model helpers', () => {
     expect(documentApi.moveFolder).toBeInstanceOf(Function);
     expect(documentApi.deleteFolder).toBeInstanceOf(Function);
     expect(documentApi.lifecycle).toBeInstanceOf(Function);
+    expect(documentApi.collections).toBeInstanceOf(Function);
+    expect(documentApi.createCollection).toBeInstanceOf(Function);
+    expect(documentApi.batch).toBeInstanceOf(Function);
   });
 });

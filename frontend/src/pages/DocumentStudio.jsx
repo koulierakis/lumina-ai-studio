@@ -35,6 +35,8 @@ export default function DocumentStudio() {
   const [banks, setBanks] = useState([]);
   const [clauses, setClauses] = useState([]);
   const [folders, setFolders] = useState([]);
+  const [collections, setCollections] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [profile, setProfile] = useState(null);
   const [selected, setSelected] = useState(null);
   const [versions, setVersions] = useState([]);
@@ -143,7 +145,7 @@ export default function DocumentStudio() {
 
   async function loadAll() {
     setLoading(true);
-    const [templatePayload, profilePayload, companyPayload, peoplePayload, bankPayload, clausePayload, folderPayload, docs] = await Promise.all([
+    const [templatePayload, profilePayload, companyPayload, peoplePayload, bankPayload, clausePayload, folderPayload, collectionPayload, docs] = await Promise.all([
       documentApi.templates(),
       documentApi.profile(),
       documentApi.companies(),
@@ -151,6 +153,7 @@ export default function DocumentStudio() {
       documentApi.banks(),
       documentApi.clauses(),
       documentApi.folders(),
+      documentApi.collections(),
       documentApi.list(filters),
     ]);
     setTemplates(templatePayload.templates || []);
@@ -160,6 +163,7 @@ export default function DocumentStudio() {
     setBanks(bankPayload || []);
     setClauses(clausePayload || templatePayload.clause_library || []);
     setFolders(folderPayload || []);
+    setCollections(collectionPayload || []);
     setDocuments(docs || []);
     if (!selected && docs?.[0]) {
       setSelected(docs[0]);
@@ -178,6 +182,39 @@ export default function DocumentStudio() {
     const docs = await documentApi.list(nextFilters);
     setDocuments(docs || []);
     return docs || [];
+  }
+
+  function toggleSelected(documentId) {
+    setSelectedIds((current) => current.includes(documentId) ? current.filter((id) => id !== documentId) : [...current, documentId]);
+  }
+
+  async function createCollectionFromSelection() {
+    const ids = selectedIds.length ? selectedIds : selected ? [selected.id] : [];
+    if (!ids.length) return toast.error('Select at least one document for the collection.');
+    try {
+      const collection = await documentApi.createCollection({ name: `Executive Collection ${collections.length + 1}`, document_ids: ids, description: 'Curated enterprise document set' });
+      setCollections((current) => [collection, ...current]);
+      await refreshDocuments();
+      toast.success('Collection created.');
+    } catch (error) {
+      toast.error(error.message || 'Collection creation failed.');
+    }
+  }
+
+  async function runBatch(action, extra = {}) {
+    const ids = selectedIds.length ? selectedIds : selected ? [selected.id] : [];
+    if (!ids.length) return toast.error('Select one or more documents first.');
+    setBusy(true);
+    try {
+      await documentApi.batch({ document_ids: ids, action, ...extra });
+      setSelectedIds([]);
+      await refreshDocuments();
+      toast.success(`Batch ${action} completed.`);
+    } catch (error) {
+      toast.error(error.message || `Batch ${action} failed.`);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function generateDocument() {
@@ -640,6 +677,20 @@ export default function DocumentStudio() {
           </div>
         </div>
         <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-white/60"><span className={`h-2 w-2 rounded-full ${busy || loading ? 'bg-gold animate-pulse' : 'bg-emerald-400'}`} />{loading ? 'Loading Document Studio…' : statusText}</div>
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gold/20 bg-black/20 p-3 text-xs text-white/70">
+          <b className="text-gold">Batch & Collections</b>
+          <span>{selectedIds.length} selected</span>
+          <button className="btn secondary" disabled={busy} onClick={() => setSelectedIds(documents.map((document) => document.id))}>Select all</button>
+          <button className="btn secondary" disabled={busy || !selectedIds.length} onClick={() => setSelectedIds([])}>Clear</button>
+          <button className="btn secondary" disabled={busy} onClick={createCollectionFromSelection}>Create collection</button>
+          <button className="btn secondary" disabled={busy} onClick={() => runBatch('archive')}>Batch archive</button>
+          <button className="btn secondary" disabled={busy} onClick={() => runBatch('restore')}>Batch restore</button>
+          <button className="btn secondary" disabled={busy} onClick={() => runBatch('trash')}>Batch trash</button>
+          <button className="btn secondary" disabled={busy} onClick={() => runBatch('tags', { mode: 'append', tags: ['reviewed'] })}>Tag reviewed</button>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/50">
+          {collections.slice(0, 8).map((collection) => <button key={collection.id} className="rounded-full border border-gold/20 bg-gold/10 px-3 py-1 text-gold" onClick={() => { const next = { ...filters, collection_id: collection.id }; setFilters(next); refreshDocuments(next); }}>{collection.name} · {collection.document_ids?.length || 0}</button>)}
+        </div>
       </section>
 
       <div className="grid grid-cols-1 2xl:grid-cols-[360px_1fr_420px] gap-6">
@@ -664,6 +715,8 @@ export default function DocumentStudio() {
             setCompareResult(null);
             loadVersions(document);
           }}
+          selectedIds={selectedIds}
+          onToggleSelected={toggleSelected}
         />
 
         <main className="space-y-4">

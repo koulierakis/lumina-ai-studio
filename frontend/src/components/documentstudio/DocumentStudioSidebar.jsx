@@ -26,6 +26,8 @@ export default function DocumentStudioSidebar({
   deleteFolder,
   moveFolder,
   onSelectDocument,
+  selectedIds = [],
+  onToggleSelected,
 }) {
 
 
@@ -445,8 +447,11 @@ setEditingFolderName(folder.name);
               }`}
             >
               <div className="flex items-start justify-between gap-3">
-                <div className="font-medium">
-                  {document.title}
+                <div className="flex items-start gap-2">
+                  <input type="checkbox" checked={selectedIds.includes(document.id)} onChange={(event) => { event.stopPropagation(); onToggleSelected?.(document.id); }} onClick={(event) => event.stopPropagation()} />
+                  <div className="font-medium">
+                    {document.title}
+                  </div>
                 </div>
 
                 <FileText className="h-4 w-4 shrink-0 text-gold" />

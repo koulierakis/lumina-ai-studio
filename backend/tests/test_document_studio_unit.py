@@ -3,7 +3,7 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
-from document_studio.models import CompanyProfile, CorporateDocument
+from document_studio.models import CompanyProfile, CorporateDocument, DocumentCollection
 from document_studio.service import (
     CHART_TYPES,
     CLAUSE_LIBRARY,
@@ -545,3 +545,18 @@ def test_document_status_lifecycle_metadata_shape_supports_review_approval_and_t
 
     assert reviewed.status == "in_review"
     assert reviewed.metadata["activity"][0]["action"] == "submit-review"
+
+
+def test_document_collection_model_supports_nested_smart_and_saved_sets():
+    collection = DocumentCollection(
+        owner_email="owner@example.com",
+        name="Banking KYC Pack",
+        parent_id="parent-collection",
+        document_ids=["doc-1", "doc-2"],
+        smart_query={"category": "Banking", "tag": "kyc"},
+    )
+
+    assert collection.name == "Banking KYC Pack"
+    assert collection.parent_id == "parent-collection"
+    assert collection.document_ids == ["doc-1", "doc-2"]
+    assert collection.smart_query["tag"] == "kyc"

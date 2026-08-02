@@ -21,6 +21,7 @@ from .models import (
     CorporateTemplate,
     DocumentAnalysisRequest,
     DocumentAnalysisResult,
+    DocumentCollection,
     DocumentDesignRequest,
     DocumentFolder,
     DocumentGenerationRequest,
@@ -62,8 +63,8 @@ from .service import (
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 documents_coll = versions_coll = profiles_coll = company_versions_coll = folders_coll = (
-    tags_coll
-) = people_coll = banks_coll = clauses_coll = media_coll = notifications_coll = None
+    collections_coll
+) = tags_coll = people_coll = banks_coll = clauses_coll = media_coll = notifications_coll = None
 
 ALLOWED_DOCUMENT_MIMES = {
     "application/pdf",
@@ -88,6 +89,7 @@ def configure_document_studio_router(
         profiles_coll, \
         company_versions_coll, \
         folders_coll, \
+        collections_coll, \
         tags_coll, \
         people_coll, \
         banks_coll, \
@@ -104,6 +106,7 @@ def configure_document_studio_router(
     profiles_coll = LocalPersistenceCollection(persistence_provider, "company_profiles")
     company_versions_coll = LocalPersistenceCollection(persistence_provider, "company_versions")
     folders_coll = LocalPersistenceCollection(persistence_provider, "document_folders")
+    collections_coll = LocalPersistenceCollection(persistence_provider, "document_collections")
     tags_coll = LocalPersistenceCollection(persistence_provider, "document_tags")
     people_coll = LocalPersistenceCollection(persistence_provider, "document_people")
     banks_coll = LocalPersistenceCollection(persistence_provider, "document_banks")
@@ -712,6 +715,112 @@ async def create_folder(body: dict, owner: str = Depends(require_owner)) -> Docu
     return folder
 
 
+@router.get("/collections", response_model=list[DocumentCollection])
+async def list_collections(
+    owner: str = Depends(require_owner), q: str = "", parent_id: str | None = None
+) -> list[DocumentCollection]:
+    query: dict = {"owner_email": owner}
+    if parent_id is not None:
+        query["parent_id"] = parent_id or None
+    if q.strip():
+        query["$or"] = [
+            {"name": {"$regex": q.strip(), "$options": "i"}},
+            {"description": {"$regex": q.strip(), "$options": "i"}},
+        ]
+    return [
+        DocumentCollection(**doc)
+        async for doc in collections_coll.find(query, {"_id": 0}).sort("name", 1)
+    ]
+
+
+@router.post("/collections", response_model=DocumentCollection)
+async def create_collection(body: dict, owner: str = Depends(require_owner)) -> DocumentCollection:
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Collection name is required")
+    parent_id = body.get("parent_id") or None
+    if parent_id and not await collections_coll.find_one({"id": parent_id, "owner_email": owner}):
+        raise HTTPException(404, "Parent collection not found")
+    duplicate = await collections_coll.find_one(
+        {"owner_email": owner, "name": name, "parent_id": parent_id}, {"_id": 0}
+    )
+    if duplicate:
+        raise HTTPException(409, "A collection with this name already exists")
+    document_ids = [str(item) for item in body.get("document_ids", [])][:500]
+    if document_ids:
+        existing = {
+            doc["id"]
+            async for doc in documents_coll.find(
+                {"owner_email": owner, "id": {"$in": document_ids}}, {"_id": 0, "id": 1}
+            )
+        }
+        document_ids = [item for item in document_ids if item in existing]
+    collection = DocumentCollection(
+        owner_email=owner,
+        name=name,
+        description=str(body.get("description") or ""),
+        parent_id=parent_id,
+        document_ids=document_ids,
+        smart_query=body.get("smart_query") or {},
+        color=str(body.get("color") or "#B9985A"),
+        icon=str(body.get("icon") or "collection"),
+    )
+    await collections_coll.insert_one(collection.model_dump())
+    if document_ids:
+        await documents_coll.update_many(
+            {"owner_email": owner, "id": {"$in": document_ids}},
+            {"$addToSet": {"collection_ids": collection.id}, "$set": {"updated_at": now_iso()}},
+        )
+    return collection
+
+
+@router.patch("/collections/{collection_id}", response_model=DocumentCollection)
+async def update_collection(
+    collection_id: str, body: dict, owner: str = Depends(require_owner)
+) -> DocumentCollection:
+    current = await collections_coll.find_one(
+        {"id": collection_id, "owner_email": owner}, {"_id": 0}
+    )
+    if not current:
+        raise HTTPException(404, "Collection not found")
+    data = {**current}
+    for field in ("name", "description", "parent_id", "smart_query", "color", "icon"):
+        if field in body:
+            data[field] = body[field]
+    if data.get("parent_id") == collection_id:
+        raise HTTPException(400, "A collection cannot be nested inside itself")
+    if "document_ids" in body:
+        data["document_ids"] = [str(item) for item in body.get("document_ids", [])][:500]
+    data["updated_at"] = now_iso()
+    updated = DocumentCollection(**data)
+    await collections_coll.replace_one(
+        {"id": collection_id, "owner_email": owner}, updated.model_dump()
+    )
+    await documents_coll.update_many(
+        {"owner_email": owner}, {"$pull": {"collection_ids": collection_id}}
+    )
+    if updated.document_ids:
+        await documents_coll.update_many(
+            {"owner_email": owner, "id": {"$in": updated.document_ids}},
+            {"$addToSet": {"collection_ids": collection_id}, "$set": {"updated_at": now_iso()}},
+        )
+    return updated
+
+
+@router.delete("/collections/{collection_id}")
+async def delete_collection(collection_id: str, owner: str = Depends(require_owner)) -> dict:
+    result = await collections_coll.delete_one({"id": collection_id, "owner_email": owner})
+    if not result.deleted_count:
+        raise HTTPException(404, "Collection not found")
+    await collections_coll.update_many(
+        {"owner_email": owner, "parent_id": collection_id}, {"$set": {"parent_id": None}}
+    )
+    await documents_coll.update_many(
+        {"owner_email": owner}, {"$pull": {"collection_ids": collection_id}}
+    )
+    return {"ok": True, "collection_id": collection_id}
+
+
 @router.get("/tags", response_model=list[DocumentTag])
 async def list_tags(owner: str = Depends(require_owner)) -> list[DocumentTag]:
     return [
@@ -748,6 +857,7 @@ async def list_documents(
     category: str = "",
     tag: str = "",
     folder_id: str = "",
+    collection_id: str = "",
     country: str = "",
     language: str = "",
     favorite: bool | None = None,
@@ -760,6 +870,8 @@ async def list_documents(
         query["tags"] = tag
     if folder_id:
         query["folder_id"] = folder_id
+    if collection_id:
+        query["collection_ids"] = collection_id
     if country:
         query["country"] = country.strip().upper()
     if language:
@@ -785,6 +897,7 @@ async def search_documents(
     text: str = "",
     category: str = "",
     folder_id: str | None = None,
+    collection_id: str = "",
     tag: str = "",
     country: str = "",
     language: str = "",
@@ -798,6 +911,8 @@ async def search_documents(
         query["category"] = category.strip()
     if folder_id:
         query["folder_id"] = folder_id
+    if collection_id.strip():
+        query["collection_ids"] = collection_id.strip()
     if tag.strip():
         query["tags"] = tag.strip()
     if country.strip():
@@ -939,6 +1054,78 @@ async def document_lifecycle(
     )
     await _save_version(updated, owner, f"Lifecycle action: {action}")
     return updated
+
+
+@router.post("/batch")
+async def batch_documents(body: dict, owner: str = Depends(require_owner)) -> dict:
+    ids = [str(item) for item in body.get("document_ids", []) if str(item).strip()][:200]
+    action = str(body.get("action") or "").strip()
+    if not ids:
+        raise HTTPException(400, "At least one document id is required")
+    if action not in {
+        "archive",
+        "restore",
+        "trash",
+        "delete",
+        "move",
+        "tags",
+        "metadata",
+        "rename-prefix",
+    }:
+        raise HTTPException(400, "Unsupported batch action")
+    docs = [
+        CorporateDocument(**doc)
+        async for doc in documents_coll.find({"owner_email": owner, "id": {"$in": ids}}, {"_id": 0})
+    ]
+    if not docs:
+        raise HTTPException(404, "No matching documents found")
+    now = now_iso()
+    updated_ids: list[str] = []
+    deleted_ids: list[str] = []
+    status_map = {"archive": "archived", "restore": "draft", "trash": "trashed"}
+    for document in docs:
+        if action == "delete":
+            await documents_coll.delete_one({"id": document.id, "owner_email": owner})
+            await versions_coll.delete_many({"document_id": document.id, "owner_email": owner})
+            deleted_ids.append(document.id)
+            continue
+        data = document.model_dump()
+        if action in status_map:
+            data["status"] = status_map[action]
+        elif action == "move":
+            folder_id = body.get("folder_id") or None
+            if folder_id and not await folders_coll.find_one(
+                {"id": folder_id, "owner_email": owner}
+            ):
+                raise HTTPException(404, "Target folder not found")
+            data["folder_id"] = folder_id
+        elif action == "tags":
+            mode = str(body.get("mode") or "replace")
+            tags = [str(tag).strip() for tag in body.get("tags", []) if str(tag).strip()][:20]
+            if mode == "append":
+                data["tags"] = list(dict.fromkeys([*data.get("tags", []), *tags]))[:20]
+            else:
+                data["tags"] = tags
+        elif action == "metadata":
+            data["metadata"] = {**(data.get("metadata") or {}), **(body.get("metadata") or {})}
+        elif action == "rename-prefix":
+            prefix = str(body.get("prefix") or "").strip()
+            if prefix:
+                data["title"] = f"{prefix} {data['title']}"[:240]
+        metadata = {**(data.get("metadata") or {})}
+        metadata["activity"] = [
+            {"at": now, "type": "batch", "action": action, "actor": owner},
+            *(metadata.get("activity") or []),
+        ][:100]
+        data["metadata"] = metadata
+        data["updated_at"] = now
+        updated = CorporateDocument(**data)
+        await documents_coll.replace_one(
+            {"id": document.id, "owner_email": owner}, updated.model_dump()
+        )
+        await _save_version(updated, owner, f"Batch action: {action}")
+        updated_ids.append(document.id)
+    return {"ok": True, "action": action, "updated_ids": updated_ids, "deleted_ids": deleted_ids}
 
 
 @router.patch("/{document_id}", response_model=CorporateDocument)
