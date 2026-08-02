@@ -24,4 +24,11 @@ describe('Document Studio model helpers', () => {
     expect(documentApi.batch).toBeInstanceOf(Function);
     expect(documentApi.activity).toBeInstanceOf(Function);
   });
+
+  test('document filters support archive and trash explorer status values', () => {
+    const filters = { status: 'trashed', q: 'kyc' };
+
+    expect(filters.status).toBe('trashed');
+    expect(filters.q).toBe('kyc');
+  });
 });

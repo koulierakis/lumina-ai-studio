@@ -858,6 +858,7 @@ async def list_documents(
     tag: str = "",
     folder_id: str = "",
     collection_id: str = "",
+    status: str = "",
     country: str = "",
     language: str = "",
     favorite: bool | None = None,
@@ -872,6 +873,8 @@ async def list_documents(
         query["folder_id"] = folder_id
     if collection_id:
         query["collection_ids"] = collection_id
+    if status:
+        query["status"] = status
     if country:
         query["country"] = country.strip().upper()
     if language:
@@ -898,6 +901,7 @@ async def search_documents(
     category: str = "",
     folder_id: str | None = None,
     collection_id: str = "",
+    status: str = "",
     tag: str = "",
     country: str = "",
     language: str = "",
@@ -913,6 +917,8 @@ async def search_documents(
         query["folder_id"] = folder_id
     if collection_id.strip():
         query["collection_ids"] = collection_id.strip()
+    if status.strip():
+        query["status"] = status.strip()
     if tag.strip():
         query["tags"] = tag.strip()
     if country.strip():

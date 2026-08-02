@@ -24,6 +24,10 @@
   merge lifecycle/batch metadata with version events, expose filtering, and the
   workspace displays recent activity with actor, timestamp, action and version
   details.
+- Document Studio archive/trash and metadata foundation: list/search APIs now
+  support status filters, the workspace exposes Trash, Archive and All views,
+  and selected documents have an editable metadata panel for category, tags,
+  status and custom metadata.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -103,6 +107,9 @@
 - Document Studio activity timeline validation: backend unit suite 16 passed,
   Ruff passed, frontend model tests 3 passed, and frontend production build
   passed.
+- Document Studio archive/trash metadata validation: backend unit suite 16
+  passed, Ruff passed, frontend model tests 4 passed, and frontend production
+  build passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

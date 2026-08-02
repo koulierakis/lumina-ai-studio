@@ -690,6 +690,9 @@ export default function DocumentStudio() {
           <button className="btn secondary" disabled={busy} onClick={() => runBatch('restore')}>Batch restore</button>
           <button className="btn secondary" disabled={busy} onClick={() => runBatch('trash')}>Batch trash</button>
           <button className="btn secondary" disabled={busy} onClick={() => runBatch('tags', { mode: 'append', tags: ['reviewed'] })}>Tag reviewed</button>
+          <button className="btn secondary" disabled={busy} onClick={() => { const next = { ...filters, status: 'trashed' }; setFilters(next); refreshDocuments(next); }}>Trash view</button>
+          <button className="btn secondary" disabled={busy} onClick={() => { const next = { ...filters, status: 'archived' }; setFilters(next); refreshDocuments(next); }}>Archive view</button>
+          <button className="btn secondary" disabled={busy} onClick={() => { const next = { ...filters, status: '' }; setFilters(next); refreshDocuments(next); }}>All active</button>
         </div>
         <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-white/50">
           {collections.slice(0, 8).map((collection) => <button key={collection.id} className="rounded-full border border-gold/20 bg-gold/10 px-3 py-1 text-gold" onClick={() => { const next = { ...filters, collection_id: collection.id }; setFilters(next); refreshDocuments(next); }}>{collection.name} · {collection.document_ids?.length || 0}</button>)}
@@ -852,6 +855,14 @@ export default function DocumentStudio() {
           <Panel title="Company Identity" icon={ShieldCheck}>
             <div className="text-xs text-white/50">Company database profile automatically populates documents, people, authority, banks, jurisdiction, signatures and compliance metadata.</div>
             <input className="field" value={profile?.company_name || ''} onChange={(e) => setProfile({ ...profile, company_name: e.target.value })} />
+            {selected && <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60 space-y-2">
+              <b className="text-white">Document Metadata</b>
+              <input className="field" value={selected.category || ''} onChange={(e) => setSelected({ ...selected, category: e.target.value })} placeholder="Category" />
+              <input className="field" value={(selected.tags || []).join(', ')} onChange={(e) => setSelected({ ...selected, tags: e.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="Tags" />
+              <input className="field" value={selected.status || 'draft'} onChange={(e) => setSelected({ ...selected, status: e.target.value })} placeholder="Status" />
+              <textarea className="field min-h-[70px]" value={JSON.stringify(selected.metadata?.custom || {}, null, 2)} onChange={(e) => { try { setSelected({ ...selected, metadata: { ...(selected.metadata || {}), custom: JSON.parse(e.target.value || '{}') } }); } catch (_) {} }} />
+              <button className="btn secondary" disabled={busy} onClick={async () => { const updated = await documentApi.update(selected.id, { category: selected.category, tags: selected.tags, status: selected.status, metadata: selected.metadata }); setSelected(updated); await refreshDocuments(); toast.success('Metadata saved.'); }}>Save metadata</button>
+            </div>}
             <div className="grid grid-cols-2 gap-2">
               {['trading_name', 'legal_form', 'jurisdiction', 'registration_number', 'ein_tax_number', 'vat_number', 'registered_office', 'principal_office', 'formation_date', 'status', 'standing', 'capital', 'website', 'phone', 'email'].map((key) => <input key={key} className="field" placeholder={key.replaceAll('_', ' ')} value={profile?.[key] || ''} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} />)}
             </div>
