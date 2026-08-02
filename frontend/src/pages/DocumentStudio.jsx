@@ -554,6 +554,56 @@ export default function DocumentStudio() {
     }
   }
 
+  async function renameFolder(folderId, name) {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return toast.error('Folder name is required.');
+    try {
+      const updated = await documentApi.renameFolder(folderId, trimmed);
+      setFolders((current) => current.map((folder) => (folder.id === folderId ? updated : folder)));
+      toast.success('Folder renamed.');
+    } catch (error) {
+      toast.error(error.message || 'Folder rename failed.');
+    }
+  }
+
+  async function deleteFolder(folderId) {
+    try {
+      await documentApi.deleteFolder(folderId);
+      setFolders((current) => current.filter((folder) => folder.id !== folderId));
+      setFilters((current) => ({ ...current, folder_id: current.folder_id === folderId ? '' : current.folder_id }));
+      toast.success('Folder deleted.');
+    } catch (error) {
+      toast.error(error.message || 'Folder deletion failed.');
+    }
+  }
+
+  async function moveFolder(folderId, parentId = null) {
+    try {
+      const updated = await documentApi.moveFolder(folderId, parentId);
+      setFolders((current) => current.map((folder) => (folder.id === folderId ? updated : folder)));
+      toast.success('Folder moved.');
+    } catch (error) {
+      toast.error(error.message || 'Folder move failed.');
+    }
+  }
+
+  async function lifecycle(action) {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const updated = await documentApi.lifecycle(selected.id, action);
+      setSelected(updated);
+      setEditorHtml(updated.content_html || '');
+      await refreshDocuments();
+      await loadVersions(updated);
+      toast.success(`Document ${action.replace('-', ' ')} completed.`);
+    } catch (error) {
+      toast.error(error.message || 'Document lifecycle update failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function download(format) {
     if (!selected) return;
     setBusy(true); setStatusText(`Exporting ${format.toUpperCase()}…`);
@@ -603,6 +653,9 @@ export default function DocumentStudio() {
           selectedDocument={selected}
           onSearch={() => refreshDocuments()}
           onCreateFolder={createFolder}
+          renameFolder={renameFolder}
+          deleteFolder={deleteFolder}
+          moveFolder={moveFolder}
           onSelectDocument={(document) => {
             setSelected(document);
             setEditorHtml(document.content_html || "");
@@ -729,6 +782,10 @@ export default function DocumentStudio() {
             <div className="flex flex-wrap gap-2">
               <button className="btn gold disabled:opacity-50" disabled={!selected || busy} onClick={() => saveEditor(false)}>Αποθήκευση έκδοσης</button>
               <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => saveEditor(true)}>Αυτόματη αποθήκευση</button>
+              <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => lifecycle('submit-review')}>Υποβολή για έλεγχο</button>
+              <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => lifecycle('approve')}>Έγκριση</button>
+              <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => lifecycle('archive')}>Αρχειοθέτηση</button>
+              <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => lifecycle('trash')}>Μεταφορά στον κάδο</button>
               <button className="btn gold" disabled={busy || !selected} onClick={() => operate('executive_quality')}><Sparkles className="h-4 w-4" />Αναβάθμιση σε Επαγγελματική Ποιότητα</button>
               <label className="btn secondary cursor-pointer"><Upload className="h-4 w-4" />Εισαγωγή PDF/DOCX/OCR<input type="file" className="hidden" accept=".pdf,.docx,.txt,.html,.md,image/*" onChange={importFile} /></label>
             </div>

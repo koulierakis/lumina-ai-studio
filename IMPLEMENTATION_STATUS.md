@@ -10,6 +10,11 @@
   barrel now exports the actual toolbar/API modules, and the sidebar folder tree
   uses stable date/name sorting with valid JavaScript booleans instead of broken
   Python-style constants.
+- Document Studio enterprise lifecycle foundation: owner-private folder rename,
+  move and empty-folder delete APIs are available, documents now support review,
+  approval, archive, trash and restore lifecycle transitions with versioned audit
+  metadata, and the React workspace exposes these actions through the editor and
+  folder context menu.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -80,6 +85,9 @@
 - Document Studio component integration rerun: backend unit suite 13 passed,
   frontend model tests 2 passed, Ruff passed, and frontend production build
   passed.
+- Document Studio lifecycle/folder validation: backend unit suite 14 passed,
+  frontend model tests 3 passed, Ruff passed after import-format fix, and
+  frontend production build passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

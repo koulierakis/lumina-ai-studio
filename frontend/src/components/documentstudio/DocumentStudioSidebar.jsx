@@ -22,9 +22,9 @@ export default function DocumentStudioSidebar({
   selectedDocument,
   onSearch,
   onCreateFolder,
-renameFolder,
-deleteFolder,
-moveFolder,
+  renameFolder,
+  deleteFolder,
+  moveFolder,
   onSelectDocument,
 }) {
 
@@ -136,12 +136,12 @@ className="field flex-1"
 value={editingFolderName}
 onChange={e=>setEditingFolderName(e.target.value)}
 onBlur={()=>{
-renameFolder(folder.id,editingFolderName);
+renameFolder?.(folder.id,editingFolderName);
 setEditingFolderId(null);
 }}
 onKeyDown={e=>{
 if(e.key==="Enter"){
-renameFolder(folder.id,editingFolderName);
+renameFolder?.(folder.id,editingFolderName);
 setEditingFolderId(null);
 }
 }}
@@ -363,6 +363,20 @@ setEditingFolderName(folder.name);
           {renderTree()}
 
       </section>
+
+      {contextFolder && (
+
+        <div
+          className="fixed z-50 w-56 rounded-2xl border border-white/10 bg-ink-950 p-2 text-sm shadow-2xl"
+          style={{ left: contextPos.x, top: contextPos.y }}
+          onMouseLeave={() => setContextFolder(null)}
+        >
+          <button className="w-full rounded-xl px-3 py-2 text-left hover:bg-white/10" onClick={() => { setEditingFolderId(contextFolder.id); setEditingFolderName(contextFolder.name); setContextFolder(null); }}>Rename folder</button>
+          <button className="w-full rounded-xl px-3 py-2 text-left hover:bg-white/10" onClick={() => { moveFolder?.(contextFolder.id, null); setContextFolder(null); }}>Move to root</button>
+          <button className="w-full rounded-xl px-3 py-2 text-left text-red-300 hover:bg-red-500/10" onClick={() => { deleteFolder?.(contextFolder.id); setContextFolder(null); }}>Delete empty folder</button>
+        </div>
+
+      )}
 
       <div className="mb-3 rounded-xl border border-white/10 bg-white/5 p-3">
 

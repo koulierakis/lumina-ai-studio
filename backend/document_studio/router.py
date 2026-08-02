@@ -909,6 +909,38 @@ async def get_document(document_id: str, owner: str = Depends(require_owner)) ->
     return await _document(document_id, owner)
 
 
+@router.post("/{document_id}/{action}", response_model=CorporateDocument)
+async def document_lifecycle(
+    document_id: str, action: str, owner: str = Depends(require_owner)
+) -> CorporateDocument:
+    document = await _document(document_id, owner)
+    status_map = {
+        "archive": "archived",
+        "trash": "trashed",
+        "restore": "draft",
+        "approve": "approved",
+        "submit-review": "in_review",
+    }
+    if action not in status_map:
+        raise HTTPException(400, "Unsupported document lifecycle action")
+    data = document.model_dump()
+    data["status"] = status_map[action]
+    data["updated_at"] = now_iso()
+    metadata = {**(data.get("metadata") or {})}
+    metadata.setdefault("activity", [])
+    metadata["activity"] = [
+        {"at": data["updated_at"], "type": "lifecycle", "action": action, "actor": owner},
+        *metadata["activity"],
+    ][:100]
+    data["metadata"] = metadata
+    updated = CorporateDocument(**data)
+    await documents_coll.replace_one(
+        {"id": document_id, "owner_email": owner}, updated.model_dump()
+    )
+    await _save_version(updated, owner, f"Lifecycle action: {action}")
+    return updated
+
+
 @router.patch("/{document_id}", response_model=CorporateDocument)
 async def update_document(
     document_id: str, body: dict, owner: str = Depends(require_owner)
