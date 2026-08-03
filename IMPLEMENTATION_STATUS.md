@@ -36,6 +36,12 @@
   version diffs, template validation/version restore/preview, batch ZIP export
   jobs, check-in/check-out locking, conflict detection, and large-library index
   metadata are now exposed through backend APIs and frontend model helpers.
+- Document Studio core product polish: the visible editor now emphasizes a
+  simple premium workflow with new/rename/duplicate/delete controls, a polished
+  formatting toolbar, premium template cards, insertion actions for title,
+  paragraphs, lists, logos, headers, footers, page numbers, watermarks, tables,
+  signatures and page breaks, print-focused styling, and relaxed manual save
+  validation for practical drafting.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -125,6 +131,9 @@
   `backend/document_studio` and `backend/tests/test_document_studio_unit.py`,
   backend unit suite 19 passed, frontend model tests 6 passed, and frontend
   production build passed.
+- Document Studio core product polish validation: Ruff passed, backend unit suite
+  19 passed, frontend model tests 6 passed, and frontend production build
+  passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

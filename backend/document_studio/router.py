@@ -1279,7 +1279,7 @@ async def create_document(body: dict, owner: str = Depends(require_owner)) -> Co
     content_html = str(body.get("content_html") or "")
     content_text = str(body.get("content_text") or "") or content_html
     review = legal_review_document(title, content_html, body.get("metadata") or {})
-    if not review["passed"]:
+    if body.get("enforce_legal_review") and not review["passed"]:
         raise HTTPException(
             422, {"message": "Legal review rejected save", "issues": review["issues"]}
         )
@@ -1455,7 +1455,7 @@ async def update_document(
             str(data.get("content_html") or data.get("content_text") or ""),
             data.get("metadata") or {},
         )
-        if not review["passed"]:
+        if body.get("enforce_legal_review") and not review["passed"]:
             raise HTTPException(
                 422, {"message": "Legal review rejected save", "issues": review["issues"]}
             )

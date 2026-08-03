@@ -51,6 +51,7 @@ export default function DocumentStudio() {
   const [filters, setFilters] = useState(initialFilters);
   const [generator, setGenerator] = useState(defaultGenerator);
   const [editorHtml, setEditorHtml] = useState('');
+  const [newDocumentTitle, setNewDocumentTitle] = useState('Executive Letterhead Document');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [statusText, setStatusText] = useState('Ready');
@@ -356,6 +357,93 @@ export default function DocumentStudio() {
     editorRef.current?.focus();
     document.execCommand('insertHTML', false, markup);
     onEditorInput();
+  }
+
+  function insertPremiumBlock(kind) {
+    const company = profile?.company_name || 'Company Name';
+    const blocks = {
+      title: '<h1 style="font-family:Georgia,serif;font-size:36px;letter-spacing:-.02em;margin:0 0 18px;color:#111827">Premium Document Title</h1><p style="font-size:14px;color:#4b5563">Professional opening paragraph with clear executive tone.</p>',
+      paragraph: '<p style="margin:14px 0;line-height:1.7">Insert polished professional text here. Use concise language, premium spacing and clear business structure.</p>',
+      list: '<ul style="margin:18px 0;padding-left:24px;line-height:1.7"><li>First professional point</li><li>Second professional point</li><li>Action / next step</li></ul>',
+      logo: `<figure style="margin:18px 0 28px"><div style="width:96px;height:96px;border:1px solid #B9985A;border-radius:18px;display:flex;align-items:center;justify-content:center;color:#B9985A;font-family:Georgia,serif">LOGO</div><figcaption style="font-size:11px;color:#6b7280;margin-top:8px">${company}</figcaption></figure>`,
+      header: `<div style="border-bottom:1px solid #B9985A;padding-bottom:12px;margin-bottom:24px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6b7280">${company} · Confidential · Page <span class="pageNumber">1</span></div>`,
+      footer: `<div style="border-top:1px solid #B9985A;padding-top:12px;margin-top:32px;font-size:11px;color:#6b7280">${company} · Document No. DRAFT · Page <span class="pageNumber">1</span></div>`,
+      watermark: `<div style="position:absolute;inset:38% auto auto 10%;transform:rotate(-28deg);font-family:Georgia,serif;font-size:76px;color:rgba(185,152,90,.09);pointer-events:none;z-index:0">CONFIDENTIAL</div>`,
+      pageNumber: '<span style="display:inline-block;border-top:1px solid #d1d5db;margin-top:18px;padding-top:8px;font-size:11px;color:#6b7280">Page 1</span>',
+      table: '<table style="width:100%;border-collapse:collapse;margin:24px 0;font-size:13px"><thead><tr><th style="border:1px solid #d1d5db;background:#111827;color:white;padding:10px;text-align:left">Item</th><th style="border:1px solid #d1d5db;background:#111827;color:white;padding:10px;text-align:left">Description</th><th style="border:1px solid #d1d5db;background:#111827;color:white;padding:10px;text-align:left">Value</th></tr></thead><tbody><tr><td style="border:1px solid #d1d5db;padding:10px">1</td><td style="border:1px solid #d1d5db;padding:10px">Professional service</td><td style="border:1px solid #d1d5db;padding:10px">TBD</td></tr></tbody></table>',
+      signature: `<section style="margin-top:48px"><h2 style="font-family:Georgia,serif;font-size:22px;color:#111827">Signature</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:42px"><div style="border-top:1px solid #111827;padding-top:10px;min-height:90px">Authorized Signatory<br/>${company}<br/>Name:<br/>Date:</div><div style="border-top:1px solid #111827;padding-top:10px;min-height:90px">Counterparty<br/>Name:<br/>Title:<br/>Date:</div></div></section>`,
+      pageBreak: '<div style="break-after:page;page-break-after:always;border-top:1px dashed #B9985A;margin:36px 0"><span style="font-size:10px;color:#B9985A">PAGE BREAK</span></div>',
+    };
+    insertHtml(blocks[kind] || blocks.paragraph);
+  }
+
+  async function createBlankDocument() {
+    setBusy(true);
+    try {
+      const title = newDocumentTitle.trim() || 'Untitled Document';
+      const created = await documentApi.create({
+        title,
+        category: 'Corporate',
+        tags: ['draft'],
+        content_html: `<article><h1>${title}</h1><p>Start writing your premium document.</p></article>`,
+        content_text: `${title} Start writing your premium document.`,
+      });
+      setSelected(created);
+      setEditorHtml(created.content_html || '');
+      await refreshDocuments();
+      await loadVersions(created);
+      toast.success('New document created.');
+    } catch (error) {
+      toast.error(error.message || 'Document creation failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function duplicateSelectedDocument() {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const copy = await documentApi.create({
+        ...selected,
+        id: undefined,
+        title: `Copy of ${selected.title}`,
+        metadata: { ...(selected.metadata || {}), duplicated_from: selected.id },
+      });
+      setSelected(copy);
+      setEditorHtml(copy.content_html || '');
+      await refreshDocuments();
+      toast.success('Document duplicated.');
+    } catch (error) {
+      toast.error(error.message || 'Duplicate failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function renameSelectedDocument() {
+    if (!selected) return;
+    const title = window.prompt('New document name', selected.title);
+    if (!title?.trim()) return;
+    const updated = await documentApi.update(selected.id, { title: title.trim(), change_note: 'Renamed document' });
+    setSelected(updated);
+    await refreshDocuments();
+    toast.success('Document renamed.');
+  }
+
+  async function deleteSelectedDocument() {
+    if (!selected) return;
+    if (!window.confirm(`Delete ${selected.title}?`)) return;
+    await documentApi.remove(selected.id);
+    setSelected(null);
+    setEditorHtml('');
+    const docs = await refreshDocuments();
+    if (docs[0]) {
+      setSelected(docs[0]);
+      setEditorHtml(docs[0].content_html || '');
+      await loadVersions(docs[0]);
+    }
+    toast.success('Document deleted.');
   }
 
   function undoEditor() {
@@ -713,6 +801,13 @@ export default function DocumentStudio() {
           </div>
         </div>
         <div className="mt-6 flex flex-wrap items-center gap-3 rounded-2xl border border-white/10 bg-black/20 px-4 py-3 text-xs text-white/60"><span className={`h-2 w-2 rounded-full ${busy || loading ? 'bg-gold animate-pulse' : 'bg-emerald-400'}`} />{loading ? 'Loading Document Studio…' : statusText}</div>
+        <div className="mt-4 grid gap-3 rounded-2xl border border-gold/20 bg-black/20 p-3 md:grid-cols-[1fr_auto_auto_auto_auto]">
+          <input className="field" value={newDocumentTitle} onChange={(e) => setNewDocumentTitle(e.target.value)} placeholder="New document title" />
+          <button className="btn gold" disabled={busy} onClick={createBlankDocument}>New document</button>
+          <button className="btn secondary" disabled={!selected || busy} onClick={renameSelectedDocument}>Rename</button>
+          <button className="btn secondary" disabled={!selected || busy} onClick={duplicateSelectedDocument}>Duplicate</button>
+          <button className="btn secondary" disabled={!selected || busy} onClick={deleteSelectedDocument}>Delete</button>
+        </div>
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl border border-gold/20 bg-black/20 p-3 text-xs text-white/70">
           <b className="text-gold">Batch & Collections</b>
           <span>{selectedIds.length} selected</span>
@@ -790,6 +885,30 @@ export default function DocumentStudio() {
           </Panel>
 
           <Panel title="Template & Merge Engine" icon={FileText}>
+            <div className="grid gap-3 md:grid-cols-3">
+              {[
+                { name: 'Banking Letterhead', category: 'Banking', tone: 'Institutional blue, strict spacing, compliance-ready' },
+                { name: 'Law Firm Agreement', category: 'Legal', tone: 'Classic serif, gold rules, signature-first drafting' },
+                { name: 'Executive Proposal', category: 'Proposal', tone: 'Modern consulting layout with premium cover and pricing' },
+              ].map((preset) => (
+                <button
+                  key={preset.name}
+                  type="button"
+                  className="rounded-2xl border border-gold/20 bg-gradient-to-br from-gold/15 to-white/[0.03] p-4 text-left transition hover:-translate-y-0.5 hover:border-gold hover:shadow-xl"
+                  onClick={() => setTemplateDraft({
+                    name: preset.name,
+                    category: preset.category,
+                    tags: [preset.category.toLowerCase(), 'premium'],
+                    content_html: `<article><h1>{{title}}</h1><p>{{company.name}}</p><p>${preset.tone}</p>{{#if signer}}<section><h2>Signature</h2><p>{{signer}}</p></section>{{/if}}</article>`,
+                    merge_schema: { required: ['title', 'company.name'] },
+                  })}
+                >
+                  <div className="text-xs uppercase tracking-[0.24em] text-gold">{preset.category}</div>
+                  <div className="mt-2 font-display text-xl text-white">{preset.name}</div>
+                  <div className="mt-2 text-xs text-white/55">{preset.tone}</div>
+                </button>
+              ))}
+            </div>
             <div className="grid md:grid-cols-2 gap-3">
               <input className="field" value={templateDraft.name || ''} onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })} placeholder="Template name" />
               <input className="field" value={templateDraft.category || ''} onChange={(e) => setTemplateDraft({ ...templateDraft, category: e.target.value })} placeholder="Category" />
@@ -805,7 +924,7 @@ export default function DocumentStudio() {
             <div className="grid md:grid-cols-2 gap-3">
               <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
                 <b className="text-white">Template Library</b>
-                {templateLibrary.slice(0, 8).map((template) => <button key={template.id} className="mt-2 block w-full rounded-lg border border-white/10 p-2 text-left hover:border-gold" onClick={() => setTemplateDraft(template)}>{template.name} · {template.status}</button>)}
+                {templateLibrary.slice(0, 8).map((template) => <button key={template.id} className="mt-2 block w-full rounded-xl border border-white/10 bg-gradient-to-r from-white/[0.06] to-gold/[0.04] p-3 text-left transition hover:border-gold" onClick={() => setTemplateDraft(template)}><span className="text-gold">{template.category}</span><div className="text-white">{template.name}</div><div>{template.status} · v{template.version_number || 1}</div></button>)}
               </div>
               <div className="rounded-xl border border-white/10 bg-white p-3 text-xs text-black">
                 <b>Diagnostics</b>
@@ -816,7 +935,7 @@ export default function DocumentStudio() {
           </Panel>
 
           <Panel title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>
-            <div className="sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur">
+            <div className="premium-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur">
               <div className="flex flex-wrap items-center gap-2">
                 <select className="field max-w-[110px] py-2" value={page.size} onChange={(e) => setPage({ ...page, size: e.target.value })}>{['A4', 'Letter', 'Legal'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[130px] py-2" value={page.orientation} onChange={(e) => setPage({ ...page, orientation: e.target.value })}>{['portrait', 'landscape'].map((x) => <option key={x}>{x}</option>)}</select>
@@ -826,9 +945,9 @@ export default function DocumentStudio() {
                   ['B', () => format('bold')], ['I', () => format('italic')], ['U', () => format('underline')], ['• List', () => format('insertUnorderedList')], ['1. List', () => format('insertOrderedList')], ['Left', () => format('justifyLeft')], ['Center', () => format('justifyCenter')], ['Right', () => format('justifyRight')], ['Indent', () => format('indent')], ['Outdent', () => format('outdent')],
                 ].map(([label, action]) => <button key={label} type="button" className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold hover:text-gold" disabled={!selected || busy} onClick={action}>{label}</button>)}
                 <input type="color" title="Text color" className="h-9 w-10 rounded-lg bg-transparent" onChange={(e) => format('foreColor', e.target.value)} />
-                <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" onClick={() => insertHtml('<table style="width:100%;border-collapse:collapse;margin:24px 0"><tr><th style="border:1px solid #d1d5db;padding:8px">Header</th><th style="border:1px solid #d1d5db;padding:8px">Value</th></tr><tr><td style="border:1px solid #d1d5db;padding:8px">Item</td><td style="border:1px solid #d1d5db;padding:8px">TBD</td></tr></table>')}>Πίνακας</button>
-                <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" onClick={() => insertHtml('<div style="break-after:page;page-break-after:always;border-top:1px dashed #B9985A;margin:32px 0"></div>')}>Αλλαγή σελίδας</button>
-                <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" onClick={() => insertHtml('<section><h2>Signature Block</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:48px"><div style="border-top:1px solid #111827;padding-top:8px">Authorized Signatory<br/>Date:</div><div style="border-top:1px solid #111827;padding-top:8px">Initials<br/>Date:</div></div></section>')}>Υπογραφή</button>
+                {[
+                  ['Title', 'title'], ['Paragraph', 'paragraph'], ['List block', 'list'], ['Logo', 'logo'], ['Header', 'header'], ['Footer', 'footer'], ['Page #', 'pageNumber'], ['Watermark', 'watermark'], ['Table', 'table'], ['Signature', 'signature'], ['Page break', 'pageBreak'],
+                ].map(([label, kind]) => <button key={kind} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold hover:text-gold" disabled={!selected || busy} onClick={() => insertPremiumBlock(kind)}>{label}</button>)}
                 <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" onClick={addComment}>Σχόλιο</button>
                 <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" disabled={!history.past.length} onClick={undoEditor}>Αναίρεση</button>
                 <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" disabled={!history.future.length} onClick={redoEditor}>Επανάληψη</button>
@@ -836,7 +955,7 @@ export default function DocumentStudio() {
               </div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-white/50">Paper: {page.size} · {page.orientation} · {page.zoom}% · drag images/signatures into the page</div>
-            <div className="overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+            <div className="premium-doc-shell overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
               <div
                 className="lumina-document lumina-document-page mx-auto shadow-2xl transition-transform"
                 data-design-profile={luxuryDesign.profile.id}

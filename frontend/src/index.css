@@ -5,6 +5,21 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  .field {
+    @apply w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder:text-white/30 outline-none transition focus:border-gold/70 focus:ring-2 focus:ring-gold/10;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.06] px-4 py-2.5 text-sm font-medium text-white transition hover:bg-white/[0.1] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn.gold {
+    @apply border-gold/40 bg-gold/20 text-gold hover:bg-gold/30;
+  }
+  .btn.secondary {
+    @apply bg-black/20 text-white/70 hover:text-white;
+  }
+}
+
 :root {
   color-scheme: dark;
 }
@@ -22,6 +37,54 @@ body {
   color: #f5f5f5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+.mini-timeline-btn {
+  border-radius: 0.25rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 9px;
+  line-height: 1;
+  padding: 0.25rem;
+}
+
+.mini-timeline-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #fff;
+}
+
+.left-tool {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.82);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.left-tool:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.inputish {
+  width: 100%;
+  border-radius: 0.375rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.4);
+  padding: 0.5rem;
+  font-size: 0.75rem;
+  color: #fff;
+  outline: none;
+}
+
+.inputish:focus {
+  border-color: rgba(212, 175, 55, 0.55);
+  box-shadow: 0 0 0 1px rgba(212, 175, 55, 0.25);
 }
 
 .font-display {
@@ -97,4 +160,51 @@ body {
 ::selection {
   background: rgba(212, 175, 55, 0.35);
   color: #fff;
+}
+
+.premium-doc-shell {
+  background:
+    radial-gradient(circle at top left, rgba(212, 175, 55, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+}
+
+.premium-toolbar {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.lumina-document-page {
+  position: relative;
+  overflow: hidden;
+}
+
+.lumina-document-page::before {
+  content: "";
+  position: absolute;
+  inset: 12mm;
+  border: 1px solid rgba(185, 152, 90, 0.16);
+  pointer-events: none;
+}
+
+.lumina-document-page article {
+  position: relative;
+  z-index: 1;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+
+  .lumina-document-page,
+  .lumina-document-page * {
+    visibility: visible;
+  }
+
+  .lumina-document-page {
+    position: absolute;
+    inset: 0;
+    margin: 0 !important;
+    transform: none !important;
+    box-shadow: none !important;
+  }
 }
