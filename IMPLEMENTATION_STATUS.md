@@ -31,6 +31,11 @@
 - Document Studio validation hardening: backend service imports now satisfy the
   active Ruff Python 3.11 rules, UTC timestamps use the standard alias, and
   generated-document validation branches are expanded for lint-clean execution.
+- Document Studio enterprise review milestone: review threads, inline markers,
+  suggestions, accept/reject/resolve/reopen actions, track changes, side-by-side
+  version diffs, template validation/version restore/preview, batch ZIP export
+  jobs, check-in/check-out locking, conflict detection, and large-library index
+  metadata are now exposed through backend APIs and frontend model helpers.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -116,6 +121,10 @@
 - Document Studio final validation: Ruff passed for `backend/document_studio`
   and `backend/tests/test_document_studio_unit.py`, backend unit suite 17
   passed, frontend model tests 4 passed, and frontend production build passed.
+- Document Studio enterprise review validation: Ruff passed for
+  `backend/document_studio` and `backend/tests/test_document_studio_unit.py`,
+  backend unit suite 19 passed, frontend model tests 6 passed, and frontend
+  production build passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

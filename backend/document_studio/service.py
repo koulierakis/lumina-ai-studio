@@ -8,6 +8,8 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from models import now_iso
+
 from .models import (
     ClauseTemplate,
     CompanyProfile,
@@ -1203,11 +1205,42 @@ def quality_score(document: CorporateDocument) -> dict:
 def compare_documents(left: CorporateDocument, right: CorporateDocument) -> dict:
     left_words = (left.content_text or "").split()
     right_words = (right.content_text or "").split()
+    left_set = set(left_words)
+    right_set = set(right_words)
+    max_len = max(len(left_words), len(right_words), 1)
+    rows = []
+    for index in range(max_len):
+        left_word = left_words[index] if index < len(left_words) else ""
+        right_word = right_words[index] if index < len(right_words) else ""
+        if left_word == right_word:
+            status = "unchanged"
+        elif left_word and not right_word:
+            status = "deleted"
+        elif right_word and not left_word:
+            status = "inserted"
+        else:
+            status = "modified"
+        if status != "unchanged":
+            rows.append(
+                {
+                    "index": index,
+                    "left": left_word,
+                    "right": right_word,
+                    "status": status,
+                }
+            )
     return {
         "left_id": left.id,
         "right_id": right.id,
-        "insertions": [w for w in right_words if w not in left_words][:100],
-        "deletions": [w for w in left_words if w not in right_words][:100],
+        "insertions": [w for w in right_words if w not in left_set][:100],
+        "deletions": [w for w in left_words if w not in right_set][:100],
+        "side_by_side": rows[:500],
+        "summary": {
+            "insertions": sum(1 for row in rows if row["status"] == "inserted"),
+            "deletions": sum(1 for row in rows if row["status"] == "deleted"),
+            "modifications": sum(1 for row in rows if row["status"] == "modified"),
+            "similarity": round(len(left_set & right_set) / max(len(left_set | right_set), 1), 3),
+        },
         "formatting_changes": {
             "left_tables": left.content_html.count("<table"),
             "right_tables": right.content_html.count("<table"),
@@ -1215,6 +1248,195 @@ def compare_documents(left: CorporateDocument, right: CorporateDocument) -> dict
             "right_headings": right.content_html.count("<h2"),
         },
     }
+
+
+def create_review_item(
+    document: CorporateDocument,
+    author: str,
+    kind: str,
+    body: str,
+    anchor: dict | None = None,
+    parent_id: str | None = None,
+    mentions: list[str] | None = None,
+    suggestion: dict | None = None,
+) -> tuple[dict, dict]:
+    metadata = {**(document.metadata or {})}
+    review = {**metadata.get("review", {})}
+    thread_id = parent_id or f"review-{abs(hash((document.id, body, now_iso()))) % 100000000:08d}"
+    item = {
+        "id": f"comment-{abs(hash((thread_id, body, author, now_iso()))) % 100000000:08d}",
+        "thread_id": thread_id,
+        "parent_id": parent_id,
+        "kind": kind if kind in {"comment", "suggestion", "mention"} else "comment",
+        "body": body,
+        "anchor": anchor or {},
+        "author": author,
+        "mentions": mentions or [],
+        "suggestion": suggestion or {},
+        "status": "open",
+        "created_at": now_iso(),
+        "updated_at": now_iso(),
+        "replies": [],
+    }
+    comments = [item, *review.get("comments", [])][:500]
+    review.update(
+        {
+            "status": "changes_requested" if item["kind"] == "suggestion" else "in_review",
+            "comments": comments,
+            "open_count": sum(1 for comment in comments if comment.get("status") == "open"),
+            "resolved_count": sum(1 for comment in comments if comment.get("status") == "resolved"),
+            "updated_at": item["updated_at"],
+            "markers": build_review_markers(comments),
+        }
+    )
+    metadata["review"] = review
+    metadata["activity"] = [
+        {"at": item["created_at"], "type": "review", "action": item["kind"], "actor": author},
+        *(metadata.get("activity") or []),
+    ][:100]
+    return metadata, item
+
+
+def apply_review_action(
+    document: CorporateDocument, comment_id: str, action: str, actor: str
+) -> dict:
+    metadata = {**(document.metadata or {})}
+    review = {**metadata.get("review", {})}
+    comments = list(review.get("comments", []))
+    found = False
+    for comment in comments:
+        if comment.get("id") == comment_id:
+            found = True
+            if action == "resolve":
+                comment["status"] = "resolved"
+            elif action == "reopen":
+                comment["status"] = "open"
+            elif action == "accept-suggestion":
+                comment["status"] = "accepted"
+            elif action == "reject-suggestion":
+                comment["status"] = "rejected"
+            else:
+                raise ValueError("Unsupported review action")
+            comment["resolved_by"] = actor
+            comment["updated_at"] = now_iso()
+    if not found:
+        raise KeyError(comment_id)
+    review.update(
+        {
+            "comments": comments,
+            "open_count": sum(1 for comment in comments if comment.get("status") == "open"),
+            "resolved_count": sum(1 for comment in comments if comment.get("status") == "resolved"),
+            "markers": build_review_markers(comments),
+            "updated_at": now_iso(),
+        }
+    )
+    metadata["review"] = review
+    metadata["activity"] = [
+        {"at": now_iso(), "type": "review", "action": action, "actor": actor},
+        *(metadata.get("activity") or []),
+    ][:100]
+    return metadata
+
+
+def build_review_markers(comments: list[dict]) -> list[dict]:
+    return [
+        {
+            "id": comment.get("id"),
+            "thread_id": comment.get("thread_id"),
+            "anchor": comment.get("anchor") or {},
+            "kind": comment.get("kind", "comment"),
+            "status": comment.get("status", "open"),
+        }
+        for comment in comments
+        if comment.get("status") in {"open", "accepted", "rejected"}
+    ][:300]
+
+
+def create_track_change(
+    document: CorporateDocument,
+    author: str,
+    change_type: str,
+    before: str = "",
+    after: str = "",
+    range_info: dict | None = None,
+    formatting: dict | None = None,
+    metadata: dict | None = None,
+) -> tuple[dict, dict]:
+    doc_metadata = {**(document.metadata or {})}
+    track = {**doc_metadata.get("track_changes", {})}
+    change = {
+        "id": f"change-{abs(hash((document.id, change_type, before, after, now_iso()))) % 100000000:08d}",
+        "type": change_type,
+        "before": before,
+        "after": after,
+        "range": range_info or {},
+        "formatting": formatting or {},
+        "metadata": metadata or {},
+        "author": author,
+        "timestamp": now_iso(),
+        "status": "pending",
+    }
+    changes = [change, *track.get("changes", [])][:1000]
+    track.update(
+        {
+            "enabled": True,
+            "changes": changes,
+            "pending_count": sum(1 for item in changes if item.get("status") == "pending"),
+            "accepted_count": sum(1 for item in changes if item.get("status") == "accepted"),
+            "rejected_count": sum(1 for item in changes if item.get("status") == "rejected"),
+            "updated_at": change["timestamp"],
+        }
+    )
+    doc_metadata["track_changes"] = track
+    doc_metadata["activity"] = [
+        {"at": change["timestamp"], "type": "track-change", "action": change_type, "actor": author},
+        *(doc_metadata.get("activity") or []),
+    ][:100]
+    return doc_metadata, change
+
+
+def apply_track_change_action(
+    document: CorporateDocument, action: str, actor: str, change_ids: list[str] | None = None
+) -> tuple[str, str, dict]:
+    metadata = {**(document.metadata or {})}
+    track = {**metadata.get("track_changes", {})}
+    changes = list(track.get("changes", []))
+    selected = set(change_ids or [])
+    apply_all = action in {"accept-all", "reject-all"} or not selected
+    target_status = "accepted" if action in {"accept", "accept-all"} else "rejected"
+    content_text = document.content_text or normalize_text(document.content_html)
+    for change in changes:
+        if change.get("status") != "pending":
+            continue
+        if not apply_all and change.get("id") not in selected:
+            continue
+        change["status"] = target_status
+        change["reviewed_by"] = actor
+        change["reviewed_at"] = now_iso()
+        if target_status == "accepted":
+            if change.get("type") == "insertion":
+                content_text += str(change.get("after") or "")
+            elif change.get("type") == "deletion":
+                content_text = content_text.replace(str(change.get("before") or ""), "", 1)
+            elif change.get("type") in {"replacement", "move"}:
+                content_text = content_text.replace(
+                    str(change.get("before") or ""), str(change.get("after") or ""), 1
+                )
+    track.update(
+        {
+            "changes": changes,
+            "pending_count": sum(1 for item in changes if item.get("status") == "pending"),
+            "accepted_count": sum(1 for item in changes if item.get("status") == "accepted"),
+            "rejected_count": sum(1 for item in changes if item.get("status") == "rejected"),
+            "updated_at": now_iso(),
+        }
+    )
+    metadata["track_changes"] = track
+    metadata["activity"] = [
+        {"at": now_iso(), "type": "track-change", "action": action, "actor": actor},
+        *(metadata.get("activity") or []),
+    ][:100]
+    return f"<article><p>{html.escape(content_text)}</p></article>", content_text, metadata
 
 
 def build_package(
@@ -1563,6 +1785,8 @@ def analyze_document(
 
 
 def _resolve_merge_value(path: str, variables: dict) -> object:
+    if path in {".", "this"}:
+        return variables.get("item", variables)
     value: object = variables
     for part in path.split("."):
         if isinstance(value, dict) and part in value:
@@ -1587,7 +1811,73 @@ def _format_merge_value(value: object, formatter: str = "") -> str:
             return str(value)
     if formatter == "date":
         return str(value)[:10]
+    if formatter.startswith("date:"):
+        return str(value)[:10]
+    if formatter.startswith("number:"):
+        decimals = formatter.split(":", 1)[1]
+        try:
+            return f"{float(value):,.{int(decimals)}f}"
+        except (TypeError, ValueError):
+            return str(value)
+    if formatter == "upper":
+        return str(value).upper()
+    if formatter == "lower":
+        return str(value).lower()
     return str(value)
+
+
+def _truthy_merge_value(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() not in {"", "false", "0", "no", "none"}
+    return bool(value)
+
+
+def validate_merge_template(content_html: str, merge_schema: dict | None = None) -> dict:
+    tokens = re.findall(r"{{\s*([^}]+)\s*}}", content_html or "")
+    variables = []
+    sections = []
+    diagnostics = []
+    stack = []
+    for token in tokens:
+        token = token.strip()
+        if token.startswith("#if ") or token.startswith("#each ") or token.startswith("#repeat "):
+            kind, _, name = token[1:].partition(" ")
+            if kind == "repeat":
+                kind = "each"
+            stack.append(kind)
+            sections.append({"type": kind, "name": name.strip()})
+        elif token.startswith("/"):
+            closing = token[1:].strip()
+            if closing == "repeat":
+                closing = "each"
+            if not stack:
+                diagnostics.append(
+                    {"severity": "error", "message": f"Unexpected closing block {token}"}
+                )
+            elif stack[-1] != closing:
+                diagnostics.append(
+                    {"severity": "error", "message": f"Mismatched closing block {token}"}
+                )
+                stack.pop()
+            else:
+                stack.pop()
+        elif not token.startswith("#"):
+            name, _, formatter = token.partition("|")
+            variables.append({"name": name.strip(), "formatter": formatter.strip()})
+    for kind in stack:
+        diagnostics.append({"severity": "error", "message": f"Unclosed {kind} block"})
+    required = set((merge_schema or {}).get("required", []))
+    available = {item["name"] for item in variables} | {item["name"] for item in sections}
+    for key in sorted(required - available):
+        diagnostics.append(
+            {"severity": "warning", "message": f"Required variable {key} not present"}
+        )
+    return {
+        "valid": not any(item["severity"] == "error" for item in diagnostics),
+        "variables": variables,
+        "sections": sections,
+        "diagnostics": diagnostics,
+    }
 
 
 def render_merge_template(
@@ -1608,12 +1898,17 @@ def render_merge_template(
             rendered.append(render_merge_template(body, scope, merge_schema)[0])
         return "".join(rendered)
 
-    output = re.sub(r"{{#each\s+([^}]+)}}(.*?){{/each}}", repeat_replacer, output, flags=re.S)
+    output = re.sub(
+        r"{{#(?:each|repeat)\s+([^}]+)}}(.*?){{/(?:each|repeat)}}",
+        repeat_replacer,
+        output,
+        flags=re.S,
+    )
 
     def conditional_replacer(match):
         name, body = match.group(1).strip(), match.group(2)
         value = _resolve_merge_value(name, variables)
-        if value:
+        if _truthy_merge_value(value):
             diagnostics["used_variables"].append(name)
             return body
         diagnostics["missing_variables"].append(name)

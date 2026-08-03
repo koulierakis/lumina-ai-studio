@@ -1,4 +1,11 @@
-import { documentApi, documentStats, summarizeDocument } from './model';
+import {
+  buildVirtualizedDocumentWindow,
+  documentApi,
+  documentStats,
+  normalizeDiffRows,
+  summarizeDocument,
+  summarizeReviewState,
+} from './model';
 
 describe('Document Studio model helpers', () => {
   test('summarizes long searchable document text', () => {
@@ -26,6 +33,13 @@ describe('Document Studio model helpers', () => {
     expect(documentApi.templateLibrary).toBeInstanceOf(Function);
     expect(documentApi.createTemplate).toBeInstanceOf(Function);
     expect(documentApi.mergeTemplate).toBeInstanceOf(Function);
+    expect(documentApi.review).toBeInstanceOf(Function);
+    expect(documentApi.createReviewItem).toBeInstanceOf(Function);
+    expect(documentApi.trackChanges).toBeInstanceOf(Function);
+    expect(documentApi.trackChangeAction).toBeInstanceOf(Function);
+    expect(documentApi.lock).toBeInstanceOf(Function);
+    expect(documentApi.exportJob).toBeInstanceOf(Function);
+    expect(documentApi.libraryIndex).toBeInstanceOf(Function);
   });
 
   test('document filters support archive and trash explorer status values', () => {
@@ -33,5 +47,30 @@ describe('Document Studio model helpers', () => {
 
     expect(filters.status).toBe('trashed');
     expect(filters.q).toBe('kyc');
+  });
+
+  test('summarizes review, lock and track changes state', () => {
+    const summary = summarizeReviewState({
+      status: 'in_review',
+      metadata: {
+        review: { status: 'changes_requested', open_count: 2, resolved_count: 1 },
+        track_changes: { pending_count: 3, accepted_count: 4, rejected_count: 1 },
+        lock: { locked: true, owner: 'reviewer@example.com' },
+      },
+    });
+
+    expect(summary.reviewStatus).toBe('changes_requested');
+    expect(summary.pendingChanges).toBe(3);
+    expect(summary.locked).toBe(true);
+  });
+
+  test('virtualized document windows and diff rows support large libraries', () => {
+    const docs = Array.from({ length: 1000 }, (_, index) => ({ id: String(index) }));
+    const window = buildVirtualizedDocumentWindow(docs, 720, 72, 720);
+    const rows = normalizeDiffRows({ side_by_side: [{ status: 'inserted' }, { status: 'modified' }] });
+
+    expect(window.items.length).toBeLessThan(30);
+    expect(window.start).toBe(5);
+    expect(rows.map((row) => row.marker)).toEqual(['+', '~']);
   });
 });

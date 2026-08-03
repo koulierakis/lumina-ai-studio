@@ -21,9 +21,13 @@ from document_studio.service import (
     analyze_document,
     apply_design_system,
     apply_document_operation,
+    apply_review_action,
+    apply_track_change_action,
     build_package,
     classify_document_request,
     compare_documents,
+    create_review_item,
+    create_track_change,
     extract_text_from_upload,
     get_template,
     legal_review_document,
@@ -34,6 +38,7 @@ from document_studio.service import (
     render_merge_template,
     render_pdf_bytes,
     render_text_export,
+    validate_merge_template,
 )
 
 
@@ -607,4 +612,66 @@ def test_template_merge_engine_supports_conditionals_repeats_and_formatting():
 
     assert "Authority Certificate" in text
     assert "$1,250.00" in html
+    assert diagnostics["valid"] is True
+
+
+def test_enterprise_review_track_changes_and_diff_foundations():
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Review Draft",
+        content_text="Alpha Beta Gamma",
+        content_html="<article><p>Alpha Beta Gamma</p></article>",
+    )
+
+    metadata, comment = create_review_item(
+        document,
+        "reviewer@example.com",
+        "suggestion",
+        "Replace Beta with Delta",
+        {"path": "p[1]"},
+        mentions=["legal@example.com"],
+        suggestion={"before": "Beta", "after": "Delta"},
+    )
+    reviewed = CorporateDocument(**{**document.model_dump(), "metadata": metadata})
+    resolved = apply_review_action(
+        reviewed, comment["id"], "accept-suggestion", "owner@example.com"
+    )
+    tracked_metadata, change = create_track_change(
+        reviewed,
+        "reviewer@example.com",
+        "replacement",
+        before="Beta",
+        after="Delta",
+    )
+    tracked = CorporateDocument(**{**reviewed.model_dump(), "metadata": tracked_metadata})
+    html, text, final_metadata = apply_track_change_action(
+        tracked, "accept", "owner@example.com", [change["id"]]
+    )
+    diff = compare_documents(
+        document, CorporateDocument(owner_email="owner@example.com", title="New", content_text=text)
+    )
+
+    assert metadata["review"]["open_count"] == 1
+    assert resolved["review"]["comments"][0]["status"] == "accepted"
+    assert "Delta" in text and html.startswith("<article")
+    assert final_metadata["track_changes"]["accepted_count"] == 1
+    assert diff["side_by_side"]
+
+
+def test_merge_template_validation_supports_repeat_boolean_and_formatters():
+    template = "{{#if approved}}<h1>{{title|upper}}</h1>{{/if}}{{#repeat rows}}<p>{{item.date|date:%Y-%m-%d}} {{item.amount|number:1}}</p>{{/repeat}}"
+    validation = validate_merge_template(template, {"required": ["title", "rows"]})
+    html, text, diagnostics = render_merge_template(
+        template,
+        {
+            "approved": "true",
+            "title": "invoice",
+            "rows": [{"date": "2026-08-03T10:00:00", "amount": 12.34}],
+        },
+        {"required": ["title", "rows"]},
+    )
+
+    assert validation["valid"] is True
+    assert "INVOICE" in html
+    assert "12.3" in text
     assert diagnostics["valid"] is True

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import io
+import zipfile
 from typing import Annotated
 
 from ai_runtime.manager import runtime_manager
@@ -25,12 +27,18 @@ from .models import (
     DocumentDesignRequest,
     DocumentFolder,
     DocumentGenerationRequest,
+    DocumentLockRequest,
     DocumentOperationRequest,
+    DocumentReviewRequest,
     DocumentTag,
     DocumentTemplateVersion,
     DocumentVersion,
     EnterpriseDocumentTemplate,
+    ExportJobRequest,
     PackageBuildRequest,
+    ReviewActionRequest,
+    TrackChangeActionRequest,
+    TrackChangeRequest,
     VersionActionRequest,
 )
 from .service import (
@@ -47,9 +55,13 @@ from .service import (
     analyze_document,
     apply_design_system,
     apply_document_operation,
+    apply_review_action,
+    apply_track_change_action,
     build_package,
     classify_document_request,
     compare_documents,
+    create_review_item,
+    create_track_change,
     extract_smart_fields,
     extract_text_from_upload,
     get_template,
@@ -61,6 +73,7 @@ from .service import (
     render_merge_template,
     render_pdf_bytes,
     render_text_export,
+    validate_merge_template,
 )
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -399,6 +412,89 @@ async def merge_template_library_item(
         template.content_html, body.get("variables") or {}, template.merge_schema
     )
     return {"content_html": content_html, "content_text": content_text, "diagnostics": diagnostics}
+
+
+@router.get(
+    "/template-library/{template_id}/versions", response_model=list[DocumentTemplateVersion]
+)
+async def list_template_versions(
+    template_id: str, owner: str = Depends(require_owner)
+) -> list[DocumentTemplateVersion]:
+    await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    return [
+        DocumentTemplateVersion(**doc)
+        async for doc in template_versions_coll.find(
+            {"template_id": template_id, "owner_email": owner}, {"_id": 0}
+        ).sort("version_number", -1)
+    ]
+
+
+@router.get("/template-library/{template_id}/preview")
+async def preview_template_library_item(
+    template_id: str, owner: str = Depends(require_owner)
+) -> Response:
+    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    template = EnterpriseDocumentTemplate(**doc)
+    sample = {
+        "title": template.name,
+        "company": "Sample Company Ltd",
+        "signer": "Authorized Signatory",
+        "fees": [{"name": "Professional Fee", "amount": 1250}],
+    }
+    content_html, _, _ = render_merge_template(template.content_html, sample, template.merge_schema)
+    return Response(content=content_html, media_type="text/html")
+
+
+@router.post("/template-library/{template_id}/validate")
+async def validate_template_library_item(
+    template_id: str, body: dict | None = None, owner: str = Depends(require_owner)
+) -> dict:
+    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    template = EnterpriseDocumentTemplate(**doc)
+    variables = (body or {}).get("variables") or {}
+    validation = validate_merge_template(template.content_html, template.merge_schema)
+    _, _, merge_diagnostics = render_merge_template(
+        template.content_html, variables, template.merge_schema
+    )
+    return {"template": validation, "merge": merge_diagnostics}
+
+
+@router.post(
+    "/template-library/{template_id}/versions/{version_id}/restore",
+    response_model=EnterpriseDocumentTemplate,
+)
+async def restore_template_version(
+    template_id: str, version_id: str, owner: str = Depends(require_owner)
+) -> EnterpriseDocumentTemplate:
+    current = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    version_doc = await template_versions_coll.find_one(
+        {"id": version_id, "template_id": template_id, "owner_email": owner}, {"_id": 0}
+    )
+    if not current or not version_doc:
+        raise HTTPException(404, "Template version not found")
+    version = DocumentTemplateVersion(**version_doc)
+    data = {**current}
+    data.update(
+        {
+            "name": version.name,
+            "content_html": version.content_html,
+            "merge_schema": version.merge_schema,
+            "version_number": int(data.get("version_number", 1)) + 1,
+            "updated_at": now_iso(),
+        }
+    )
+    restored = EnterpriseDocumentTemplate(**data)
+    await templates_coll.replace_one(
+        {"id": template_id, "owner_email": owner}, restored.model_dump()
+    )
+    await _save_template_version(
+        restored, owner, f"Restored template version {version.version_number}"
+    )
+    return restored
 
 
 @router.post("/classify")
@@ -1320,6 +1416,18 @@ async def update_document(
     document_id: str, body: dict, owner: str = Depends(require_owner)
 ) -> CorporateDocument:
     document = await _document(document_id, owner)
+    lock = (document.metadata or {}).get("lock") or {}
+    if lock.get("locked") and lock.get("owner") != owner and not body.get("force"):
+        raise HTTPException(423, "Document is checked out by another reviewer")
+    if body.get("expected_version") and int(body["expected_version"]) != document.version_number:
+        raise HTTPException(
+            409,
+            {
+                "message": "Document version conflict",
+                "current_version": document.version_number,
+                "expected_version": body.get("expected_version"),
+            },
+        )
     data = document.model_dump()
     content_changed = any(field in body for field in ("title", "content_html", "content_text"))
     for field in (
@@ -1363,6 +1471,68 @@ async def update_document(
     )
     if content_changed:
         await _save_version(updated, owner, str(body.get("change_note") or "Edited document"))
+    return updated
+
+
+@router.post("/{document_id}/lock", response_model=CorporateDocument)
+async def document_lock_action(
+    document_id: str, body: DocumentLockRequest, owner: str = Depends(require_owner)
+) -> CorporateDocument:
+    document = await _document(document_id, owner)
+    metadata = {**(document.metadata or {})}
+    lock = {**(metadata.get("lock") or {})}
+    action = body.action.lower().strip()
+    if body.expected_version and body.expected_version != document.version_number:
+        raise HTTPException(
+            409,
+            {
+                "message": "Document version conflict",
+                "current_version": document.version_number,
+                "expected_version": body.expected_version,
+                "resolution": body.resolution,
+            },
+        )
+    if action in {"check-out", "lock"}:
+        if lock.get("locked") and lock.get("owner") != owner:
+            raise HTTPException(423, "Document already checked out")
+        lock = {
+            "locked": True,
+            "owner": owner,
+            "checked_out_at": now_iso(),
+            "version_number": document.version_number,
+            "note": body.note,
+        }
+    elif action in {"check-in", "unlock"}:
+        if lock.get("locked") and lock.get("owner") != owner:
+            raise HTTPException(423, "Only the lock owner can check in this document")
+        lock = {
+            **lock,
+            "locked": False,
+            "checked_in_at": now_iso(),
+            "checked_in_by": owner,
+            "note": body.note,
+        }
+    elif action == "conflict-resolution":
+        lock = {
+            **lock,
+            "resolution": body.resolution,
+            "resolved_at": now_iso(),
+            "resolved_by": owner,
+        }
+    else:
+        raise HTTPException(400, "Unsupported lock action")
+    metadata["lock"] = lock
+    metadata["activity"] = [
+        {"at": now_iso(), "type": "lock", "action": action, "actor": owner},
+        *(metadata.get("activity") or []),
+    ][:100]
+    data = document.model_dump()
+    data.update({"metadata": metadata, "updated_at": now_iso()})
+    updated = CorporateDocument(**data)
+    await documents_coll.replace_one(
+        {"id": document_id, "owner_email": owner}, updated.model_dump()
+    )
+    await _save_version(updated, owner, f"Document lock action: {action}")
     return updated
 
 
@@ -1464,6 +1634,150 @@ async def document_activity(
         key=lambda event: str(event.get("at") or event.get("created_at") or ""), reverse=True
     )
     return {"document_id": document_id, "events": events[: max(1, min(limit, 200))]}
+
+
+@router.get("/{document_id}/review")
+async def get_document_review(document_id: str, owner: str = Depends(require_owner)) -> dict:
+    document = await _document(document_id, owner)
+    review = (document.metadata or {}).get("review") or {}
+    return {
+        "document_id": document_id,
+        "status": review.get("status", document.status),
+        "comments": review.get("comments", []),
+        "markers": review.get("markers", []),
+        "open_count": review.get("open_count", 0),
+        "resolved_count": review.get("resolved_count", 0),
+        "change_history": (document.metadata or {}).get("activity", []),
+    }
+
+
+@router.post("/{document_id}/review")
+async def create_document_review_item(
+    document_id: str, body: DocumentReviewRequest, owner: str = Depends(require_owner)
+) -> dict:
+    document = await _document(document_id, owner)
+    metadata, item = create_review_item(
+        document,
+        owner,
+        body.kind,
+        body.body,
+        body.anchor,
+        body.parent_id,
+        body.mentions,
+        body.suggestion,
+    )
+    await documents_coll.update_one(
+        {"id": document_id, "owner_email": owner},
+        {"$set": {"metadata": metadata, "status": "in_review", "updated_at": now_iso()}},
+    )
+    return {"ok": True, "item": item, "review": metadata.get("review", {})}
+
+
+@router.post("/{document_id}/review/{comment_id}")
+async def document_review_action(
+    document_id: str,
+    comment_id: str,
+    body: ReviewActionRequest,
+    owner: str = Depends(require_owner),
+) -> dict:
+    document = await _document(document_id, owner)
+    try:
+        metadata = apply_review_action(document, comment_id, body.action, owner)
+    except KeyError as exc:
+        raise HTTPException(404, "Review item not found") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    await documents_coll.update_one(
+        {"id": document_id, "owner_email": owner},
+        {"$set": {"metadata": metadata, "updated_at": now_iso()}},
+    )
+    return {"ok": True, "review": metadata.get("review", {})}
+
+
+@router.get("/{document_id}/track-changes")
+async def get_track_changes(
+    document_id: str,
+    owner: str = Depends(require_owner),
+    status: str = "",
+    author: str = "",
+) -> dict:
+    document = await _document(document_id, owner)
+    track = (document.metadata or {}).get("track_changes") or {}
+    changes = list(track.get("changes", []))
+    if status:
+        changes = [change for change in changes if change.get("status") == status]
+    if author:
+        changes = [change for change in changes if change.get("author") == author]
+    return {"document_id": document_id, **track, "changes": changes}
+
+
+@router.post("/{document_id}/track-changes")
+async def add_track_change(
+    document_id: str, body: TrackChangeRequest, owner: str = Depends(require_owner)
+) -> dict:
+    document = await _document(document_id, owner)
+    metadata, change = create_track_change(
+        document,
+        owner,
+        body.change_type,
+        body.before,
+        body.after,
+        body.range,
+        body.formatting,
+        body.metadata,
+    )
+    await documents_coll.update_one(
+        {"id": document_id, "owner_email": owner},
+        {"$set": {"metadata": metadata, "updated_at": now_iso()}},
+    )
+    return {"ok": True, "change": change, "track_changes": metadata.get("track_changes", {})}
+
+
+@router.post("/{document_id}/track-changes/actions", response_model=CorporateDocument)
+async def track_change_action(
+    document_id: str, body: TrackChangeActionRequest, owner: str = Depends(require_owner)
+) -> CorporateDocument:
+    document = await _document(document_id, owner)
+    content_html, content_text, metadata = apply_track_change_action(
+        document, body.action, owner, body.change_ids
+    )
+    data = document.model_dump()
+    data.update(
+        {
+            "content_html": content_html,
+            "content_text": content_text,
+            "searchable_text": content_text,
+            "metadata": metadata,
+            "version_number": document.version_number + 1,
+            "updated_at": now_iso(),
+        }
+    )
+    updated = CorporateDocument(**data)
+    await documents_coll.replace_one(
+        {"id": document_id, "owner_email": owner}, updated.model_dump()
+    )
+    await _save_version(updated, owner, f"Track changes: {body.action}")
+    return updated
+
+
+@router.get("/{document_id}/diff/{version_id}")
+async def document_version_diff(
+    document_id: str, version_id: str, owner: str = Depends(require_owner)
+) -> dict:
+    document = await _document(document_id, owner)
+    version_doc = await versions_coll.find_one(
+        {"id": version_id, "document_id": document_id, "owner_email": owner}, {"_id": 0}
+    )
+    if not version_doc:
+        raise HTTPException(404, "Version not found")
+    version = DocumentVersion(**version_doc)
+    left = CorporateDocument(
+        owner_email=owner,
+        title=version.title,
+        content_html=version.content_html,
+        content_text=version.content_text,
+    )
+    return compare_documents(left, document)
 
 
 @router.post("/{document_id}/analysis", response_model=DocumentAnalysisResult)
@@ -1849,6 +2163,130 @@ async def export_document(
         "X-Lumina-Media-Id": media.id,
     }
     return Response(content=data, media_type=mime, headers=headers)
+
+
+def _render_export_bytes(
+    document: CorporateDocument, profile: CompanyProfile, fmt: str
+) -> tuple[bytes, str, str]:
+    fmt = fmt.lower()
+    if fmt == "pdf":
+        return render_pdf_bytes(document, profile), "application/pdf", "pdf"
+    if fmt == "docx":
+        return (
+            render_docx_bytes(document, profile),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        )
+    if fmt == "html":
+        return document.content_html.encode(), "text/html", "html"
+    if fmt in {"markdown", "md", "txt"}:
+        return render_text_export(document, fmt)
+    raise HTTPException(400, "Export format must be pdf, docx, html, markdown or txt")
+
+
+@router.post("/export-jobs")
+async def create_export_job(body: ExportJobRequest, owner: str = Depends(require_owner)) -> dict:
+    ids = [str(item) for item in body.document_ids if str(item).strip()]
+    if not ids:
+        raise HTTPException(400, "At least one document id is required")
+    formats = [
+        fmt.lower()
+        for fmt in body.formats
+        if fmt.lower() in {"pdf", "docx", "html", "markdown", "md", "txt"}
+    ]
+    if not formats:
+        raise HTTPException(400, "At least one supported export format is required")
+    docs = [
+        CorporateDocument(**doc)
+        async for doc in documents_coll.find({"owner_email": owner, "id": {"$in": ids}}, {"_id": 0})
+    ]
+    if not docs:
+        raise HTTPException(404, "No matching documents found")
+    job_id = f"export-{abs(hash((owner, ids, formats, now_iso()))) % 100000000:08d}"
+    buffer = io.BytesIO()
+    manifest = []
+    profile_cache: dict[str, CompanyProfile] = {}
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for index, document in enumerate(docs, 1):
+            profile_id = document.company_profile_id or "default"
+            if profile_id not in profile_cache:
+                profile_cache[profile_id] = await _profile(owner, document.company_profile_id)
+            for fmt in formats:
+                data, mime, ext = _render_export_bytes(document, profile_cache[profile_id], fmt)
+                safe_title = "".join(
+                    ch if ch.isalnum() or ch in "-_" else "_" for ch in document.title
+                )[:80]
+                name = f"{index:03d}-{safe_title}.{ext}"
+                archive.writestr(name, data)
+                manifest.append({"document_id": document.id, "filename": name, "mime_type": mime})
+        archive.writestr("manifest.json", str(manifest))
+    data = buffer.getvalue()
+    filename, _, size = save_bytes(data, "application/zip", kind="generated")
+    media = MediaAsset(
+        owner_email=owner,
+        filename=filename,
+        mime_type="application/zip",
+        kind="generated",
+        size_bytes=size,
+        source_module="documents",
+        edit_note=f"document-export-job:{job_id}",
+    )
+    await media_coll.insert_one(media.model_dump())
+    progress = {"percent": 100, "status": "completed", "retry_of": body.retry_of}
+    for document in docs:
+        metadata = {**(document.metadata or {})}
+        metadata["export_jobs"] = [
+            {
+                "id": job_id,
+                "media_id": media.id,
+                "formats": formats,
+                "progress": progress,
+                "created_at": now_iso(),
+            },
+            *(metadata.get("export_jobs") or []),
+        ][:50]
+        await documents_coll.update_one(
+            {"id": document.id, "owner_email": owner},
+            {
+                "$set": {"metadata": metadata, "updated_at": now_iso()},
+                "$addToSet": {"export_media_ids": media.id},
+            },
+        )
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "status": "completed",
+        "progress": progress,
+        "media_id": media.id,
+        "manifest": manifest,
+    }
+
+
+@router.get("/library/index")
+async def document_library_index(owner: str = Depends(require_owner), limit: int = 500) -> dict:
+    docs = [
+        CorporateDocument(**doc)
+        async for doc in documents_coll.find({"owner_email": owner}, {"_id": 0}).sort(
+            "updated_at", -1
+        )
+    ]
+    terms: dict[str, int] = {}
+    for document in docs[: max(1, min(limit, 2000))]:
+        for token in set(
+            (document.searchable_text or document.content_text or document.title).lower().split()
+        ):
+            if len(token) > 2:
+                terms[token] = terms.get(token, 0) + 1
+    return {
+        "document_count": len(docs),
+        "indexed_at": now_iso(),
+        "top_terms": sorted(terms.items(), key=lambda item: item[1], reverse=True)[:100],
+        "virtualization": {
+            "recommended_page_size": 50,
+            "lazy_preview": True,
+            "background_indexing": True,
+        },
+    }
 
 
 @router.delete("/{document_id}")

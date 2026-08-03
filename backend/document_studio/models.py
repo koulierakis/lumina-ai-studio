@@ -301,6 +301,49 @@ class DocumentDesignRequest(BaseModel):
     cover_style: str = "Corporate"
 
 
+class DocumentReviewRequest(BaseModel):
+    kind: str = "comment"
+    body: str = ""
+    anchor: dict = Field(default_factory=dict)
+    parent_id: str | None = None
+    mentions: list[str] = Field(default_factory=list)
+    suggestion: dict = Field(default_factory=dict)
+
+
+class ReviewActionRequest(BaseModel):
+    action: str
+    body: str = ""
+
+
+class TrackChangeRequest(BaseModel):
+    change_type: str = "insertion"
+    before: str = ""
+    after: str = ""
+    range: dict = Field(default_factory=dict)
+    formatting: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
+
+class TrackChangeActionRequest(BaseModel):
+    action: str = "accept"
+    change_ids: list[str] = Field(default_factory=list)
+    filter: dict = Field(default_factory=dict)
+
+
+class DocumentLockRequest(BaseModel):
+    action: str = "check-out"
+    expected_version: int | None = None
+    resolution: str = "manual"
+    note: str = ""
+
+
+class ExportJobRequest(BaseModel):
+    formats: list[str] = Field(default_factory=lambda: ["pdf"])
+    document_ids: list[str] = Field(default_factory=list)
+    package_name: str = "document-export"
+    retry_of: str | None = None
+
+
 class PackageBuildRequest(BaseModel):
     package_type: str = "proposal"
     title: str = "Executive Package"

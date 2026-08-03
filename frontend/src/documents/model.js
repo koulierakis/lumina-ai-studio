@@ -29,6 +29,9 @@ export const documentApi = {
   templateAction: (id, action) => apiPost(`/documents/template-library/${id}/${action}`, {}),
   deleteTemplate: (id) => apiDelete(`/documents/template-library/${id}`),
   mergeTemplate: (id, payload) => apiPost(`/documents/template-library/${id}/merge`, payload),
+  templateVersions: (id) => apiGet(`/documents/template-library/${id}/versions`),
+  validateTemplate: (id, payload = {}) => apiPost(`/documents/template-library/${id}/validate`, payload),
+  restoreTemplateVersion: (id, versionId) => apiPost(`/documents/template-library/${id}/versions/${versionId}/restore`, {}),
   companies: () => apiGet('/documents/companies'),
   searchCompanies: (q) => apiGet('/documents/companies/search', { params: { q } }),
   companyDashboard: (id) => apiGet(`/documents/companies/${id}/dashboard`),
@@ -62,14 +65,24 @@ export const documentApi = {
   update: (id, payload) => apiPatch(`/documents/${id}`, payload),
   lifecycle: (id, action) => apiPost(`/documents/${id}/${action}`, {}),
   batch: (payload) => apiPost('/documents/batch', payload),
+  exportJob: (payload) => apiPost('/documents/export-jobs', payload),
+  libraryIndex: (params = {}) => apiGet('/documents/library/index', { params }),
   design: (id, payload) => apiPatch(`/documents/${id}/design`, payload),
   redesign: (id) => apiPost(`/documents/${id}/redesign`, {}),
   quality: (id) => apiGet(`/documents/${id}/quality`),
   compare: (id, rightId) => apiGet(`/documents/${id}/compare/${rightId}`),
+  versionDiff: (id, versionId) => apiGet(`/documents/${id}/diff/${versionId}`),
   previewUrl: (id) => `${API_BASE}/documents/${id}/preview`,
   remove: (id) => apiDelete(`/documents/${id}`),
   versions: (id) => apiGet(`/documents/${id}/versions`),
   activity: (id, params = {}) => apiGet(`/documents/${id}/activity`, { params }),
+  review: (id) => apiGet(`/documents/${id}/review`),
+  createReviewItem: (id, payload) => apiPost(`/documents/${id}/review`, payload),
+  reviewAction: (id, commentId, payload) => apiPost(`/documents/${id}/review/${commentId}`, payload),
+  trackChanges: (id, params = {}) => apiGet(`/documents/${id}/track-changes`, { params }),
+  createTrackChange: (id, payload) => apiPost(`/documents/${id}/track-changes`, payload),
+  trackChangeAction: (id, payload) => apiPost(`/documents/${id}/track-changes/actions`, payload),
+  lock: (id, payload) => apiPost(`/documents/${id}/lock`, payload),
   analyze: (id, payload) => apiPost(`/documents/${id}/analysis`, payload),
   legalReview: (id) => apiPost(`/documents/${id}/legal-review`, {}),
   insertClause: (id, clauseId) => apiPost(`/documents/${id}/clauses/${clauseId}`, {}),
@@ -102,4 +115,44 @@ export function documentStats(document) {
   const text = document?.content_text || document?.searchable_text || '';
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   return { words, versions: document?.version_number || 1, exports: document?.export_media_ids?.length || 0 };
+}
+
+export function summarizeReviewState(document) {
+  const review = document?.metadata?.review || {};
+  const track = document?.metadata?.track_changes || {};
+  const lock = document?.metadata?.lock || {};
+  return {
+    reviewStatus: review.status || document?.status || 'draft',
+    openComments: review.open_count || 0,
+    resolvedComments: review.resolved_count || 0,
+    pendingChanges: track.pending_count || 0,
+    acceptedChanges: track.accepted_count || 0,
+    rejectedChanges: track.rejected_count || 0,
+    locked: Boolean(lock.locked),
+    lockedBy: lock.owner || '',
+  };
+}
+
+export function buildVirtualizedDocumentWindow(documents = [], scrollTop = 0, rowHeight = 72, viewportHeight = 720) {
+  const safeRowHeight = Math.max(24, rowHeight);
+  const start = Math.max(0, Math.floor(scrollTop / safeRowHeight) - 5);
+  const visibleCount = Math.ceil(viewportHeight / safeRowHeight) + 10;
+  const end = Math.min(documents.length, start + visibleCount);
+  return {
+    start,
+    end,
+    totalHeight: documents.length * safeRowHeight,
+    items: documents.slice(start, end).map((document, offset) => ({
+      document,
+      index: start + offset,
+      top: (start + offset) * safeRowHeight,
+    })),
+  };
+}
+
+export function normalizeDiffRows(diff = {}) {
+  return (diff.side_by_side || []).map((row) => ({
+    ...row,
+    marker: row.status === 'inserted' ? '+' : row.status === 'deleted' ? '-' : row.status === 'modified' ? '~' : ' ',
+  }));
 }
