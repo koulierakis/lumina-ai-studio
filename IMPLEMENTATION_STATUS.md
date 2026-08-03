@@ -56,6 +56,10 @@
   normalized and persisted only after edits, headers and footers support alignment,
   first-page variants and structured placeholders, and automatic page numbering is
   rendered outside body HTML for editor, print preview and export metadata.
+- Document Studio PDF/DOCX layout fidelity engine: backend exports now consume the
+  normalized export layout payload for page size, orientation, margins, manual
+  page breaks, repeated and first-page headers/footers, placeholder resolution,
+  page-number fields, and structurally valid PDF/DOCX page setup output.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -158,6 +162,9 @@
 - Document Studio headers/footers/page setup validation: frontend document studio
   model/editor/pagination/document model tests 37 passed, backend Document Studio
   unit suite 19 passed, and frontend production build passed.
+- Document Studio PDF/DOCX layout fidelity validation: Ruff passed for changed
+  Document Studio backend files/tests, and backend Document Studio unit suite 23
+  passed with PDF/DOCX structural layout assertions.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

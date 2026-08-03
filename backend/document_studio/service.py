@@ -167,6 +167,16 @@ DEFAULT_PAGE_DESIGN = {
     "watermark": True,
     "page_border": "1px solid #B9985A",
 }
+EXPORT_PAGE_SIZES_MM = {"A4": (210.0, 297.0), "Letter": (215.9, 279.4), "US Letter": (215.9, 279.4)}
+EXPORT_PAGE_NUMBER_POSITIONS = {
+    "top-left",
+    "top-center",
+    "top-right",
+    "bottom-left",
+    "bottom-center",
+    "bottom-right",
+    "none",
+}
 COMPONENT_LIBRARY = [
     "signature_blocks",
     "company_information",
@@ -1643,49 +1653,463 @@ def extract_text_from_upload(data: bytes, mime: str, filename: str = "document")
     return normalize_text(data.decode("latin-1", errors="ignore"))[:50000]
 
 
+def _normalize_export_layout(document: CorporateDocument) -> dict:
+    raw = (document.design or {}).get("exportLayout") or (document.metadata or {}).get(
+        "export_layout"
+    )
+    legacy = (document.design or {}).get("pageLayout") or (document.metadata or {}).get(
+        "page_layout"
+    )
+    if not raw and legacy:
+        raw = {
+            "page": {
+                "size": legacy.get("size", "A4"),
+                "orientation": legacy.get("orientation", "portrait"),
+                "margins": legacy.get("margins", {}),
+                "background": legacy.get("background", "#ffffff"),
+                "printBackground": legacy.get("printBackground", True),
+            },
+            "header": legacy.get("header", {}),
+            "footer": legacy.get("footer", {}),
+            "pageNumbers": legacy.get("pageNumbers", {}),
+        }
+    raw = raw or {}
+    page = raw.get("page", {}) if isinstance(raw.get("page"), dict) else {}
+    margins = page.get("margins", {}) if isinstance(page.get("margins"), dict) else {}
+    size = page.get("size") if page.get("size") in EXPORT_PAGE_SIZES_MM else "A4"
+    orientation = "landscape" if page.get("orientation") == "landscape" else "portrait"
+    header = {
+        "enabled": False,
+        "text": "",
+        "firstPageText": "",
+        "align": "center",
+        "distanceMm": 8,
+        "repeat": True,
+        "differentFirstPage": False,
+        **(raw.get("header") or {}),
+    }
+    footer = {
+        "enabled": False,
+        "text": "",
+        "firstPageText": "",
+        "align": "center",
+        "distanceMm": 8,
+        "repeat": True,
+        "differentFirstPage": False,
+        **(raw.get("footer") or {}),
+    }
+    numbers = {
+        "enabled": True,
+        "position": "bottom-center",
+        "format": "Page 1 of 5",
+        **(raw.get("pageNumbers") or {}),
+    }
+    if numbers.get("position") not in EXPORT_PAGE_NUMBER_POSITIONS:
+        numbers["position"] = "bottom-center"
+    if numbers.get("position") == "none":
+        numbers["enabled"] = False
+    return {
+        "page": {
+            "size": size,
+            "orientation": orientation,
+            "margins": {
+                side: _clamp_float(
+                    margins.get(side), 22 if side in {"top", "bottom"} else 18, 5, 80
+                )
+                for side in ("top", "right", "bottom", "left")
+            },
+            "background": page.get("background", "#ffffff"),
+            "printBackground": page.get("printBackground") is not False,
+        },
+        "header": _normalize_export_region(header),
+        "footer": _normalize_export_region(footer),
+        "pageNumbers": numbers,
+    }
+
+
+def _clamp_float(value: object, fallback: float, minimum: float, maximum: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    return min(maximum, max(minimum, parsed))
+
+
+def _normalize_export_region(region: dict) -> dict:
+    align = region.get("align") if region.get("align") in {"left", "center", "right"} else "center"
+    return {
+        **region,
+        "enabled": region.get("enabled") is not False,
+        "text": str(region.get("text") or ""),
+        "firstPageText": str(region.get("firstPageText") or ""),
+        "align": align,
+        "distanceMm": _clamp_float(region.get("distanceMm") or region.get("spacing"), 8, 0, 40),
+        "repeat": region.get("repeat") is not False,
+        "differentFirstPage": bool(region.get("differentFirstPage") or region.get("firstPageOnly")),
+    }
+
+
+def _page_size_points(layout: dict) -> tuple[float, float]:
+    width_mm, height_mm = EXPORT_PAGE_SIZES_MM[layout["page"]["size"]]
+    if layout["page"]["orientation"] == "landscape":
+        width_mm, height_mm = height_mm, width_mm
+    return width_mm * 72 / 25.4, height_mm * 72 / 25.4
+
+
+def _resolve_export_text(template: str, document: CorporateDocument, page: int, pages: int) -> str:
+    today = datetime.now(UTC).date().isoformat()
+    return (
+        str(template or "")
+        .replace("{{DOCUMENT_TITLE}}", document.title)
+        .replace("{{CURRENT_DATE}}", today)
+        .replace("{{PAGE_NUMBER}}", str(page))
+        .replace("{{TOTAL_PAGES}}", str(pages))
+        .replace("{{title}}", document.title)
+        .replace("{{date}}", today)
+        .replace("{{page}}", str(page))
+        .replace("{{pages}}", str(pages))
+    )
+
+
+def _export_blocks(document: CorporateDocument) -> list[dict]:
+    source = document.content_html or html.escape(document.content_text or document.title)
+    source = re.sub(r"<br\s*/?>", "\n", source, flags=re.I)
+    tokens = re.split(r"(<[^>]+>)", source)
+    blocks: list[dict] = []
+    current: list[str] = []
+    in_list = False
+    for token in tokens:
+        lower = token.lower()
+        if re.search(
+            r"data-lumina-page-break=['\"]true|page-break-after\s*:\s*always|break-after\s*:\s*page",
+            token,
+            re.I,
+        ):
+            if current:
+                blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+                current = []
+            blocks.append({"type": "page_break"})
+        elif lower.startswith("<h1") or lower.startswith("<h2") or lower.startswith("<h3"):
+            if current:
+                blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+                current = []
+            current.append("")
+        elif lower.startswith("</h"):
+            text = normalize_text(" ".join(current))
+            if text:
+                blocks.append({"type": "heading", "text": text})
+            current = []
+        elif lower.startswith("<li"):
+            current = ["•"]
+            in_list = True
+        elif lower.startswith("</li"):
+            text = normalize_text(" ".join(current))
+            if text:
+                blocks.append({"type": "list", "text": text})
+            current = []
+            in_list = False
+        elif lower.startswith("<tr"):
+            if current:
+                blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+            current = []
+        elif lower.startswith("</tr"):
+            text = normalize_text(" | ".join(current))
+            if text:
+                blocks.append({"type": "table", "text": text})
+            current = []
+        elif token.startswith("<"):
+            if lower.startswith("</p") and current and not in_list:
+                blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+                current = []
+        else:
+            text = html.unescape(token).strip()
+            if text:
+                current.append(text)
+    if current:
+        blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+    return [block for block in blocks if block.get("type") == "page_break" or block.get("text")]
+
+
+def _paginate_blocks(blocks: list[dict], layout: dict) -> list[list[dict]]:
+    width, height = _page_size_points(layout)
+    margins = layout["page"]["margins"]
+    available = height - (margins["top"] + margins["bottom"]) * 72 / 25.4 - 54
+    lines_per_page = max(8, int(available // 15))
+    pages: list[list[dict]] = [[]]
+    used = 0
+    chars_per_line = max(35, int((width - (margins["left"] + margins["right"]) * 72 / 25.4) // 5.2))
+    for block in blocks:
+        if block["type"] == "page_break":
+            if pages[-1]:
+                pages.append([])
+                used = 0
+            continue
+        weight = max(
+            1, (len(block["text"]) // chars_per_line) + (2 if block["type"] == "heading" else 1)
+        )
+        if used and used + weight > lines_per_page:
+            pages.append([])
+            used = 0
+        pages[-1].append(block)
+        used += weight
+    return pages or [[{"type": "p", "text": ""}]]
+
+
+def _pdf_escape(text: str) -> str:
+    return str(text).replace("\\", "\\\\").replace("(", "[").replace(")", "]")
+
+
 def render_pdf_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
-    text = (document.content_text or document.title)[:6000]
-    lines = [
-        document.title,
-        profile.company_name,
-        "",
-        *[text[i : i + 88] for i in range(0, len(text), 88)],
+    layout = _normalize_export_layout(document)
+    width, height = _page_size_points(layout)
+    pages = _paginate_blocks(_export_blocks(document), layout)
+    objects: list[bytes] = []
+    page_ids: list[int] = []
+    font_id = 3
+    for index, page_blocks in enumerate(pages, 1):
+        stream = _render_pdf_page_stream(
+            document, profile, layout, page_blocks, index, len(pages), width, height
+        )
+        stream_b = stream.encode("latin-1", errors="ignore")
+        content_id = 4 + (index - 1) * 2
+        page_id = content_id + 1
+        page_ids.append(page_id)
+        objects.append(
+            f"{content_id} 0 obj <</Length {len(stream_b)}>> stream\n".encode()
+            + stream_b
+            + b"\nendstream endobj\n"
+        )
+        objects.append(
+            f"{page_id} 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 {width:.2f} {height:.2f}]/Resources<</Font<</F1 {font_id} 0 R>>>>/Contents {content_id} 0 R>> endobj\n".encode()
+        )
+    header = b"%PDF-1.4\n"
+    base = [
+        b"1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n",
+        f"2 0 obj <</Type/Pages/Count {len(page_ids)}/Kids[{' '.join(f'{pid} 0 R' for pid in page_ids)}]>> endobj\n".encode(),
+        b"3 0 obj <</Type/Font/Subtype/Type1/BaseFont/Times-Roman>> endobj\n",
     ]
-    stream = (
-        "BT /F1 11 Tf 54 780 Td 14 TL "
-        + " ".join(f"({line.replace('(', '[').replace(')', ']')}) Tj T*" for line in lines[:48])
-        + " ET"
+    return header + b"".join(base + objects) + b"trailer <</Root 1 0 R>>\n%%EOF"
+
+
+def _render_pdf_page_stream(
+    document: CorporateDocument,
+    profile: CompanyProfile,
+    layout: dict,
+    blocks: list[dict],
+    page: int,
+    total: int,
+    width: float,
+    height: float,
+) -> str:
+    margins = layout["page"]["margins"]
+    left = margins["left"] * 72 / 25.4
+    top = height - margins["top"] * 72 / 25.4
+    bottom = margins["bottom"] * 72 / 25.4
+    commands = []
+    if layout["page"].get("printBackground"):
+        commands.append(f"0.98 0.98 0.96 rg 0 0 {width:.2f} {height:.2f} re f 0 0 0 rg")
+    if page == 1:
+        commands.append(_pdf_text(document.title, left, top, 14))
+        top -= 22
+    header_text = _region_text(layout["header"], document, page, total)
+    footer_text = _region_text(layout["footer"], document, page, total)
+    if header_text:
+        commands.append(
+            _pdf_text(header_text, left, height - layout["header"]["distanceMm"] * 72 / 25.4, 10)
+        )
+    if footer_text:
+        commands.append(
+            _pdf_text(footer_text, left, layout["footer"]["distanceMm"] * 72 / 25.4 + 12, 10)
+        )
+    number_text = _format_export_page_number(layout["pageNumbers"], page, total)
+    if number_text:
+        x = _page_number_x(
+            layout["pageNumbers"]["position"], left, width - margins["right"] * 72 / 25.4, width
+        )
+        y = height - 18 if layout["pageNumbers"]["position"].startswith("top") else bottom - 18
+        commands.append(_pdf_text(number_text, x, y, 9))
+    y = top - 36
+    for block in blocks:
+        font_size = 14 if block["type"] == "heading" else 11
+        for line in _wrap_text(block["text"], 92 if font_size == 11 else 70):
+            if y < bottom + 24:
+                break
+            commands.append(_pdf_text(line, left, y, font_size))
+            y -= font_size + 4
+        y -= 4
+    return "\n".join(commands)
+
+
+def _pdf_text(text: str, x: float, y: float, size: int) -> str:
+    return f"BT /F1 {size} Tf {x:.2f} {y:.2f} Td ({_pdf_escape(text)}) Tj ET"
+
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    words = str(text).split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if len(current) + len(word) + 1 > width:
+            lines.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def _region_text(region: dict, document: CorporateDocument, page: int, total: int) -> str:
+    if not region.get("enabled") or (not region.get("repeat", True) and page > 1):
+        return ""
+    template = (
+        region.get("firstPageText")
+        if region.get("differentFirstPage") and page == 1 and region.get("firstPageText")
+        else region.get("text")
     )
-    stream_b = stream.encode("latin-1", errors="ignore")
-    pdf = (
-        b"%PDF-1.4\n1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n2 0 obj <</Type/Pages/Count 1/Kids[3 0 R]>> endobj\n3 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>/Contents 5 0 R>> endobj\n4 0 obj <</Type/Font/Subtype/Type1/BaseFont/Times-Roman>> endobj\n5 0 obj <</Length "
-        + str(len(stream_b)).encode()
-        + b">> stream\n"
-        + stream_b
-        + b"\nendstream endobj\ntrailer <</Root 1 0 R>>\n%%EOF"
-    )
-    return pdf
+    return _resolve_export_text(str(template or ""), document, page, total)
+
+
+def _format_export_page_number(settings: dict, page: int, total: int) -> str:
+    if settings.get("enabled") is False or settings.get("position") == "none":
+        return ""
+    fmt = settings.get("format") or "Page 1 of 5"
+    if fmt in {"1", "X"}:
+        return str(page)
+    if fmt in {"Page 1", "Page X"}:
+        return f"Page {page}"
+    return f"Page {page} of {total}"
+
+
+def _page_number_x(position: str, left: float, right: float, width: float) -> float:
+    if position.endswith("left"):
+        return left
+    if position.endswith("right"):
+        return right - 54
+    return width / 2 - 24
 
 
 def render_docx_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
-    text = html.escape(document.content_text or document.title)
-    paragraphs = "".join(
-        f"<w:p><w:r><w:t>{html.escape(line)}</w:t></w:r></w:p>"
-        for line in re.split(r"(?<=\.)\s+", text)[:80]
-    )
-    document_xml = f"<?xml version='1.0' encoding='UTF-8' standalone='yes'?><w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:body><w:p><w:r><w:t>{html.escape(document.title)}</w:t></w:r></w:p><w:p><w:r><w:t>{html.escape(profile.company_name)}</w:t></w:r></w:p>{paragraphs}<w:sectPr/></w:body></w:document>"
+    layout = _normalize_export_layout(document)
+    blocks = _export_blocks(document)
+    body_xml = "".join(_docx_block_xml(block) for block in blocks)
+    sect_pr = _docx_section_properties(layout)
+    document_xml = f"<?xml version='1.0' encoding='UTF-8' standalone='yes'?><w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'><w:body><w:p><w:r><w:t>{html.escape(document.title)}</w:t></w:r></w:p><w:p><w:r><w:t>{html.escape(profile.company_name)}</w:t></w:r></w:p>{body_xml}{sect_pr}</w:body></w:document>"
+    rels = [
+        "<Relationship Id='rIdHeader1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/header' Target='header1.xml'/>",
+        "<Relationship Id='rIdFooter1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer' Target='footer1.xml'/>",
+    ]
+    content_overrides = [
+        "<Override PartName='/word/header1.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml'/>",
+        "<Override PartName='/word/footer1.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml'/>",
+    ]
+    if layout["header"].get("differentFirstPage"):
+        rels.append(
+            "<Relationship Id='rIdHeaderFirst' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/header' Target='headerFirst.xml'/>"
+        )
+        content_overrides.append(
+            "<Override PartName='/word/headerFirst.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml'/>"
+        )
+    if layout["footer"].get("differentFirstPage"):
+        rels.append(
+            "<Relationship Id='rIdFooterFirst' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer' Target='footerFirst.xml'/>"
+        )
+        content_overrides.append(
+            "<Override PartName='/word/footerFirst.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml'/>"
+        )
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(
             "[Content_Types].xml",
-            "<?xml version='1.0' encoding='UTF-8'?><Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml'/><Default Extension='xml' ContentType='application/xml'/><Override PartName='/word/document.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'/></Types>",
+            "<?xml version='1.0' encoding='UTF-8'?><Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml'/><Default Extension='xml' ContentType='application/xml'/><Override PartName='/word/document.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'/>"
+            + "".join(content_overrides)
+            + "</Types>",
         )
         zf.writestr(
             "_rels/.rels",
             "<?xml version='1.0' encoding='UTF-8'?><Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'><Relationship Id='rId1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument' Target='word/document.xml'/></Relationships>",
         )
+        zf.writestr(
+            "word/_rels/document.xml.rels",
+            "<?xml version='1.0' encoding='UTF-8'?><Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'>"
+            + "".join(rels)
+            + "</Relationships>",
+        )
         zf.writestr("word/document.xml", document_xml)
+        zf.writestr(
+            "word/header1.xml",
+            _docx_region_xml("hdr", _region_text(layout["header"], document, 2, 2)),
+        )
+        zf.writestr(
+            "word/footer1.xml",
+            _docx_region_xml(
+                "ftr", _region_text(layout["footer"], document, 2, 2), layout["pageNumbers"]
+            ),
+        )
+        if layout["header"].get("differentFirstPage"):
+            zf.writestr(
+                "word/headerFirst.xml",
+                _docx_region_xml("hdr", _region_text(layout["header"], document, 1, 2)),
+            )
+        if layout["footer"].get("differentFirstPage"):
+            zf.writestr(
+                "word/footerFirst.xml",
+                _docx_region_xml(
+                    "ftr", _region_text(layout["footer"], document, 1, 2), layout["pageNumbers"]
+                ),
+            )
     return buffer.getvalue()
+
+
+def _docx_block_xml(block: dict) -> str:
+    if block["type"] == "page_break":
+        return "<w:p><w:r><w:br w:type='page'/></w:r></w:p>"
+    style = "<w:pStyle w:val='Heading1'/>" if block["type"] == "heading" else ""
+    bullet = "• " if block["type"] == "list" and not block["text"].startswith("•") else ""
+    return f"<w:p><w:pPr>{style}</w:pPr><w:r><w:t>{html.escape(bullet + block['text'])}</w:t></w:r></w:p>"
+
+
+def _docx_section_properties(layout: dict) -> str:
+    width_pt, height_pt = _page_size_points(layout)
+    margins = layout["page"]["margins"]
+    page_w = int(width_pt * 20)
+    page_h = int(height_pt * 20)
+    margin_attrs = " ".join(
+        f"w:{side}='{int(margins[side] * 56.6929)}'" for side in ("top", "right", "bottom", "left")
+    )
+    orient = " w:orient='landscape'" if layout["page"]["orientation"] == "landscape" else ""
+    title_pg = (
+        "<w:titlePg/>"
+        if layout["header"].get("differentFirstPage") or layout["footer"].get("differentFirstPage")
+        else ""
+    )
+    first_refs = ""
+    if layout["header"].get("differentFirstPage"):
+        first_refs += "<w:headerReference w:type='first' r:id='rIdHeaderFirst'/>"
+    if layout["footer"].get("differentFirstPage"):
+        first_refs += "<w:footerReference w:type='first' r:id='rIdFooterFirst'/>"
+    return f"<w:sectPr>{first_refs}<w:headerReference w:type='default' r:id='rIdHeader1'/><w:footerReference w:type='default' r:id='rIdFooter1'/>{title_pg}<w:pgSz w:w='{page_w}' w:h='{page_h}'{orient}/><w:pgMar {margin_attrs}/></w:sectPr>"
+
+
+def _docx_region_xml(kind: str, text: str, page_numbers: dict | None = None) -> str:
+    runs = f"<w:r><w:t>{html.escape(text)}</w:t></w:r>" if text else ""
+    if (
+        page_numbers
+        and page_numbers.get("enabled") is not False
+        and page_numbers.get("position") != "none"
+    ):
+        runs += "<w:r><w:t> </w:t></w:r>" + _docx_field("PAGE")
+        fmt = page_numbers.get("format") or "Page 1 of 5"
+        if fmt in {"Page 1", "Page 1 of 5", "Page X", "Page X of Y"}:
+            prefix = "Page " if fmt.startswith("Page") else ""
+            runs = f"<w:r><w:t>{prefix}</w:t></w:r>" + _docx_field("PAGE")
+        if fmt in {"Page 1 of 5", "Page X of Y"}:
+            runs += "<w:r><w:t> of </w:t></w:r>" + _docx_field("NUMPAGES")
+    return f"<?xml version='1.0' encoding='UTF-8' standalone='yes'?><w:{kind} xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:p>{runs}</w:p></w:{kind}>"
+
+
+def _docx_field(name: str) -> str:
+    return f"<w:r><w:fldChar w:fldCharType='begin'/></w:r><w:r><w:instrText xml:space='preserve'>{name}</w:instrText></w:r><w:r><w:fldChar w:fldCharType='end'/></w:r>"
 
 
 def analyze_document(

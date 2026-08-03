@@ -88,6 +88,159 @@ def test_pdf_and_docx_generation_are_valid_binary_contracts():
         assert "Board Resolution" in archive.read("word/document.xml").decode("utf-8")
 
 
+def _layout_fixture(**overrides):
+    layout = {
+        "page": {
+            "size": "A4",
+            "orientation": "portrait",
+            "margins": {"top": 20, "right": 16, "bottom": 22, "left": 18},
+            "background": "#ffffff",
+            "printBackground": True,
+        },
+        "header": {
+            "enabled": True,
+            "text": "{{DOCUMENT_TITLE}} · {{CURRENT_DATE}}",
+            "firstPageText": "First {{DOCUMENT_TITLE}}",
+            "align": "center",
+            "distanceMm": 8,
+            "repeat": True,
+            "differentFirstPage": True,
+        },
+        "footer": {
+            "enabled": True,
+            "text": "Footer {{PAGE_NUMBER}}/{{TOTAL_PAGES}}",
+            "firstPageText": "First footer {{PAGE_NUMBER}}",
+            "align": "right",
+            "distanceMm": 9,
+            "repeat": True,
+            "differentFirstPage": True,
+        },
+        "pageNumbers": {"enabled": True, "position": "bottom-right", "format": "Page 1 of 5"},
+    }
+    for key, value in overrides.items():
+        if isinstance(value, dict) and isinstance(layout.get(key), dict):
+            layout[key] = {**layout[key], **value}
+        else:
+            layout[key] = value
+    return layout
+
+
+def _export_fixture_document(layout=None):
+    return CorporateDocument(
+        owner_email="owner@example.com",
+        title="Layout Fidelity Fixture",
+        content_html=(
+            "<h1>Layout Fidelity Fixture</h1><p>First page paragraph with bold and italic text.</p>"
+            "<ul><li>First list item</li><li>Second list item</li></ul>"
+            "<table><tr><td>Cell A</td><td>Cell B</td></tr></table>"
+            "<div data-lumina-page-break='true'></div><p>Second page content after manual break.</p>"
+        ),
+        content_text="Layout Fidelity Fixture First page paragraph. Second page content after manual break.",
+        design={"exportLayout": layout or _layout_fixture()},
+        metadata={"export_layout": layout or _layout_fixture()},
+    )
+
+
+def test_pdf_export_honors_layout_page_size_orientation_headers_and_breaks():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        _layout_fixture(
+            page={
+                "size": "A4",
+                "orientation": "landscape",
+                "margins": {"top": 12, "right": 14, "bottom": 16, "left": 18},
+            }
+        )
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    assert pdf.startswith(b"%PDF-1.4")
+    assert b"/Count 2" in pdf
+    assert b"/MediaBox[0 0 841.89 595.28]" in pdf
+    assert b"First Layout Fidelity Fixture" in pdf
+    assert b"Footer 2/2" in pdf
+    assert b"Page 2 of 2" in pdf
+    assert b"Second page content after manual break" in pdf
+
+
+def test_pdf_export_falls_back_for_malformed_legacy_layout():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        {"page": {"size": "Unknown", "orientation": "sideways", "margins": {"top": "bad"}}}
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    assert pdf.startswith(b"%PDF-1.4")
+    assert b"/MediaBox[0 0 595.28 841.89]" in pdf
+    assert b"Layout Fidelity Fixture" in pdf
+
+
+def test_docx_export_honors_section_headers_footers_fields_and_breaks():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    layout = _layout_fixture(
+        page={
+            "size": "Letter",
+            "orientation": "landscape",
+            "margins": {"top": 10, "right": 11, "bottom": 12, "left": 13},
+        }
+    )
+    document = _export_fixture_document(layout)
+
+    docx = render_docx_bytes(document, profile)
+
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        names = set(archive.namelist())
+        assert {
+            "word/document.xml",
+            "word/header1.xml",
+            "word/footer1.xml",
+            "word/headerFirst.xml",
+            "word/footerFirst.xml",
+            "word/_rels/document.xml.rels",
+        }.issubset(names)
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+        rels = archive.read("word/_rels/document.xml.rels").decode("utf-8")
+        footer = archive.read("word/footer1.xml").decode("utf-8")
+        header_first = archive.read("word/headerFirst.xml").decode("utf-8")
+
+    assert "w:orient='landscape'" in document_xml
+    assert "w:pgSz" in document_xml and "w:pgMar" in document_xml
+    assert "w:br w:type='page'" in document_xml
+    assert "rIdHeaderFirst" in rels and "rIdFooterFirst" in rels
+    assert "First Layout Fidelity Fixture" in header_first
+    assert "PAGE" in footer and "NUMPAGES" in footer
+
+
+def test_docx_export_old_payload_compatibility_uses_page_layout_metadata():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Legacy Layout",
+        content_html="<p>Legacy body</p><div style='page-break-after:always'></div><p>After break</p>",
+        metadata={
+            "page_layout": {
+                "size": "Letter",
+                "orientation": "portrait",
+                "margins": {"top": 15, "right": 16, "bottom": 17, "left": 18},
+                "header": {"enabled": True, "text": "{{title}}"},
+                "footer": {"enabled": True, "text": "{{page}}/{{pages}}"},
+                "pageNumbers": {"enabled": True, "position": "top-left", "format": "1"},
+            }
+        },
+    )
+
+    docx = render_docx_bytes(document, profile)
+
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+        header = archive.read("word/header1.xml").decode("utf-8")
+    assert "w:pgSz" in document_xml
+    assert "w:br w:type='page'" in document_xml
+    assert "Legacy Layout" in header
+
+
 def test_docx_import_extracts_searchable_text():
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
