@@ -196,6 +196,50 @@ export function summarizeReviewState(document) {
   };
 }
 
+export function normalizeReviewAction(action = '') {
+  const value = String(action || '').trim().toLowerCase();
+  if (value === 'accept') return 'accept-suggestion';
+  if (value === 'reject') return 'reject-suggestion';
+  return value;
+}
+
+export function groupReviewThreads(comments = []) {
+  const threads = new Map();
+  (comments || []).forEach((comment) => {
+    const threadId = comment.thread_id || comment.parent_id || comment.id;
+    const existing = threads.get(threadId) || { id: threadId, root: null, replies: [], open: 0, resolved: 0, accepted: 0, rejected: 0 };
+    if (!comment.parent_id || comment.id === threadId) existing.root = comment;
+    else existing.replies.push(comment);
+    if (comment.status === 'open') existing.open += 1;
+    if (comment.status === 'resolved') existing.resolved += 1;
+    if (comment.status === 'accepted') existing.accepted += 1;
+    if (comment.status === 'rejected') existing.rejected += 1;
+    threads.set(threadId, existing);
+  });
+  return [...threads.values()].map((thread) => ({
+    ...thread,
+    root: thread.root || thread.replies[0] || null,
+    replies: thread.replies.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))),
+  })).filter((thread) => thread.root).sort((a, b) => String(b.root.updated_at || b.root.created_at || '').localeCompare(String(a.root.updated_at || a.root.created_at || '')));
+}
+
+export function buildTrackChangePreview(change = {}) {
+  const before = String(change.before || '').trim() || '∅';
+  const after = String(change.after || '').trim() || '∅';
+  const type = change.change_type || change.type || 'replacement';
+  return `${type}: ${before} → ${after}`;
+}
+
+export function summarizeVersionHistory(versions = []) {
+  const sorted = [...(versions || [])].sort((a, b) => Number(b.version_number || 0) - Number(a.version_number || 0));
+  return {
+    latest: sorted[0] || null,
+    count: sorted.length,
+    named: sorted.filter((version) => version.name || (version.change_note && version.change_note !== 'Autosave')).length,
+    restorable: sorted.filter((version) => version.id).length,
+  };
+}
+
 export function buildVirtualizedDocumentWindow(documents = [], scrollTop = 0, rowHeight = 72, viewportHeight = 720) {
   const safeRowHeight = Math.max(24, rowHeight);
   const start = Math.max(0, Math.floor(scrollTop / safeRowHeight) - 5);

@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, FileText, Heart, History, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
-import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, PROFESSIONAL_TEMPLATE_CATALOG, buildMergeFieldChip, buildProfessionalTemplateDraft, documentApi, documentStats, exportDocumentUrl, filterProfessionalTemplates, makeDocumentDownloadHeaders, summarizeDocument, validateMergeFields } from '../documents/model';
+import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, PROFESSIONAL_TEMPLATE_CATALOG, buildMergeFieldChip, buildProfessionalTemplateDraft, buildTrackChangePreview, documentApi, documentStats, exportDocumentUrl, filterProfessionalTemplates, groupReviewThreads, makeDocumentDownloadHeaders, normalizeReviewAction, summarizeDocument, summarizeVersionHistory, validateMergeFields } from '../documents/model';
 
 import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
 import PaginatedDocumentWorkspace from "../components/documentstudio/PaginatedDocumentWorkspace";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
-import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, applyFindReplace, buildAdvancedTableHtml, buildExportLayoutPayload, buildImageFigureHtml, extractDocumentImages, extractDocumentOutline, findReplacePreview, normalizeImageAsset, normalizePageLayout, pageDimensions, spellCheckFoundation, summarizeTables } from "../components/documentstudio/editorModel";
+import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, applyFindReplace, buildAdvancedTableHtml, buildExportLayoutPayload, buildImageFigureHtml, documentAccessibilityAudit, documentPerformanceAudit, extractDocumentImages, extractDocumentOutline, findReplacePreview, normalizeImageAsset, normalizePageLayout, pageDimensions, spellCheckFoundation, summarizeTables } from "../components/documentstudio/editorModel";
 import {
   DOCUMENT_PROFILE_IDS,
   getDocumentProfileOptions,
@@ -109,6 +109,7 @@ export default function DocumentStudio() {
   const [reviewState, setReviewState] = useState({ comments: [], markers: [], open_count: 0, resolved_count: 0, status: 'draft' });
   const [trackState, setTrackState] = useState({ changes: [], pending_count: 0, accepted_count: 0, rejected_count: 0 });
   const [reviewDraft, setReviewDraft] = useState({ kind: 'comment', body: '', suggestion: '' });
+  const [reviewMode, setReviewMode] = useState('editing');
   const [history, setHistory] = useState({ past: [], future: [] });
   const editorApiRef = useRef(null);
   const editorElementRef = useRef(null);
@@ -196,6 +197,10 @@ export default function DocumentStudio() {
   const documentOutline = useMemo(() => extractDocumentOutline(editorHtml), [editorHtml]);
   const findPreview = useMemo(() => findReplacePreview(editorHtml, findReplace.find), [editorHtml, findReplace.find]);
   const spelling = useMemo(() => spellCheckFoundation(editorHtml, [profile?.company_name, profile?.jurisdiction].filter(Boolean).join(' ').split(/\s+/)), [editorHtml, profile?.company_name, profile?.jurisdiction]);
+  const reviewThreads = useMemo(() => groupReviewThreads(reviewState.comments || []), [reviewState.comments]);
+  const versionSummary = useMemo(() => summarizeVersionHistory(versions), [versions]);
+  const accessibility = useMemo(() => documentAccessibilityAudit(editorHtml, normalizedPageLayout), [editorHtml, normalizedPageLayout]);
+  const performance = useMemo(() => documentPerformanceAudit(editorHtml, pageFlow), [editorHtml, pageFlow]);
 
   function updatePageLayout(mutator) {
     setPageLayout((current) => normalizePageLayout(typeof mutator === 'function' ? mutator(current) : mutator));
@@ -438,6 +443,7 @@ export default function DocumentStudio() {
   }
 
   function onEditorChange(nextHtml) {
+    if (reviewMode === 'viewing') return;
     if (nextHtml !== editorHtml) {
       setEditorHtml(nextHtml);
     }
@@ -875,7 +881,7 @@ export default function DocumentStudio() {
   async function reviewItemAction(commentId, action) {
     if (!selected) return;
     try {
-      const payload = await documentApi.reviewAction(selected.id, commentId, { action });
+      const payload = await documentApi.reviewAction(selected.id, commentId, { action: normalizeReviewAction(action) });
       setReviewState(payload.review || reviewState);
       toast.success(`Review item ${action}.`);
     } catch (error) {
@@ -915,6 +921,11 @@ export default function DocumentStudio() {
     } catch (error) {
       toast.error(error.message || 'Track change action failed.');
     }
+  }
+
+  async function compareWithLatestVersion() {
+    if (!selected || !versionSummary.latest) return;
+    setCompareResult(await documentApi.versionDiff(selected.id, versionSummary.latest.id));
   }
 
   async function toggleFavorite(document) {
@@ -1213,8 +1224,9 @@ export default function DocumentStudio() {
           </Panel>
 
           <Panel title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>
-            <div className="premium-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur">
+            <div className="premium-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur" role="toolbar" aria-label="Document editing toolbar">
               <div className="flex flex-wrap items-center gap-2">
+                <select className="field max-w-[130px] py-2" aria-label="Review mode" value={reviewMode} onChange={(e) => setReviewMode(e.target.value)}>{['editing', 'reviewing', 'viewing'].map((mode) => <option key={mode}>{mode}</option>)}</select>
                 <select className="field max-w-[110px] py-2" value={normalizedPageLayout.size} onChange={(e) => updatePageLayout((current) => ({ ...current, size: e.target.value }))}>{['A4', 'Letter'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[130px] py-2" value={normalizedPageLayout.orientation} onChange={(e) => updatePageLayout((current) => ({ ...current, orientation: e.target.value }))}>{['portrait', 'landscape'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[140px] py-2" onChange={(e) => format('fontName', e.target.value)} defaultValue="Inter">{['Inter', 'Georgia', 'Times New Roman', 'Arial', 'Calibri'].map((x) => <option key={x}>{x}</option>)}</select>
@@ -1336,7 +1348,7 @@ export default function DocumentStudio() {
                       ref={editorApiRef}
                       html={editorHtml || '<h1>Start typing your document</h1><p>Use the toolbar to format content.</p>'}
                       onHtmlChange={onEditorChange}
-                      disabled={busy || !selected}
+                      disabled={busy || !selected || reviewMode === 'viewing'}
                       onEditorReady={setLexicalEditor}
                     />
                   </div>
@@ -1582,7 +1594,7 @@ export default function DocumentStudio() {
 
           <Panel title="Review Sidebar" icon={History}>
             <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
-              <div className="flex items-center justify-between"><b className="text-white">Comments & Suggestions</b><span>{reviewState.open_count || 0} open · {reviewState.resolved_count || 0} resolved</span></div>
+              <div className="flex items-center justify-between"><b className="text-white">Comments & Suggestions</b><span>{reviewState.open_count || 0} open · {reviewState.resolved_count || 0} resolved · {reviewMode}</span></div>
               <select className="field py-2" value={reviewDraft.kind} onChange={(e) => setReviewDraft((current) => ({ ...current, kind: e.target.value }))}>{['comment', 'suggestion'].map((kind) => <option key={kind}>{kind}</option>)}</select>
               <textarea className="field min-h-[70px]" value={reviewDraft.body} onChange={(e) => setReviewDraft((current) => ({ ...current, body: e.target.value }))} placeholder="Review comment or suggestion rationale" />
               <input className="field" value={reviewDraft.suggestion} onChange={(e) => setReviewDraft((current) => ({ ...current, suggestion: e.target.value }))} placeholder="Replacement text for suggestions / tracked changes" />
@@ -1592,8 +1604,8 @@ export default function DocumentStudio() {
                 <button className="btn secondary" disabled={!selected || busy} onClick={() => loadReviewWorkspace()}>Refresh review</button>
               </div>
               <div className="max-h-56 overflow-auto space-y-2 pr-1">
-                {(reviewState.comments || []).length === 0 && <div>No backend review comments yet.</div>}
-                {(reviewState.comments || []).slice(0, 12).map((comment) => <div key={comment.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-white/80">{comment.kind} · {comment.status}</div><div className="mt-1">{comment.body}</div><div className="mt-2 flex flex-wrap gap-1">{['resolve', 'reopen', 'accept', 'reject'].map((action) => <button key={action} className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => reviewItemAction(comment.id, action)}>{action}</button>)}</div></div>)}
+                {reviewThreads.length === 0 && <div>No backend review comments yet.</div>}
+                {reviewThreads.slice(0, 12).map((thread) => <div key={thread.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-white/80">{thread.root.kind} · {thread.root.status} · {thread.replies.length} replies</div><div className="mt-1">{thread.root.body}</div>{thread.root.suggestion?.replacement || thread.root.suggestion?.after ? <div className="mt-1 rounded-lg border border-gold/20 bg-gold/10 p-2 text-gold">Suggestion: {thread.root.suggestion.replacement || thread.root.suggestion.after}</div> : null}<div className="mt-2 flex flex-wrap gap-1">{['resolve', 'reopen', 'accept', 'reject'].map((action) => <button key={action} className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => reviewItemAction(thread.root.id, action)}>{action}</button>)}</div></div>)}
               </div>
             </div>
             <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
@@ -1601,8 +1613,13 @@ export default function DocumentStudio() {
               <div className="mb-2 flex gap-2"><button className="btn secondary" disabled={!selected || busy || !(trackState.changes || []).length} onClick={() => trackChangeAction('accept')}>Accept all</button><button className="btn secondary" disabled={!selected || busy || !(trackState.changes || []).length} onClick={() => trackChangeAction('reject')}>Reject all</button></div>
               <div className="max-h-56 overflow-auto space-y-2 pr-1">
                 {(trackState.changes || []).length === 0 && <div>No tracked changes recorded.</div>}
-                {(trackState.changes || []).slice(0, 12).map((change) => <div key={change.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-white/80">{change.change_type} · {change.status}</div><div className="mt-1 line-clamp-2">{change.before || '∅'} → {change.after || '∅'}</div><div className="mt-2 flex gap-1"><button className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => trackChangeAction('accept', [change.id])}>accept</button><button className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => trackChangeAction('reject', [change.id])}>reject</button></div></div>)}
+                {(trackState.changes || []).slice(0, 12).map((change) => <div key={change.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-white/80">{change.change_type || change.type} · {change.status}</div><div className="mt-1 line-clamp-2">{buildTrackChangePreview(change)}</div><div className="mt-2 flex gap-1"><button className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => trackChangeAction('accept', [change.id])}>accept</button><button className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => trackChangeAction('reject', [change.id])}>reject</button></div></div>)}
               </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <b className="text-white">Accessibility & Performance</b>
+              <div className="mt-2 grid grid-cols-2 gap-2"><span>A11y score: {accessibility.score}</span><span>Words: {performance.words}</span><span>Images: {performance.imageCount}</span><span>Payload: {Math.round(performance.estimatedBytes / 1024)} KB</span></div>
+              <div className="mt-2 space-y-1">{[...accessibility.issues.map((issue) => issue.message), ...performance.warnings].slice(0, 6).map((message) => <div key={message} className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-amber-100">{message}</div>)}</div>
             </div>
           </Panel>
 
@@ -1634,7 +1651,9 @@ export default function DocumentStudio() {
             <div className="grid grid-cols-3 gap-2"><button className="btn secondary" disabled={!selected} onClick={() => window.print()}>Εκτύπωση</button><button className="btn secondary" disabled={!selected} onClick={() => selected && window.open(`mailto:?subject=${encodeURIComponent(selected.title)}&body=${encodeURIComponent('LUMINA document ready for review.')}`)}>Αποστολή email</button><button className="btn secondary" disabled={!selected} onClick={() => navigator.clipboard?.writeText(documentApi.previewUrl(selected.id)).then(() => toast.success('Ο σύνδεσμος κοινοποίησης αντιγράφηκε.'))}>Κοινοποίηση</button></div>
             <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => selected && toggleFavorite(selected)}><Heart className="h-4 w-4" />{selected?.favorite ? 'Αφαίρεση από αγαπημένα' : 'Προσθήκη στα αγαπημένα'}</button>
             <button className="btn secondary disabled:opacity-50" disabled={!selected || documents.length < 2 || busy} onClick={compareWithFirstOther}>Παράλληλη σύγκριση</button>
+            <button className="btn secondary disabled:opacity-50" disabled={!selected || !versionSummary.latest || busy} onClick={compareWithLatestVersion}>Compare latest version</button>
             {compareResult && <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-xs"><div>Insertions: {compareResult.insertions.slice(0, 12).join(', ')}</div><div>Deletions: {compareResult.deletions.slice(0, 12).join(', ')}</div><div>Formatting: {JSON.stringify(compareResult.formatting_changes)}</div></div>}
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60"><b className="text-white">Version History</b><div>Versions: {versionSummary.count} · Named: {versionSummary.named} · Restorable: {versionSummary.restorable}</div><div>Latest: {versionSummary.latest?.change_note || 'None loaded'}</div></div>
             <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
               <div className="mb-2 font-medium text-white">Activity Timeline</div>
               {activity.length === 0 && <div>No activity loaded.</div>}

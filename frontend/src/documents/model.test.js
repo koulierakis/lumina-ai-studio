@@ -2,15 +2,19 @@ import {
   PROFESSIONAL_TEMPLATE_CATALOG,
   buildMergeFieldChip,
   buildProfessionalTemplateDraft,
+  buildTrackChangePreview,
   buildVirtualizedDocumentWindow,
   documentApi,
   documentStats,
   extractMergeFields,
   filterProfessionalTemplates,
   flattenMergeVariables,
+  groupReviewThreads,
+  normalizeReviewAction,
   normalizeDiffRows,
   summarizeDocument,
   summarizeReviewState,
+  summarizeVersionHistory,
   validateMergeFields,
 } from './model';
 
@@ -69,6 +73,26 @@ describe('Document Studio model helpers', () => {
     expect(summary.reviewStatus).toBe('changes_requested');
     expect(summary.pendingChanges).toBe(3);
     expect(summary.locked).toBe(true);
+  });
+
+  test('normalizes review actions, groups threads and summarizes versions', () => {
+    const threads = groupReviewThreads([
+      { id: 'c1', thread_id: 't1', kind: 'suggestion', status: 'open', body: 'Replace term', updated_at: '2026-08-03T10:00:00Z' },
+      { id: 'c2', thread_id: 't1', parent_id: 'c1', status: 'resolved', body: 'Done', created_at: '2026-08-03T10:01:00Z' },
+      { id: 'c3', thread_id: 't2', status: 'accepted', body: 'Accepted', updated_at: '2026-08-03T11:00:00Z' },
+    ]);
+    const summary = summarizeVersionHistory([
+      { id: 'v1', version_number: 1, change_note: 'Autosave' },
+      { id: 'v2', version_number: 2, change_note: 'Manual editor save' },
+    ]);
+
+    expect(normalizeReviewAction('accept')).toBe('accept-suggestion');
+    expect(normalizeReviewAction('reject')).toBe('reject-suggestion');
+    expect(threads[0].id).toBe('t2');
+    expect(threads.find((thread) => thread.id === 't1').replies).toHaveLength(1);
+    expect(buildTrackChangePreview({ type: 'replacement', before: 'Beta', after: 'Delta' })).toBe('replacement: Beta → Delta');
+    expect(summary.latest.id).toBe('v2');
+    expect(summary.named).toBe(1);
   });
 
   test('virtualized document windows and diff rows support large libraries', () => {

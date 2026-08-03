@@ -238,6 +238,63 @@ export function spellCheckFoundation(html = '', customWords = []) {
   return { checked: words.length, unknown: unknown.slice(0, 50), language: 'en' };
 }
 
+export function documentAccessibilityAudit(html = '', layout = {}) {
+  const source = String(html || '');
+  const images = [...source.matchAll(/<img\b([^>]*)>/gi)];
+  const headings = extractDocumentOutline(source);
+  const tables = summarizeTables(source);
+  const issues = [];
+  images.forEach((match, index) => {
+    if (!/\salt=("[^"]+"|'[^']+'|[^\s>]+)/i.test(match[1] || '')) {
+      issues.push({ severity: 'warning', code: 'image-alt', message: `Image ${index + 1} is missing alternative text.` });
+    }
+  });
+  if (!headings.length) issues.push({ severity: 'warning', code: 'headings', message: 'Add headings for screen-reader navigation.' });
+  headings.reduce((previous, heading) => {
+    if (previous && heading.level - previous.level > 1) {
+      issues.push({ severity: 'warning', code: 'heading-order', message: `Heading ${heading.text} skips a level.` });
+    }
+    return heading;
+  }, null);
+  if (tables.some((table) => table.rows > 1 && table.columns > 1) && !/<th\b/i.test(source)) {
+    issues.push({ severity: 'warning', code: 'table-headers', message: 'Data tables should include header cells.' });
+  }
+  const normalized = normalizePageLayout(layout);
+  if (!normalized.header.enabled && !normalized.footer.enabled) {
+    issues.push({ severity: 'info', code: 'page-regions', message: 'Enable headers or footers for exported document context.' });
+  }
+  return {
+    score: Math.max(0, 100 - issues.filter((issue) => issue.severity === 'warning').length * 12 - issues.filter((issue) => issue.severity === 'info').length * 4),
+    issues,
+    imageCount: images.length,
+    headingCount: headings.length,
+    tableCount: tables.length,
+  };
+}
+
+export function documentPerformanceAudit(html = '', pageFlow = {}) {
+  const source = String(html || '');
+  const text = source.replace(/<[^>]+>/g, ' ');
+  const imageCount = (source.match(/<img\b/gi) || []).length;
+  const tableCount = (source.match(/<table\b/gi) || []).length;
+  const heavyTables = summarizeTables(source).filter((table) => table.rows * table.columns > 400).length;
+  const estimatedBytes = new Blob([source]).size;
+  const warnings = [];
+  if (estimatedBytes > 750_000) warnings.push('Large HTML payload may slow autosave and export.');
+  if (imageCount > 40) warnings.push('Many embedded images can increase PDF/DOCX export time.');
+  if (heavyTables) warnings.push('Very large tables should be split across sections.');
+  if ((pageFlow.pageCount || 1) > 120) warnings.push('Documents over 120 pages may need split-package export.');
+  return {
+    estimatedBytes,
+    words: text.trim() ? text.trim().split(/\s+/).length : 0,
+    imageCount,
+    tableCount,
+    heavyTables,
+    pageCount: pageFlow.pageCount || 1,
+    warnings,
+  };
+}
+
 export class PageBreakNode extends ElementNode {
   static getType() {
     return 'page-break';

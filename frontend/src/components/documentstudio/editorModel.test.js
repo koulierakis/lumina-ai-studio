@@ -7,6 +7,8 @@ import {
   buildExportLayoutPayload,
   buildImageFigureHtml,
   createPageBreakNode,
+  documentAccessibilityAudit,
+  documentPerformanceAudit,
   extractDocumentOutline,
   extractDocumentImages,
   findReplacePreview,
@@ -195,5 +197,16 @@ describe('document studio page layout model', () => {
     expect(findReplacePreview(html, 'corporate').count).toBe(1);
     expect(applyFindReplace(html, 'teh', 'the')).toContain('the typo');
     expect(spellCheckFoundation(html).unknown).toContain('teh');
+  });
+
+  it('audits accessibility and performance for production readiness', () => {
+    const html = '<h1>Title</h1><h3>Skipped</h3><p>Body</p><img src="https://example.com/logo.png"><table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>';
+    const accessibility = documentAccessibilityAudit(html, { header: { enabled: false }, footer: { enabled: false } });
+    const performance = documentPerformanceAudit(html, { pageCount: 2 });
+
+    expect(accessibility.score).toBeLessThan(100);
+    expect(accessibility.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(['image-alt', 'heading-order', 'table-headers']));
+    expect(performance.imageCount).toBe(1);
+    expect(performance.pageCount).toBe(2);
   });
 });

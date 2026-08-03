@@ -1,6 +1,12 @@
 # Lumina AI Desktop Studio — Implementation Status
 
 ## Completed in this revision
+- Document Studio final review polish: review mode now has explicit editing,
+  reviewing and read-only viewing states; review actions normalize to the
+  backend accept/reject suggestion contract; comments are grouped into threaded
+  review conversations; tracked changes show deterministic previews; version
+  history exposes latest/named/restorable summaries and latest-version compare;
+  and the sidebar now includes production accessibility and performance audits.
 - Document Studio production editing continuation: Images and Logo Engine now
   supports safe uploaded/URL/brand assets, captions, accessibility metadata,
   logo/signature/seal insertion and image inventory; Advanced Tables now provide
@@ -136,6 +142,10 @@
 - Unit tests for fallback and identity capability selection.
 
 ## Validation
+- Document Studio final review polish validation: frontend document model/editor
+  model/DocumentRichEditor targeted tests passed with 39 tests, backend Document
+  Studio unit suite passed with 23 tests from the backend root, Ruff passed for
+  Document Studio backend files/tests, and frontend production build passed.
 - Document Studio production editing continuation validation: frontend document
   model/editor model tests passed, DocumentRichEditor regression tests passed,
   and frontend production build passed.
