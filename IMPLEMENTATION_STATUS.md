@@ -42,6 +42,11 @@
   paragraphs, lists, logos, headers, footers, page numbers, watermarks, tables,
   signatures and page breaks, print-focused styling, and relaxed manual save
   validation for practical drafting.
+- Document Studio editor engine foundation: the page editor now uses a Lexical
+  structured editor bridge instead of browser `execCommand`, with HTML import for
+  existing documents, sanitized paste/HTML insertion, Lexical history undo/redo,
+  formatting command adapters, and save/autosave compatibility against the
+  existing backend contracts.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -133,6 +138,9 @@
   production build passed.
 - Document Studio core product polish validation: Ruff passed, backend unit suite
   19 passed, frontend model tests 6 passed, and frontend production build
+  passed.
+- Document Studio editor engine validation: Ruff passed, backend unit suite 19
+  passed, frontend model/editor tests 7 passed, and frontend production build
   passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness

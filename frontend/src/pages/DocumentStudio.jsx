@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { Download, FileText, Heart, History, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
 import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, documentApi, documentStats, exportDocumentUrl, makeDocumentDownloadHeaders, summarizeDocument } from '../documents/model';
 
+import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
 import {
   DOCUMENT_PROFILE_IDS,
@@ -67,7 +68,8 @@ export default function DocumentStudio() {
   });
   const [comments, setComments] = useState([]);
   const [history, setHistory] = useState({ past: [], future: [] });
-  const editorRef = useRef(null);
+  const editorApiRef = useRef(null);
+  const lastSavedHtmlRef = useRef('');
 
   const categories = useMemo(() => [...new Set(templates.map((item) => item.category))], [templates]);
 
@@ -283,9 +285,14 @@ export default function DocumentStudio() {
     setBusy(true);
     setStatusText(autosave ? 'Autosaving…' : 'Saving version…');
     try {
+    if (autosave && editorHtml === lastSavedHtmlRef.current) {
+      setStatusText('Ready');
+      return;
+    }
     const contentText = editorHtml.replace(/<[^>]+>/g, ' ');
     const updated = await documentApi.update(selected.id, { content_html: editorHtml, content_text: contentText, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
     setSelected(updated);
+    lastSavedHtmlRef.current = updated.content_html || editorHtml;
     await refreshDocuments();
     await loadVersions(updated);
     toast.success(autosave ? 'Autosaved.' : 'Document saved with version history.');
@@ -337,26 +344,30 @@ export default function DocumentStudio() {
     setSelected(updated); setEditorHtml(updated.content_html || ''); await loadVersions(updated); await refreshDocuments(); toast.success('Clause inserted and versioned.');
   }
 
-  function syncEditorHistory(nextHtml) {
-    setHistory((previous) => ({ past: [...previous.past.slice(-80), editorHtml], future: [] }));
-    setEditorHtml(nextHtml);
-  }
-
-  function onEditorInput() {
-    const nextHtml = editorRef.current?.innerHTML || '';
-    syncEditorHistory(nextHtml);
+  function onEditorChange(nextHtml) {
+    if (nextHtml !== editorHtml) {
+      setEditorHtml(nextHtml);
+    }
   }
 
   function format(command, value = null) {
-    editorRef.current?.focus();
-    document.execCommand(command, false, value);
-    onEditorInput();
+    const editor = editorApiRef.current;
+    if (!editor) return;
+    const textFormats = { bold: 'bold', italic: 'italic', underline: 'underline' };
+    const alignments = { justifyLeft: 'left', justifyCenter: 'center', justifyRight: 'right' };
+    if (textFormats[command]) editor.formatText(textFormats[command]);
+    else if (alignments[command]) editor.formatElement(alignments[command]);
+    else if (command === 'insertUnorderedList') editor.insertList(false);
+    else if (command === 'insertOrderedList') editor.insertList(true);
+    else if (command === 'indent') editor.indent();
+    else if (command === 'outdent') editor.outdent();
+    else if (command === 'fontName') editor.setInlineStyle({ 'font-family': value });
+    else if (command === 'fontSize') editor.setInlineStyle({ 'font-size': `${Number(value || 3) * 4}px` });
+    else if (command === 'foreColor') editor.setInlineStyle({ color: value });
   }
 
   function insertHtml(markup) {
-    editorRef.current?.focus();
-    document.execCommand('insertHTML', false, markup);
-    onEditorInput();
+    editorApiRef.current?.insertHtml(markup);
   }
 
   function insertPremiumBlock(kind) {
@@ -447,23 +458,11 @@ export default function DocumentStudio() {
   }
 
   function undoEditor() {
-    setHistory((previous) => {
-      const past = [...previous.past];
-      const last = past.pop();
-      if (!last) return previous;
-      setEditorHtml(last);
-      return { past, future: [editorHtml, ...previous.future].slice(0, 80) };
-    });
+    editorApiRef.current?.undo();
   }
 
   function redoEditor() {
-    setHistory((previous) => {
-      const future = [...previous.future];
-      const next = future.shift();
-      if (!next) return previous;
-      setEditorHtml(next);
-      return { past: [...previous.past, editorHtml].slice(-80), future };
-    });
+    editorApiRef.current?.redo();
   }
 
   function handleDrop(event) {
@@ -997,7 +996,12 @@ export default function DocumentStudio() {
                 >
                   {profile?.company_name || 'Company'} · {selected?.title || 'Untitled'} · Page 1
                 </header>
-                <article ref={editorRef} contentEditable={!busy && !!selected} suppressContentEditableWarning className="prose prose-neutral max-w-none min-h-[760px] outline-none" onInput={onEditorInput} dangerouslySetInnerHTML={{ __html: editorHtml || '<h1>Start typing your document</h1><p>Use the toolbar to format content.</p>' }} />
+                <DocumentRichEditor
+                  ref={editorApiRef}
+                  html={editorHtml || '<h1>Start typing your document</h1><p>Use the toolbar to format content.</p>'}
+                  onHtmlChange={onEditorChange}
+                  disabled={busy || !selected}
+                />
                 <footer
                   contentEditable
                   suppressContentEditableWarning
