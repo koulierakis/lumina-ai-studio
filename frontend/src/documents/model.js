@@ -8,6 +8,69 @@ export const DOCUMENT_TYPES = [
 export const DOCUMENT_CREATION_MODES = ['prompt', 'template', 'uploaded', 'rewrite', 'merge', 'continue', 'translate', 'improve', 'summarize', 'expand', 'style'];
 export const EXPORT_FORMATS = ['pdf', 'docx', 'html', 'markdown', 'rtf', 'txt'];
 
+export const PROFESSIONAL_TEMPLATE_CATALOG = [
+  { id: 'board-resolution-pro', name: 'Board Resolution Pack', category: 'Corporate Governance', jurisdiction: 'Common Law', tags: ['resolution', 'board', 'governance'], blocks: ['cover', 'recitals', 'resolutions', 'certification', 'signature'], tone: 'Formal corporate governance with certification block' },
+  { id: 'bank-kyc-pro', name: 'Bank KYC Submission', category: 'Banking', jurisdiction: 'CY/EU', tags: ['banking', 'kyc', 'aml'], blocks: ['letterhead', 'company-profile', 'ubo', 'source-of-funds', 'attachments'], tone: 'Institutional banking compliance package' },
+  { id: 'service-agreement-pro', name: 'Master Services Agreement', category: 'Commercial Agreements', jurisdiction: 'International', tags: ['agreement', 'services', 'commercial'], blocks: ['definitions', 'scope', 'fees', 'sla', 'liability', 'termination'], tone: 'Executive commercial contract with balanced risk allocation' },
+  { id: 'executive-proposal-pro', name: 'Executive Proposal', category: 'Proposal', jurisdiction: 'Global', tags: ['proposal', 'pricing', 'consulting'], blocks: ['cover', 'summary', 'scope', 'timeline', 'pricing', 'terms'], tone: 'Premium consulting presentation converted to document form' },
+  { id: 'power-attorney-pro', name: 'Power of Attorney', category: 'Legal Documents', jurisdiction: 'International', tags: ['poa', 'authority', 'notary'], blocks: ['grant', 'powers', 'limitations', 'duration', 'notary', 'apostille'], tone: 'Notarial legal authority instrument' },
+  { id: 'invoice-proforma-pro', name: 'Proforma Invoice', category: 'Invoices', jurisdiction: 'Global', tags: ['invoice', 'proforma', 'trade'], blocks: ['seller', 'buyer', 'line-items', 'tax', 'payment', 'bank'], tone: 'Clean finance-ready invoice with bank details' },
+];
+
+export function filterProfessionalTemplates(templates = PROFESSIONAL_TEMPLATE_CATALOG, filters = {}) {
+  const q = String(filters.q || '').trim().toLowerCase();
+  const category = String(filters.category || '').trim().toLowerCase();
+  return templates.filter((template) => {
+    const haystack = [template.name, template.category, template.jurisdiction, template.tone, ...(template.tags || []), ...(template.blocks || [])].join(' ').toLowerCase();
+    return (!q || haystack.includes(q)) && (!category || String(template.category || '').toLowerCase() === category);
+  });
+}
+
+export function buildProfessionalTemplateDraft(template = {}) {
+  const blocks = template.blocks || [];
+  const fields = blocks.map((block) => `<section><h2>${block.replaceAll('-', ' ')}</h2><p>{{${block.replaceAll('-', '_')}}}</p></section>`).join('');
+  return {
+    name: template.name || 'Professional Template',
+    category: template.category || 'Corporate',
+    tags: [...new Set([...(template.tags || []), 'professional', 'premium'])],
+    content_html: `<article><h1>{{title}}</h1><p>{{company.name}}</p><p>${template.tone || 'Professional document template'}</p>${fields}<section><h2>Signature</h2><p>{{signer}}</p></section></article>`,
+    merge_schema: { required: ['title', 'company.name'], blocks },
+    metadata: { catalog_template_id: template.id, jurisdiction: template.jurisdiction, professional: true },
+  };
+}
+
+export function extractMergeFields(templateHtml = '') {
+  const tokens = [...String(templateHtml || '').matchAll(/{{\s*([^#\/][^}|\s]*)(?:\|[^}]*)?\s*}}/g)]
+    .map((match) => match[1].trim())
+    .filter(Boolean);
+  return [...new Set(tokens)].sort();
+}
+
+export function flattenMergeVariables(value = {}, prefix = '') {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.entries(value).reduce((acc, [key, child]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (child && typeof child === 'object' && !Array.isArray(child)) {
+      return { ...acc, ...flattenMergeVariables(child, path) };
+    }
+    acc[path] = child;
+    return acc;
+  }, {});
+}
+
+export function validateMergeFields(templateHtml = '', variables = {}, requiredFields = []) {
+  const fields = extractMergeFields(templateHtml);
+  const flattened = flattenMergeVariables(variables);
+  const required = [...new Set([...(requiredFields || []), ...fields])];
+  const missing = required.filter((field) => flattened[field] === undefined || flattened[field] === null || flattened[field] === '');
+  return { valid: missing.length === 0, fields, required, missing, available: Object.keys(flattened).sort() };
+}
+
+export function buildMergeFieldChip(field = '') {
+  const safe = String(field || '').trim().replace(/[^\w.]/g, '');
+  return safe ? `{{${safe}}}` : '';
+}
+
 export const DEFAULT_COMPANY_PROFILE = {
   company_name: 'Lumina Corporate Holdings',
   primary_color: '#B9985A',

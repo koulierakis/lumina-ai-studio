@@ -2,16 +2,27 @@ import {
   DEFAULT_PAGE_LAYOUT,
   PAGE_NUMBER_POSITIONS,
   PageBreakNode,
+  applyFindReplace,
+  buildAdvancedTableHtml,
   buildExportLayoutPayload,
+  buildImageFigureHtml,
   createPageBreakNode,
+  extractDocumentOutline,
+  extractDocumentImages,
+  findReplacePreview,
   formatPageNumber,
   getPageRegionText,
+  normalizeImageAsset,
   normalizeLegacyPageBreaks,
   normalizePageLayout,
+  normalizeTableModel,
   pageDimensions,
   pageContentBox,
   paginateDocumentHtml,
   renderLayoutText,
+  sanitizeEditorHtml,
+  spellCheckFoundation,
+  summarizeTables,
 } from './editorModel';
 
 describe('document studio page layout model', () => {
@@ -129,5 +140,60 @@ describe('document studio page layout model', () => {
     const html = '<div style="break-after:page;page-break-after:always"></div><p>Legacy content</p>';
     const normalized = normalizeLegacyPageBreaks(html);
     expect(normalized).toContain('data-lumina-page-break="true"');
+  });
+
+  it('normalizes image assets for document-safe insertion', () => {
+    const asset = normalizeImageAsset({ src: 'https://example.com/logo.png', role: 'logo', width: 200, opacity: 2, align: 'unknown' });
+
+    expect(asset.role).toBe('logo');
+    expect(asset.width).toBe(100);
+    expect(asset.opacity).toBe(5);
+    expect(asset.align).toBe('center');
+  });
+
+  it('builds accessible, print-stable image figure markup', () => {
+    const html = buildImageFigureHtml({ src: 'data:image/png;base64,AAAA', alt: 'Logo', caption: 'Company', role: 'logo', align: 'left', width: 24 });
+
+    expect(html).toContain('data-lumina-image="true"');
+    expect(html).toContain('alt="Logo"');
+    expect(html).toContain('break-inside:avoid');
+    expect(html).toContain('Company');
+  });
+
+  it('rejects unsafe image sources during sanitization and extraction', () => {
+    const dirty = '<p>Test</p><img src="file:///secret.png" alt="bad"><img src="https://example.com/safe.webp" alt="safe">';
+
+    expect(buildImageFigureHtml({ src: 'javascript:alert(1)' })).toBe('');
+    expect(sanitizeEditorHtml(dirty)).not.toContain('file:///secret.png');
+    expect(extractDocumentImages(dirty)).toHaveLength(1);
+  });
+
+  it('normalizes advanced table dimensions and style defaults', () => {
+    const table = normalizeTableModel({ rows: 500, columns: 99, headerRows: 400, style: 'bad', width: 4 });
+
+    expect(table.rows).toBe(100);
+    expect(table.columns).toBe(20);
+    expect(table.headerRows).toBe(100);
+    expect(table.style).toBe('executive');
+    expect(table.width).toBe(20);
+  });
+
+  it('builds print-ready advanced tables with repeatable headers', () => {
+    const html = buildAdvancedTableHtml({ rows: 4, columns: 3, caption: 'Risk matrix', style: 'matrix', firstColumn: true, totalRow: true });
+
+    expect(html).toContain('data-lumina-table="advanced"');
+    expect(html).toContain('<caption');
+    expect(html).toContain('table-header-group');
+    expect(html).toContain('scope="row"');
+    expect(summarizeTables(html)).toEqual([{ index: 1, advanced: true, rows: 4, columns: 3 }]);
+  });
+
+  it('extracts outlines, previews find-replace, and flags spelling candidates', () => {
+    const html = '<h1>Executive Summary</h1><p>The corporate contract has teh typo.</p><h2>Terms</h2>';
+
+    expect(extractDocumentOutline(html).map((item) => item.text)).toEqual(['Executive Summary', 'Terms']);
+    expect(findReplacePreview(html, 'corporate').count).toBe(1);
+    expect(applyFindReplace(html, 'teh', 'the')).toContain('the typo');
+    expect(spellCheckFoundation(html).unknown).toContain('teh');
   });
 });

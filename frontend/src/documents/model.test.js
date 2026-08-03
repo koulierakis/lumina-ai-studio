@@ -1,10 +1,17 @@
 import {
+  PROFESSIONAL_TEMPLATE_CATALOG,
+  buildMergeFieldChip,
+  buildProfessionalTemplateDraft,
   buildVirtualizedDocumentWindow,
   documentApi,
   documentStats,
+  extractMergeFields,
+  filterProfessionalTemplates,
+  flattenMergeVariables,
   normalizeDiffRows,
   summarizeDocument,
   summarizeReviewState,
+  validateMergeFields,
 } from './model';
 
 describe('Document Studio model helpers', () => {
@@ -72,5 +79,28 @@ describe('Document Studio model helpers', () => {
     expect(window.items.length).toBeLessThan(30);
     expect(window.start).toBe(5);
     expect(rows.map((row) => row.marker)).toEqual(['+', '~']);
+  });
+
+  test('professional template catalog can be filtered and converted to merge-ready drafts', () => {
+    const banking = filterProfessionalTemplates(PROFESSIONAL_TEMPLATE_CATALOG, { q: 'kyc', category: 'Banking' });
+    const draft = buildProfessionalTemplateDraft(banking[0]);
+
+    expect(banking).toHaveLength(1);
+    expect(draft.tags).toContain('professional');
+    expect(draft.content_html).toContain('{{title}}');
+    expect(draft.merge_schema.required).toContain('company.name');
+    expect(draft.metadata.professional).toBe(true);
+  });
+
+  test('variables and merge fields report missing data deterministically', () => {
+    const html = '<h1>{{title}}</h1><p>{{company.name}}</p><p>{{ signer }}</p>';
+    const variables = { title: 'Board Pack', company: { name: 'Lumina' } };
+    const diagnostics = validateMergeFields(html, variables, ['date']);
+
+    expect(extractMergeFields(html)).toEqual(['company.name', 'signer', 'title']);
+    expect(flattenMergeVariables(variables)).toEqual({ title: 'Board Pack', 'company.name': 'Lumina' });
+    expect(diagnostics.valid).toBe(false);
+    expect(diagnostics.missing).toEqual(['date', 'signer']);
+    expect(buildMergeFieldChip(' company.name! ')).toBe('{{company.name}}');
   });
 });

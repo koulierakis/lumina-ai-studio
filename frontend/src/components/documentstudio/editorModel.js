@@ -1,11 +1,241 @@
 import { ElementNode } from 'lexical';
 
+const SAFE_IMAGE_SRC_PATTERN = /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,|blob:)/i;
+
+function escapeHtml(value = '') {
+  return String(value ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 export function sanitizeEditorHtml(html = '') {
   return String(html || '')
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
     .replace(/\son\w+=("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-    .replace(/javascript:/gi, '');
+    .replace(/javascript:/gi, '')
+    .replace(/<img\b([^>]*)>/gi, (match, attributes = '') => {
+      const srcMatch = attributes.match(/\ssrc=("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+      const src = srcMatch?.[2] || srcMatch?.[3] || srcMatch?.[4] || '';
+      if (!SAFE_IMAGE_SRC_PATTERN.test(src)) return '';
+      return match;
+    });
+}
+
+export const IMAGE_WRAP_STYLES = ['inline', 'center', 'left', 'right', 'full-width'];
+export const IMAGE_SHAPES = ['square', 'rounded', 'circle', 'stamp'];
+export const IMAGE_ROLES = ['image', 'logo', 'signature', 'seal', 'watermark'];
+
+export const DEFAULT_IMAGE_ASSET = {
+  src: '',
+  alt: '',
+  caption: '',
+  width: 45,
+  align: 'center',
+  shape: 'rounded',
+  role: 'image',
+  opacity: 100,
+  border: true,
+  shadow: false,
+  link: '',
+};
+
+export function isSafeImageSource(src = '') {
+  return SAFE_IMAGE_SRC_PATTERN.test(String(src || '').trim());
+}
+
+export function normalizeImageAsset(asset = {}) {
+  const source = { ...DEFAULT_IMAGE_ASSET, ...(asset || {}) };
+  const role = IMAGE_ROLES.includes(source.role) ? source.role : DEFAULT_IMAGE_ASSET.role;
+  const align = IMAGE_WRAP_STYLES.includes(source.align) ? source.align : DEFAULT_IMAGE_ASSET.align;
+  const shape = IMAGE_SHAPES.includes(source.shape) ? source.shape : DEFAULT_IMAGE_ASSET.shape;
+  const defaultWidth = role === 'logo' ? 24 : role === 'signature' ? 32 : role === 'seal' ? 22 : DEFAULT_IMAGE_ASSET.width;
+  return {
+    ...source,
+    src: String(source.src || '').trim(),
+    alt: String(source.alt || role),
+    caption: String(source.caption || ''),
+    width: clampNumber(source.width, defaultWidth, 5, 100),
+    align,
+    shape,
+    role,
+    opacity: clampNumber(source.opacity, 100, 5, 100),
+    border: source.border !== false,
+    shadow: Boolean(source.shadow),
+    link: String(source.link || '').trim(),
+  };
+}
+
+function imageFigureStyle(asset) {
+  const base = ['margin:18px 0', 'break-inside:avoid', 'page-break-inside:avoid'];
+  if (asset.align === 'center') base.push('text-align:center');
+  if (asset.align === 'right') base.push('text-align:right');
+  if (asset.align === 'left') base.push('text-align:left');
+  if (asset.align === 'full-width') base.push('width:100%', 'text-align:center');
+  if (asset.align === 'inline') base.push('display:inline-block', 'vertical-align:middle', 'margin:4px 8px');
+  if (asset.role === 'watermark') base.push('position:absolute', 'inset:38% auto auto 12%', 'transform:rotate(-28deg)', 'z-index:0', 'pointer-events:none');
+  return base.join(';');
+}
+
+function imageElementStyle(asset) {
+  const width = asset.align === 'full-width' ? 100 : asset.width;
+  const base = [`width:${width}%`, 'max-width:100%', 'height:auto', 'object-fit:contain'];
+  if (asset.role === 'logo') base.push('max-height:42mm');
+  if (asset.role === 'signature') base.push('max-height:28mm');
+  if (asset.role === 'seal') base.push('max-height:32mm');
+  if (asset.shape === 'rounded') base.push('border-radius:14px');
+  if (asset.shape === 'circle') base.push('border-radius:9999px', 'aspect-ratio:1/1');
+  if (asset.shape === 'stamp') base.push('border-radius:9999px', 'padding:8px', 'background:#fff');
+  if (asset.border) base.push('border:1px solid #d1d5db');
+  if (asset.shadow) base.push('box-shadow:0 14px 35px rgba(17,24,39,.18)');
+  if (asset.opacity < 100) base.push(`opacity:${asset.opacity / 100}`);
+  return base.join(';');
+}
+
+export function buildImageFigureHtml(asset = {}) {
+  const normalized = normalizeImageAsset(asset);
+  if (!isSafeImageSource(normalized.src)) return '';
+  const image = `<img src="${escapeHtml(normalized.src)}" alt="${escapeHtml(normalized.alt)}" data-lumina-image-role="${escapeHtml(normalized.role)}" style="${imageElementStyle(normalized)}" />`;
+  const linkedImage = normalized.link && /^https?:\/\//i.test(normalized.link) ? `<a href="${escapeHtml(normalized.link)}">${image}</a>` : image;
+  const caption = normalized.caption ? `<figcaption style="margin-top:8px;font-size:11px;color:#6b7280;text-align:${normalized.align === 'right' ? 'right' : normalized.align === 'left' ? 'left' : 'center'}">${escapeHtml(normalized.caption)}</figcaption>` : '';
+  return `<figure data-lumina-image="true" data-lumina-image-role="${escapeHtml(normalized.role)}" style="${imageFigureStyle(normalized)}">${linkedImage}${caption}</figure>`;
+}
+
+export function extractDocumentImages(html = '') {
+  const matches = [...String(html || '').matchAll(/<img\b([^>]*)>/gi)];
+  return matches.map((match, index) => {
+    const attributes = match[1] || '';
+    const readAttr = (name) => {
+      const attrMatch = attributes.match(new RegExp(`\\s${name}=("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
+      return attrMatch?.[2] || attrMatch?.[3] || attrMatch?.[4] || '';
+    };
+    return normalizeImageAsset({
+      src: readAttr('src'),
+      alt: readAttr('alt') || `Image ${index + 1}`,
+      role: readAttr('data-lumina-image-role') || 'image',
+    });
+  }).filter((asset) => isSafeImageSource(asset.src));
+}
+
+export const DEFAULT_TABLE_MODEL = {
+  rows: 3,
+  columns: 3,
+  headerRows: 1,
+  caption: '',
+  style: 'executive',
+  width: 100,
+  repeatHeader: true,
+  bandedRows: true,
+  totalRow: false,
+  firstColumn: false,
+};
+
+export const TABLE_STYLES = ['executive', 'ledger', 'matrix', 'minimal'];
+
+export function normalizeTableModel(model = {}) {
+  const source = { ...DEFAULT_TABLE_MODEL, ...(model || {}) };
+  const rows = Math.round(clampNumber(source.rows, DEFAULT_TABLE_MODEL.rows, 1, 100));
+  const columns = Math.round(clampNumber(source.columns, DEFAULT_TABLE_MODEL.columns, 1, 20));
+  const headerRows = Math.round(clampNumber(source.headerRows, DEFAULT_TABLE_MODEL.headerRows, 0, rows));
+  return {
+    ...source,
+    rows,
+    columns,
+    headerRows,
+    caption: String(source.caption || ''),
+    style: TABLE_STYLES.includes(source.style) ? source.style : DEFAULT_TABLE_MODEL.style,
+    width: clampNumber(source.width, DEFAULT_TABLE_MODEL.width, 20, 100),
+    repeatHeader: source.repeatHeader !== false,
+    bandedRows: source.bandedRows !== false,
+    totalRow: Boolean(source.totalRow),
+    firstColumn: Boolean(source.firstColumn),
+  };
+}
+
+function tablePalette(style) {
+  const palettes = {
+    executive: { head: '#111827', headText: '#ffffff', border: '#d1d5db', band: '#f9fafb', total: '#f3f4f6' },
+    ledger: { head: '#1e3a8a', headText: '#ffffff', border: '#bfdbfe', band: '#eff6ff', total: '#dbeafe' },
+    matrix: { head: '#3f3f46', headText: '#ffffff', border: '#d4d4d8', band: '#fafafa', total: '#e4e4e7' },
+    minimal: { head: '#ffffff', headText: '#111827', border: '#e5e7eb', band: '#ffffff', total: '#f9fafb' },
+  };
+  return palettes[style] || palettes.executive;
+}
+
+export function buildAdvancedTableHtml(model = {}) {
+  const table = normalizeTableModel(model);
+  const palette = tablePalette(table.style);
+  const cellBase = `border:1px solid ${palette.border};padding:10px 12px;vertical-align:top;line-height:1.45`;
+  const caption = table.caption ? `<caption style="caption-side:top;text-align:left;font-weight:700;margin-bottom:8px;color:#111827">${escapeHtml(table.caption)}</caption>` : '';
+  const colgroup = `<colgroup>${Array.from({ length: table.columns }, () => `<col style="width:${100 / table.columns}%" />`).join('')}</colgroup>`;
+  const headerRows = Array.from({ length: table.headerRows }, (_, rowIndex) => `<tr>${Array.from({ length: table.columns }, (_, columnIndex) => `<th scope="col" style="${cellBase};background:${palette.head};color:${palette.headText};font-weight:700;text-align:left${table.firstColumn && columnIndex === 0 ? ';min-width:28mm' : ''}">Header ${rowIndex + 1}.${columnIndex + 1}</th>`).join('')}</tr>`).join('');
+  const bodyRowCount = Math.max(1, table.rows - table.headerRows);
+  const bodyRows = Array.from({ length: bodyRowCount }, (_, rowIndex) => {
+    const isTotal = table.totalRow && rowIndex === bodyRowCount - 1;
+    const background = isTotal ? palette.total : table.bandedRows && rowIndex % 2 === 1 ? palette.band : '#ffffff';
+    return `<tr>${Array.from({ length: table.columns }, (_, columnIndex) => {
+      const tag = table.firstColumn && columnIndex === 0 ? 'th scope="row"' : 'td';
+      const weight = isTotal || (table.firstColumn && columnIndex === 0) ? ';font-weight:700' : '';
+      return `<${tag} style="${cellBase};background:${background};color:#111827${weight}">${isTotal ? 'Total' : `Cell ${rowIndex + 1}.${columnIndex + 1}`}</${tag.split(' ')[0]}>`;
+    }).join('')}</tr>`;
+  }).join('');
+  const thead = headerRows ? `<thead style="display:${table.repeatHeader ? 'table-header-group' : 'table-row-group'}">${headerRows}</thead>` : '';
+  return `<table data-lumina-table="advanced" data-lumina-table-style="${escapeHtml(table.style)}" style="width:${table.width}%;border-collapse:collapse;margin:24px 0;font-size:13px;break-inside:auto;page-break-inside:auto">${caption}${colgroup}${thead}<tbody>${bodyRows}</tbody></table>`;
+}
+
+export function summarizeTables(html = '') {
+  return [...String(html || '').matchAll(/<table\b([\s\S]*?)<\/table>/gi)].map((match, index) => ({
+    index: index + 1,
+    advanced: /data-lumina-table="advanced"/i.test(match[0]),
+    rows: (match[0].match(/<tr\b/gi) || []).length,
+    columns: Math.max(...(match[0].match(/<tr\b[\s\S]*?<\/tr>/gi) || ['']).map((row) => (row.match(/<(td|th)\b/gi) || []).length), 0),
+  }));
+}
+
+export function extractDocumentOutline(html = '') {
+  return [...String(html || '').matchAll(/<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi)].map((match, index) => {
+    const text = match[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || `Heading ${index + 1}`;
+    return { id: `outline-${index + 1}`, level: Number(match[1]), text, index };
+  });
+}
+
+export function findReplacePreview(html = '', query = '') {
+  const needle = String(query || '').trim();
+  if (!needle) return { count: 0, snippets: [] };
+  const text = String(html || '').replace(/<[^>]+>/g, ' ');
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const regex = new RegExp(escaped, 'gi');
+  const matches = [...text.matchAll(regex)];
+  return {
+    count: matches.length,
+    snippets: matches.slice(0, 8).map((match) => text.slice(Math.max(0, match.index - 30), Math.min(text.length, match.index + needle.length + 30)).trim()),
+  };
+}
+
+export function applyFindReplace(html = '', query = '', replacement = '') {
+  const needle = String(query || '').trim();
+  if (!needle) return String(html || '');
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(html || '').replace(new RegExp(escaped, 'gi'), String(replacement ?? ''));
+}
+
+const COMMON_WORDS = new Set('a about above after again all also an and any are as at be because been before being below between both but by can company contract corporate date document each effective for from further has have if in into is it its law legal may must no not of on or other our page party per professional report shall should signature such than that the their then there these this to under up use version was will with within without you your'.split(' '));
+
+export function spellCheckFoundation(html = '', customWords = []) {
+  const allowed = new Set([...COMMON_WORDS, ...customWords.map((word) => String(word).toLowerCase())]);
+  const text = String(html || '').replace(/<[^>]+>/g, ' ');
+  const words = [...text.matchAll(/\b[A-Za-z][A-Za-z'-]{2,}\b/g)].map((match) => match[0]);
+  const unknown = [...new Set(words.filter((word) => !allowed.has(word.toLowerCase()) && !/^[A-Z]{2,}$/.test(word)))].sort((a, b) => a.localeCompare(b));
+  return { checked: words.length, unknown: unknown.slice(0, 50), language: 'en' };
 }
 
 export class PageBreakNode extends ElementNode {

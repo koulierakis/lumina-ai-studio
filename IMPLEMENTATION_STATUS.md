@@ -1,6 +1,19 @@
 # Lumina AI Desktop Studio — Implementation Status
 
 ## Completed in this revision
+- Document Studio production editing continuation: Images and Logo Engine now
+  supports safe uploaded/URL/brand assets, captions, accessibility metadata,
+  logo/signature/seal insertion and image inventory; Advanced Tables now provide
+  print-safe repeat headers, style presets, captions, first-column and total-row
+  options; the professional template catalog now exposes curated merge-ready
+  templates; Variables & Merge Fields now validate required/nested fields with
+  insertable chips; and the editor sidebar now includes outline navigation,
+  find/replace and spell-check foundation diagnostics.
+- Document Studio review workspace completion: the React workspace now consumes
+  the existing backend review and track-changes contracts directly, loads review
+  state with versions/activity, supports persisted comments and suggestions,
+  records tracked replacements from selected text, and exposes accept/reject/
+  resolve/reopen controls without replacing the existing backend APIs.
 - Document Studio hardening: existing documents now preload version history on
   initial selection, manual saves refresh version history immediately, failed
   saves and exports surface actionable errors, user-named folder creation
@@ -123,6 +136,12 @@
 - Unit tests for fallback and identity capability selection.
 
 ## Validation
+- Document Studio production editing continuation validation: frontend document
+  model/editor model tests passed, DocumentRichEditor regression tests passed,
+  and frontend production build passed.
+- Document Studio review workspace validation: frontend document model/editor
+  model/DocumentRichEditor targeted tests passed and frontend production build
+  passed.
 - Document Studio backend import smoke test: passed.
 - Document Studio backend Ruff check: passed for `backend/document_studio/router.py`.
 - Document Studio frontend model tests: 2 passed.

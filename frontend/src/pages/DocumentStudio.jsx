@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Download, FileText, Heart, History, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
-import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, documentApi, documentStats, exportDocumentUrl, makeDocumentDownloadHeaders, summarizeDocument } from '../documents/model';
+import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, PROFESSIONAL_TEMPLATE_CATALOG, buildMergeFieldChip, buildProfessionalTemplateDraft, documentApi, documentStats, exportDocumentUrl, filterProfessionalTemplates, makeDocumentDownloadHeaders, summarizeDocument, validateMergeFields } from '../documents/model';
 
 import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
 import PaginatedDocumentWorkspace from "../components/documentstudio/PaginatedDocumentWorkspace";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
-import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, buildExportLayoutPayload, normalizePageLayout, pageDimensions } from "../components/documentstudio/editorModel";
+import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, applyFindReplace, buildAdvancedTableHtml, buildExportLayoutPayload, buildImageFigureHtml, extractDocumentImages, extractDocumentOutline, findReplacePreview, normalizeImageAsset, normalizePageLayout, pageDimensions, spellCheckFoundation, summarizeTables } from "../components/documentstudio/editorModel";
 import {
   DOCUMENT_PROFILE_IDS,
   getDocumentProfileOptions,
@@ -30,11 +30,39 @@ const defaultGenerator = {
   tags: ['premium', 'agreement', 'corporate'],
 };
 
+const defaultImageDraft = {
+  src: '',
+  alt: 'Corporate brand image',
+  caption: '',
+  width: 38,
+  align: 'center',
+  shape: 'rounded',
+  role: 'image',
+  opacity: 100,
+  border: true,
+  shadow: false,
+  link: '',
+};
+
+const defaultTableDraft = {
+  rows: 4,
+  columns: 4,
+  headerRows: 1,
+  caption: 'Executive decision matrix',
+  style: 'executive',
+  width: 100,
+  repeatHeader: true,
+  bandedRows: true,
+  totalRow: false,
+  firstColumn: true,
+};
+
 export default function DocumentStudio() {
   const [documents, setDocuments] = useState([]);
   const [templates, setTemplates] = useState([]);
   const [templateLibrary, setTemplateLibrary] = useState([]);
   const [templateDraft, setTemplateDraft] = useState({ name: 'Banking Certificate Template', category: 'Banking', tags: ['banking', 'kyc'], content_html: '<article><h1>{{title}}</h1><p>{{company.name}}</p>{{#if signer}}<p>Signer: {{signer}}</p>{{/if}}{{#each items}}<p>{{item.name}} · {{item.amount|currency}}</p>{{/each}}</article>', merge_schema: { required: ['title', 'company.name'] } });
+  const [templateFilters, setTemplateFilters] = useState({ q: '', category: '' });
   const [mergeVariables, setMergeVariables] = useState('{"title":"Certificate of Authority","company":{"name":"JSA GLOBAL PARTNERS LLC"},"signer":"GIANNIS KOULIERAKIS","items":[{"name":"Service Fee","amount":12500}]}');
   const [mergePreview, setMergePreview] = useState(null);
   const [companies, setCompanies] = useState([]);
@@ -65,6 +93,10 @@ export default function DocumentStudio() {
   const [printPreview, setPrintPreview] = useState(false);
   const [layoutWarning, setLayoutWarning] = useState('');
   const [layoutDirty, setLayoutDirty] = useState(false);
+  const [imageDraft, setImageDraft] = useState(defaultImageDraft);
+  const [tableDraft, setTableDraft] = useState(defaultTableDraft);
+  const [findReplace, setFindReplace] = useState({ find: '', replace: '' });
+  const imageInputRef = useRef(null);
   const saveSequenceRef = useRef(0);
 
   const [luxuryDesigner, setLuxuryDesigner] = useState({
@@ -74,6 +106,9 @@ export default function DocumentStudio() {
     layoutPresetId: 'banking',
   });
   const [comments, setComments] = useState([]);
+  const [reviewState, setReviewState] = useState({ comments: [], markers: [], open_count: 0, resolved_count: 0, status: 'draft' });
+  const [trackState, setTrackState] = useState({ changes: [], pending_count: 0, accepted_count: 0, rejected_count: 0 });
+  const [reviewDraft, setReviewDraft] = useState({ kind: 'comment', body: '', suggestion: '' });
   const [history, setHistory] = useState({ past: [], future: [] });
   const editorApiRef = useRef(null);
   const editorElementRef = useRef(null);
@@ -82,6 +117,14 @@ export default function DocumentStudio() {
   const [pageFlow, setPageFlow] = useState({ pageCount: 1, mode: 'paginated', warning: '' });
 
   const categories = useMemo(() => [...new Set(templates.map((item) => item.category))], [templates]);
+  const professionalTemplateMatches = useMemo(() => filterProfessionalTemplates(PROFESSIONAL_TEMPLATE_CATALOG, templateFilters), [templateFilters]);
+  const mergeDiagnostics = useMemo(() => {
+    try {
+      return validateMergeFields(templateDraft.content_html, JSON.parse(mergeVariables || '{}'), templateDraft.merge_schema?.required || []);
+    } catch (_) {
+      return { valid: false, fields: [], required: [], missing: ['Invalid JSON'], available: [] };
+    }
+  }, [mergeVariables, templateDraft.content_html, templateDraft.merge_schema]);
 
   const luxuryDesign = useMemo(
     () =>
@@ -148,6 +191,11 @@ export default function DocumentStudio() {
 
   const normalizedPageLayout = useMemo(() => normalizePageLayout(pageLayout), [pageLayout]);
   const activePageDimensions = useMemo(() => pageDimensions(normalizedPageLayout), [normalizedPageLayout]);
+  const documentImages = useMemo(() => extractDocumentImages(editorHtml), [editorHtml]);
+  const documentTables = useMemo(() => summarizeTables(editorHtml), [editorHtml]);
+  const documentOutline = useMemo(() => extractDocumentOutline(editorHtml), [editorHtml]);
+  const findPreview = useMemo(() => findReplacePreview(editorHtml, findReplace.find), [editorHtml, findReplace.find]);
+  const spelling = useMemo(() => spellCheckFoundation(editorHtml, [profile?.company_name, profile?.jurisdiction].filter(Boolean).join(' ').split(/\s+/)), [editorHtml, profile?.company_name, profile?.jurisdiction]);
 
   function updatePageLayout(mutator) {
     setPageLayout((current) => normalizePageLayout(typeof mutator === 'function' ? mutator(current) : mutator));
@@ -302,6 +350,20 @@ export default function DocumentStudio() {
     }
   }
 
+  function applyProfessionalTemplate(template) {
+    const draft = buildProfessionalTemplateDraft(template);
+    setTemplateDraft(draft);
+    setGenerator((current) => ({
+      ...current,
+      title: draft.name,
+      template_id: current.template_id,
+      tags: draft.tags,
+      fields: { ...current.fields, document_type: template.category, subject: template.tone },
+      prompt: `Create a ${template.name} for ${profile?.company_name || 'the active company'} using ${template.tone}. Include: ${(template.blocks || []).join(', ')}.`,
+    }));
+    toast.success(`${template.name} loaded into the template workspace.`);
+  }
+
   async function saveEditor(autosave = false) {
     if (!selected) return;
     const saveSequence = ++saveSequenceRef.current;
@@ -423,6 +485,62 @@ export default function DocumentStudio() {
     insertHtml(blocks[kind] || blocks.paragraph);
   }
 
+  function insertImageAsset(asset = imageDraft) {
+    const html = buildImageFigureHtml(asset);
+    if (!html) {
+      toast.error('Add a safe image source before inserting. Supported sources: HTTPS, blob URLs, or data image files.');
+      return;
+    }
+    insertHtml(html);
+    setImageDraft((current) => ({ ...current, src: '', caption: current.caption }));
+    toast.success(`${normalizeImageAsset(asset).role} inserted into the document.`);
+  }
+
+  function insertBrandAsset(role) {
+    const profileKey = role === 'signature' ? 'signature_url' : role === 'seal' ? 'seal_url' : 'logo_url';
+    const source = profile?.[profileKey] || '';
+    if (!source) {
+      toast.error(`No ${role} URL is saved in the active company identity.`);
+      return;
+    }
+    insertImageAsset({
+      ...imageDraft,
+      src: source,
+      role,
+      alt: `${profile?.company_name || 'Company'} ${role}`,
+      caption: role === 'logo' ? profile?.company_name || '' : '',
+      width: role === 'logo' ? 24 : role === 'signature' ? 30 : 18,
+      shape: role === 'seal' ? 'stamp' : 'rounded',
+      align: role === 'logo' ? 'left' : 'center',
+      border: role !== 'signature',
+    });
+  }
+
+  function handleImageUpload(file) {
+    if (!file?.type?.startsWith('image/')) return false;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const asset = normalizeImageAsset({ ...imageDraft, src: reader.result, alt: file.name, caption: file.name.replace(/\.[^.]+$/, '') });
+      setImageDraft(asset);
+      insertImageAsset(asset);
+    };
+    reader.readAsDataURL(file);
+    return true;
+  }
+
+  function insertAdvancedTable() {
+    insertHtml(buildAdvancedTableHtml(tableDraft));
+    toast.success('Advanced table inserted with print-safe structure.');
+  }
+
+  function replaceAllMatches() {
+    if (!findReplace.find.trim()) return;
+    const nextHtml = applyFindReplace(editorHtml, findReplace.find, findReplace.replace);
+    setEditorHtml(nextHtml);
+    editorApiRef.current?.setHtml(nextHtml);
+    toast.success(`${findPreview.count} match(es) replaced.`);
+  }
+
   async function createBlankDocument() {
     setBusy(true);
     try {
@@ -513,10 +631,7 @@ export default function DocumentStudio() {
     event.preventDefault();
     const file = event.dataTransfer.files?.[0];
     if (!file) return;
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader();
-      reader.onload = () => insertHtml(`<figure style="margin:24px 0"><img src="${reader.result}" style="max-width:100%;border:1px solid #d1d5db"/><figcaption>Inserted image</figcaption></figure>`);
-      reader.readAsDataURL(file);
+    if (handleImageUpload(file)) {
       return;
     }
     toast.info('Το αρχείο παραλήφθηκε. Χρησιμοποιήστε την Εισαγωγή PDF/DOCX/OCR για να προστεθεί στη βιβλιοθήκη.');
@@ -720,6 +835,86 @@ export default function DocumentStudio() {
     setVersions(payload || []);
     const activityPayload = await documentApi.activity(document.id);
     setActivity(activityPayload.events || []);
+    await loadReviewWorkspace(document);
+  }
+
+  async function loadReviewWorkspace(document = selected) {
+    if (!document?.id) return;
+    try {
+      const [reviewPayload, trackPayload] = await Promise.all([
+        documentApi.review(document.id),
+        documentApi.trackChanges(document.id),
+      ]);
+      setReviewState(reviewPayload || { comments: [], markers: [], open_count: 0, resolved_count: 0, status: document.status });
+      setTrackState(trackPayload || { changes: [], pending_count: 0, accepted_count: 0, rejected_count: 0 });
+    } catch (error) {
+      toast.error(error.message || 'Review workspace could not load.');
+    }
+  }
+
+  async function createBackendReviewItem(kind = reviewDraft.kind) {
+    if (!selected) return;
+    const selectedText = window.getSelection()?.toString() || '';
+    const body = (reviewDraft.body || selectedText || `${kind === 'suggestion' ? 'Suggested change' : 'Review note'}`).trim();
+    try {
+      const payload = await documentApi.createReviewItem(selected.id, {
+        kind,
+        body,
+        anchor: { selected_text: selectedText, document_title: selected.title },
+        suggestion: kind === 'suggestion' ? { replacement: reviewDraft.suggestion || selectedText, selected_text: selectedText } : {},
+      });
+      setReviewState(payload.review || reviewState);
+      setReviewDraft({ kind: 'comment', body: '', suggestion: '' });
+      await refreshDocuments();
+      toast.success(`${kind === 'suggestion' ? 'Suggestion' : 'Comment'} added to review history.`);
+    } catch (error) {
+      toast.error(error.message || 'Review item could not be created.');
+    }
+  }
+
+  async function reviewItemAction(commentId, action) {
+    if (!selected) return;
+    try {
+      const payload = await documentApi.reviewAction(selected.id, commentId, { action });
+      setReviewState(payload.review || reviewState);
+      toast.success(`Review item ${action}.`);
+    } catch (error) {
+      toast.error(error.message || 'Review action failed.');
+    }
+  }
+
+  async function addTrackedChange(change_type = 'replacement') {
+    if (!selected) return;
+    const selectedText = window.getSelection()?.toString() || '';
+    try {
+      const payload = await documentApi.createTrackChange(selected.id, {
+        change_type,
+        before: selectedText,
+        after: reviewDraft.suggestion || reviewDraft.body || selectedText,
+        range: { selected_text: selectedText },
+        metadata: { source: 'review_sidebar' },
+      });
+      setTrackState(payload.track_changes || trackState);
+      toast.success('Tracked change recorded.');
+    } catch (error) {
+      toast.error(error.message || 'Tracked change could not be recorded.');
+    }
+  }
+
+  async function trackChangeAction(action, changeIds = []) {
+    if (!selected) return;
+    try {
+      const updated = await documentApi.trackChangeAction(selected.id, { action, change_ids: changeIds });
+      setSelected(updated);
+      setEditorHtml(updated.content_html || '');
+      setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout));
+      setLayoutDirty(false);
+      await loadVersions(updated);
+      await refreshDocuments();
+      toast.success(`Tracked changes ${action}.`);
+    } catch (error) {
+      toast.error(error.message || 'Track change action failed.');
+    }
   }
 
   async function toggleFavorite(document) {
@@ -936,6 +1131,28 @@ export default function DocumentStudio() {
           </Panel>
 
           <Panel title="Template & Merge Engine" icon={FileText}>
+            <div className="rounded-2xl border border-gold/20 bg-black/20 p-4 text-xs text-white/65 space-y-3">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div><b className="text-gold">Professional Template Library</b><div className="text-white/45">Curated single-user Word/Docs-grade templates with merge-ready sections and compliance metadata.</div></div>
+                <div className="flex gap-2">
+                  <input className="field py-2" value={templateFilters.q} onChange={(e) => setTemplateFilters((current) => ({ ...current, q: e.target.value }))} placeholder="Search templates" />
+                  <select className="field py-2" value={templateFilters.category} onChange={(e) => setTemplateFilters((current) => ({ ...current, category: e.target.value }))}>
+                    <option value="">All categories</option>
+                    {[...new Set(PROFESSIONAL_TEMPLATE_CATALOG.map((template) => template.category))].map((category) => <option key={category}>{category}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {professionalTemplateMatches.map((template) => (
+                  <button key={template.id} type="button" className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.06] to-gold/[0.05] p-4 text-left transition hover:-translate-y-0.5 hover:border-gold" onClick={() => applyProfessionalTemplate(template)}>
+                    <div className="text-[10px] uppercase tracking-[0.22em] text-gold">{template.category} · {template.jurisdiction}</div>
+                    <div className="mt-2 font-display text-lg text-white">{template.name}</div>
+                    <div className="mt-2 text-white/55">{template.tone}</div>
+                    <div className="mt-3 flex flex-wrap gap-1">{template.blocks.slice(0, 4).map((block) => <span key={block} className="rounded-full border border-white/10 px-2 py-0.5 text-white/45">{block}</span>)}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-3">
               {[
                 { name: 'Banking Letterhead', category: 'Banking', tone: 'Institutional blue, strict spacing, compliance-ready' },
@@ -967,6 +1184,16 @@ export default function DocumentStudio() {
             </div>
             <textarea className="field min-h-[150px] font-mono text-xs" value={templateDraft.content_html || ''} onChange={(e) => setTemplateDraft({ ...templateDraft, content_html: e.target.value })} />
             <textarea className="field min-h-[110px] font-mono text-xs" value={mergeVariables} onChange={(e) => setMergeVariables(e.target.value)} />
+            <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-white/65">
+              <div className="mb-2 flex items-center justify-between"><b className="text-gold">Variables & Merge Fields</b><span className={mergeDiagnostics.valid ? 'text-emerald-300' : 'text-amber-200'}>{mergeDiagnostics.valid ? 'All fields populated' : `${mergeDiagnostics.missing.length} missing`}</span></div>
+              <div className="flex flex-wrap gap-2">
+                {['title', 'company.name', 'signer', 'date', 'amount', 'jurisdiction'].map((field) => <button key={field} type="button" className="rounded-full border border-gold/20 bg-gold/10 px-3 py-1 text-gold" onClick={() => setTemplateDraft((current) => ({ ...current, content_html: `${current.content_html || ''}${buildMergeFieldChip(field)}` }))}>{buildMergeFieldChip(field)}</button>)}
+              </div>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                <div><b className="text-white">Fields:</b> {mergeDiagnostics.fields.join(', ') || 'None'}</div>
+                <div><b className="text-white">Missing:</b> {mergeDiagnostics.missing.join(', ') || 'None'}</div>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-2">
               <button className="btn gold" disabled={busy} onClick={() => saveTemplateDraft('save')}>Save template</button>
               <button className="btn secondary" disabled={busy || !templateDraft.id} onClick={() => saveTemplateDraft('publish')}>Publish</button>
@@ -1031,6 +1258,50 @@ export default function DocumentStudio() {
               <select className="field py-2" value={normalizedPageLayout.pageNumbers.format} onChange={(e) => updatePageLayout((current) => ({ ...current, pageNumbers: { ...current.pageNumbers, format: e.target.value } }))}>{PAGE_NUMBER_FORMATS.map((x) => <option key={x}>{x}</option>)}</select>
               <input type="color" className="h-10 rounded-xl bg-transparent" value={normalizedPageLayout.background} onChange={(e) => updatePageLayout((current) => ({ ...current, background: e.target.value }))} />
               <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.printBackground} onChange={(e) => updatePageLayout((current) => ({ ...current, printBackground: e.target.checked }))} />Print background</label>
+            </div>
+            <div className="grid gap-3 rounded-2xl border border-gold/20 bg-black/20 p-3 text-xs text-white/65 md:grid-cols-4">
+              <b className="text-gold md:col-span-4">Images & Logo Engine</b>
+              <input className="field md:col-span-2" value={imageDraft.src} onChange={(e) => setImageDraft((current) => ({ ...current, src: e.target.value }))} placeholder="HTTPS image, logo URL, or uploaded data image" />
+              <input className="field" value={imageDraft.alt} onChange={(e) => setImageDraft((current) => ({ ...current, alt: e.target.value }))} placeholder="Alt text" />
+              <input className="field" value={imageDraft.caption} onChange={(e) => setImageDraft((current) => ({ ...current, caption: e.target.value }))} placeholder="Caption" />
+              <select className="field py-2" value={imageDraft.role} onChange={(e) => setImageDraft((current) => ({ ...current, role: e.target.value }))}>{['image', 'logo', 'signature', 'seal', 'watermark'].map((x) => <option key={x}>{x}</option>)}</select>
+              <select className="field py-2" value={imageDraft.align} onChange={(e) => setImageDraft((current) => ({ ...current, align: e.target.value }))}>{['inline', 'left', 'center', 'right', 'full-width'].map((x) => <option key={x}>{x}</option>)}</select>
+              <select className="field py-2" value={imageDraft.shape} onChange={(e) => setImageDraft((current) => ({ ...current, shape: e.target.value }))}>{['square', 'rounded', 'circle', 'stamp'].map((x) => <option key={x}>{x}</option>)}</select>
+              <label>Width %<input className="field mt-1 py-1" type="number" min="5" max="100" value={imageDraft.width} onChange={(e) => setImageDraft((current) => ({ ...current, width: Number(e.target.value) }))} /></label>
+              <label>Opacity %<input className="field mt-1 py-1" type="number" min="5" max="100" value={imageDraft.opacity} onChange={(e) => setImageDraft((current) => ({ ...current, opacity: Number(e.target.value) }))} /></label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={imageDraft.border} onChange={(e) => setImageDraft((current) => ({ ...current, border: e.target.checked }))} />Border</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={imageDraft.shadow} onChange={(e) => setImageDraft((current) => ({ ...current, shadow: e.target.checked }))} />Shadow</label>
+              <input className="field md:col-span-2" value={imageDraft.link} onChange={(e) => setImageDraft((current) => ({ ...current, link: e.target.value }))} placeholder="Optional HTTPS link" />
+              <div className="flex flex-wrap gap-2 md:col-span-4">
+                <button className="btn gold" disabled={!selected || busy} onClick={() => insertImageAsset()}>Insert image</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => imageInputRef.current?.click()}>Upload image</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => insertBrandAsset('logo')}>Insert saved logo</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => insertBrandAsset('signature')}>Insert signature</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => insertBrandAsset('seal')}>Insert seal</button>
+                <input ref={imageInputRef} type="file" className="hidden" accept="image/*" onChange={(event) => { handleImageUpload(event.target.files?.[0]); event.target.value = ''; }} />
+              </div>
+              <div className="md:col-span-4 text-white/50">Assets in document: {documentImages.length} · Drag-and-drop images directly onto the page; saved logos/signatures/seals come from Company Identity URLs.</div>
+            </div>
+            <div className="grid gap-3 rounded-2xl border border-gold/20 bg-black/20 p-3 text-xs text-white/65 md:grid-cols-4">
+              <b className="text-gold md:col-span-4">Advanced Tables</b>
+              <label>Rows<input className="field mt-1 py-1" type="number" min="1" max="100" value={tableDraft.rows} onChange={(e) => setTableDraft((current) => ({ ...current, rows: Number(e.target.value) }))} /></label>
+              <label>Columns<input className="field mt-1 py-1" type="number" min="1" max="20" value={tableDraft.columns} onChange={(e) => setTableDraft((current) => ({ ...current, columns: Number(e.target.value) }))} /></label>
+              <label>Header rows<input className="field mt-1 py-1" type="number" min="0" max="10" value={tableDraft.headerRows} onChange={(e) => setTableDraft((current) => ({ ...current, headerRows: Number(e.target.value) }))} /></label>
+              <label>Width %<input className="field mt-1 py-1" type="number" min="20" max="100" value={tableDraft.width} onChange={(e) => setTableDraft((current) => ({ ...current, width: Number(e.target.value) }))} /></label>
+              <input className="field md:col-span-2" value={tableDraft.caption} onChange={(e) => setTableDraft((current) => ({ ...current, caption: e.target.value }))} placeholder="Caption" />
+              <select className="field py-2" value={tableDraft.style} onChange={(e) => setTableDraft((current) => ({ ...current, style: e.target.value }))}>{['executive', 'ledger', 'matrix', 'minimal'].map((x) => <option key={x}>{x}</option>)}</select>
+              <div className="grid grid-cols-2 gap-2 md:col-span-4">
+                <label className="flex items-center gap-2"><input type="checkbox" checked={tableDraft.repeatHeader} onChange={(e) => setTableDraft((current) => ({ ...current, repeatHeader: e.target.checked }))} />Repeat header on pages</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={tableDraft.bandedRows} onChange={(e) => setTableDraft((current) => ({ ...current, bandedRows: e.target.checked }))} />Banded rows</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={tableDraft.firstColumn} onChange={(e) => setTableDraft((current) => ({ ...current, firstColumn: e.target.checked }))} />First column headers</label>
+                <label className="flex items-center gap-2"><input type="checkbox" checked={tableDraft.totalRow} onChange={(e) => setTableDraft((current) => ({ ...current, totalRow: e.target.checked }))} />Total row</label>
+              </div>
+              <div className="flex flex-wrap gap-2 md:col-span-4">
+                <button className="btn gold" disabled={!selected || busy} onClick={insertAdvancedTable}>Insert advanced table</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => setTableDraft({ ...defaultTableDraft, style: 'ledger', caption: 'Financial ledger', columns: 5, totalRow: true })}>Ledger preset</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => setTableDraft({ ...defaultTableDraft, style: 'matrix', caption: 'Compliance matrix', rows: 6, columns: 3 })}>Matrix preset</button>
+              </div>
+              <div className="md:col-span-4 text-white/50">Tables in document: {documentTables.length} · Advanced: {documentTables.filter((table) => table.advanced).length} · Largest grid: {Math.max(0, ...documentTables.map((table) => table.rows))} rows × {Math.max(0, ...documentTables.map((table) => table.columns))} columns.</div>
             </div>
             {(layoutWarning || pageFlow.warning) && <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">{layoutWarning || pageFlow.warning}</div>}
             <div className="premium-doc-shell overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
@@ -1106,6 +1377,9 @@ export default function DocumentStudio() {
             <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60"><b>Bank accounts</b>{banks.slice(0, 4).map((bank) => <div key={bank.id}>{bank.bank_name} · {bank.swift} · {bank.iban}</div>)}</div>
             <div className="grid grid-cols-3 gap-2">
               {['primary_color', 'secondary_color', 'accent_color'].map((key) => <input key={key} type="color" className="h-12 w-full rounded-xl bg-transparent" value={profile?.[key] || '#B9985A'} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} />)}
+            </div>
+            <div className="grid gap-2">
+              {['logo_url', 'signature_url', 'seal_url'].map((key) => <input key={key} className="field" placeholder={key.replaceAll('_', ' ')} value={profile?.[key] || ''} onChange={(e) => setProfile({ ...profile, [key]: e.target.value })} />)}
             </div>
             <button className="btn disabled:opacity-50" disabled={!profile || busy} onClick={async () => { const saved = await documentApi.saveProfile(profile); setProfile(saved); toast.success('Η εταιρική ταυτότητα αποθηκεύτηκε.'); }}>Αποθήκευση εταιρικής ταυτότητας</button>
           </Panel>
@@ -1284,6 +1558,52 @@ export default function DocumentStudio() {
               {['proposal', 'banking', 'legal'].map((type) => <button key={type} className="btn secondary capitalize disabled:opacity-50" disabled={busy} onClick={() => buildPackage(type)}>{type}</button>)}
             </div>
             <div className="text-xs text-white/50">Proposal: cover, executive summary, company, scope, deliverables, timeline, pricing, terms, appendices, signature. Banking and legal packages generate complete annexed document suites.</div>
+          </Panel>
+
+          <Panel title="Navigation, Find & Proofing" icon={FileText}>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <b className="text-white">Document Outline</b>
+              {documentOutline.length === 0 && <div className="mt-2 text-white/40">No headings detected.</div>}
+              {documentOutline.slice(0, 12).map((item) => <div key={item.id} className="mt-2" style={{ paddingLeft: `${(item.level - 1) * 10}px` }}>H{item.level} · {item.text}</div>)}
+            </div>
+            <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <b className="text-white">Find & Replace</b>
+              <input className="field" value={findReplace.find} onChange={(e) => setFindReplace((current) => ({ ...current, find: e.target.value }))} placeholder="Find text" />
+              <input className="field" value={findReplace.replace} onChange={(e) => setFindReplace((current) => ({ ...current, replace: e.target.value }))} placeholder="Replace with" />
+              <div>{findPreview.count} match(es)</div>
+              <button className="btn secondary" disabled={!selected || busy || !findPreview.count} onClick={replaceAllMatches}>Replace all</button>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <b className="text-white">Spell Check Foundation</b>
+              <div>Checked {spelling.checked} words · {spelling.unknown.length} flagged terms</div>
+              <div className="mt-2 flex flex-wrap gap-1">{spelling.unknown.slice(0, 16).map((word) => <span key={word} className="rounded-full border border-amber-400/20 bg-amber-500/10 px-2 py-0.5 text-amber-100">{word}</span>)}</div>
+            </div>
+          </Panel>
+
+          <Panel title="Review Sidebar" icon={History}>
+            <div className="grid gap-2 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <div className="flex items-center justify-between"><b className="text-white">Comments & Suggestions</b><span>{reviewState.open_count || 0} open · {reviewState.resolved_count || 0} resolved</span></div>
+              <select className="field py-2" value={reviewDraft.kind} onChange={(e) => setReviewDraft((current) => ({ ...current, kind: e.target.value }))}>{['comment', 'suggestion'].map((kind) => <option key={kind}>{kind}</option>)}</select>
+              <textarea className="field min-h-[70px]" value={reviewDraft.body} onChange={(e) => setReviewDraft((current) => ({ ...current, body: e.target.value }))} placeholder="Review comment or suggestion rationale" />
+              <input className="field" value={reviewDraft.suggestion} onChange={(e) => setReviewDraft((current) => ({ ...current, suggestion: e.target.value }))} placeholder="Replacement text for suggestions / tracked changes" />
+              <div className="flex flex-wrap gap-2">
+                <button className="btn gold" disabled={!selected || busy} onClick={() => createBackendReviewItem(reviewDraft.kind)}>Add review item</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => addTrackedChange('replacement')}>Track replacement</button>
+                <button className="btn secondary" disabled={!selected || busy} onClick={() => loadReviewWorkspace()}>Refresh review</button>
+              </div>
+              <div className="max-h-56 overflow-auto space-y-2 pr-1">
+                {(reviewState.comments || []).length === 0 && <div>No backend review comments yet.</div>}
+                {(reviewState.comments || []).slice(0, 12).map((comment) => <div key={comment.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-white/80">{comment.kind} · {comment.status}</div><div className="mt-1">{comment.body}</div><div className="mt-2 flex flex-wrap gap-1">{['resolve', 'reopen', 'accept', 'reject'].map((action) => <button key={action} className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => reviewItemAction(comment.id, action)}>{action}</button>)}</div></div>)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+              <div className="mb-2 flex items-center justify-between"><b className="text-white">Track Changes</b><span>{trackState.pending_count || 0} pending · {trackState.accepted_count || 0} accepted · {trackState.rejected_count || 0} rejected</span></div>
+              <div className="mb-2 flex gap-2"><button className="btn secondary" disabled={!selected || busy || !(trackState.changes || []).length} onClick={() => trackChangeAction('accept')}>Accept all</button><button className="btn secondary" disabled={!selected || busy || !(trackState.changes || []).length} onClick={() => trackChangeAction('reject')}>Reject all</button></div>
+              <div className="max-h-56 overflow-auto space-y-2 pr-1">
+                {(trackState.changes || []).length === 0 && <div>No tracked changes recorded.</div>}
+                {(trackState.changes || []).slice(0, 12).map((change) => <div key={change.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3"><div className="text-white/80">{change.change_type} · {change.status}</div><div className="mt-1 line-clamp-2">{change.before || '∅'} → {change.after || '∅'}</div><div className="mt-2 flex gap-1"><button className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => trackChangeAction('accept', [change.id])}>accept</button><button className="rounded border border-white/10 px-2 py-1 text-white/55 hover:border-gold hover:text-gold" onClick={() => trackChangeAction('reject', [change.id])}>reject</button></div></div>)}
+              </div>
+            </div>
           </Panel>
 
           <Panel title="Intelligence" icon={Sparkles}>
