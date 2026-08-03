@@ -29,18 +29,23 @@ import {
   UNDO_COMMAND,
   createCommand,
 } from 'lexical';
-import { sanitizeEditorHtml } from './editorModel';
+import { createPageBreakNode, PageBreakNode, sanitizeEditorHtml } from './editorModel';
 
 export const INSERT_CLEAN_HTML_COMMAND = createCommand('INSERT_CLEAN_HTML_COMMAND');
+export const INSERT_PAGE_BREAK_COMMAND = createCommand('INSERT_PAGE_BREAK_COMMAND');
 export const SET_EDITOR_HTML_COMMAND = createCommand('SET_EDITOR_HTML_COMMAND');
 
 function Placeholder() {
   return <div className="pointer-events-none absolute left-0 top-0 text-neutral-400">Start typing your document…</div>;
 }
 
-function EditorBridge({ html, onHtmlChange, editorApiRef }) {
+function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
   const [editor] = useLexicalComposerContext();
   const lastExternalHtml = useRef(html || '');
+
+  useEffect(() => {
+    onEditorReady?.(editor);
+  }, [editor, onEditorReady]);
 
   useImperativeHandle(editorApiRef, () => ({
     formatText: (format) => editor.dispatchCommand(FORMAT_TEXT_COMMAND, format),
@@ -52,6 +57,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef }) {
     insertList: (ordered = false) => editor.dispatchCommand(ordered ? INSERT_ORDERED_LIST_COMMAND : INSERT_UNORDERED_LIST_COMMAND, undefined),
     removeList: () => editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined),
     insertHtml: (markup) => editor.dispatchCommand(INSERT_CLEAN_HTML_COMMAND, markup),
+    insertPageBreak: () => editor.dispatchCommand(INSERT_PAGE_BREAK_COMMAND, undefined),
     setHtml: (markup) => editor.dispatchCommand(SET_EDITOR_HTML_COMMAND, markup),
     setHeading: (tag = 'h2') => editor.update(() => {
       const selection = $getSelection();
@@ -102,6 +108,15 @@ function EditorBridge({ html, onHtmlChange, editorApiRef }) {
       });
       return true;
     }, COMMAND_PRIORITY_HIGH),
+    editor.registerCommand(INSERT_PAGE_BREAK_COMMAND, () => {
+      editor.update(() => {
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) {
+          selection.insertNodes([createPageBreakNode()]);
+        }
+      });
+      return true;
+    }, COMMAND_PRIORITY_HIGH),
     editor.registerCommand(PASTE_COMMAND, (event) => {
       const clipboard = event.clipboardData;
       const html = clipboard?.getData('text/html');
@@ -122,12 +137,12 @@ function EditorBridge({ html, onHtmlChange, editorApiRef }) {
   }} />;
 }
 
-const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtmlChange, disabled, className = '' }, ref) {
+const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtmlChange, disabled, className = '', onEditorReady }, ref) {
   const editorApiRef = useRef(null);
   const initialConfig = useMemo(() => ({
     namespace: 'LuminaDocumentStudioEditor',
     editable: !disabled,
-    nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode],
+    nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode, PageBreakNode],
     onError(error) {
       throw error;
     },
@@ -145,14 +160,14 @@ const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtml
     <LexicalComposer initialConfig={initialConfig}>
       <div className="relative">
         <RichTextPlugin
-          contentEditable={<ContentEditable className={`prose prose-neutral max-w-none min-h-[760px] outline-none ${className}`} />}
+          contentEditable={<ContentEditable className={`prose prose-neutral max-w-none outline-none ${className}`} />}
           placeholder={<Placeholder />}
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
         <ListPlugin />
         <LinkPlugin />
-        <EditorBridge html={html} onHtmlChange={onHtmlChange} editorApiRef={ref || editorApiRef} />
+        <EditorBridge html={html} onHtmlChange={onHtmlChange} editorApiRef={ref || editorApiRef} onEditorReady={onEditorReady} />
       </div>
     </LexicalComposer>
   );

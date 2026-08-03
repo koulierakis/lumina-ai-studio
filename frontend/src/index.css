@@ -172,22 +172,119 @@ body {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
-.lumina-document-page {
-  position: relative;
-  overflow: hidden;
+.lumina-page-workspace {
+  display: flex;
+  justify-content: center;
+  min-width: max-content;
+  padding: 18px 0 48px;
 }
 
-.lumina-document-page::before {
+.lumina-page-stack {
+  position: relative;
+}
+
+.lumina-print-page {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  color: #111827;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+}
+
+.lumina-print-page::before {
   content: "";
   position: absolute;
-  inset: 12mm;
-  border: 1px solid rgba(185, 152, 90, 0.16);
+  inset: 10mm;
+  border: 1px solid rgba(185, 152, 90, 0.14);
   pointer-events: none;
 }
 
-.lumina-document-page article {
+.lumina-page-content-guide {
+  border: 1px dashed rgba(185, 152, 90, 0.16);
+  pointer-events: none;
+}
+
+.lumina-paginated-editor-layer {
+  position: absolute;
+  inset: 0 auto auto 0;
+  box-sizing: border-box;
+  z-index: 4;
+  background: transparent;
+}
+
+.lumina-page-flow-editor {
   position: relative;
-  z-index: 1;
+  color: #111827;
+}
+
+.lumina-page-flow-editor [contenteditable="true"] {
+  min-height: inherit;
+  overflow: visible;
+}
+
+.lumina-page-break-marker {
+  position: relative;
+  display: block;
+  user-select: none;
+}
+
+.lumina-page-break-marker::after {
+  content: "Manual page break forces next page";
+  margin-left: 12px;
+  color: rgba(185, 152, 90, 0.72);
+}
+
+.lumina-page-number {
+  position: absolute;
+  z-index: 2;
+  font-size: 10px;
+  color: #6b7280;
+}
+
+.lumina-page-number.bottom-center {
+  bottom: 8mm;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.lumina-page-number.bottom-right {
+  right: 12mm;
+  bottom: 8mm;
+}
+
+.lumina-page-number.top-right {
+  top: 8mm;
+  right: 12mm;
+}
+
+.lumina-page-flow-warning {
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+  margin-right: 16px;
+  max-width: 360px;
+  align-self: flex-start;
+  border-radius: 14px;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  background: rgba(120, 53, 15, 0.84);
+  padding: 10px 12px;
+  color: #fef3c7;
+  font-size: 12px;
+}
+
+.lumina-preview-html-layer {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: 3;
+  color: #111827;
+  pointer-events: none;
+}
+
+.lumina-preview-page-body {
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0;
 }
 
 @media print {
@@ -195,12 +292,12 @@ body {
     visibility: hidden;
   }
 
-  .lumina-document-page,
-  .lumina-document-page * {
+  .lumina-print-page,
+  .lumina-print-page * {
     visibility: visible;
   }
 
-  .lumina-document-page {
+  .lumina-print-page {
     position: absolute;
     inset: 0;
     margin: 0 !important;

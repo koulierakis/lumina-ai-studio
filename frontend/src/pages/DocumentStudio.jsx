@@ -4,7 +4,9 @@ import { Download, FileText, Heart, History, ShieldCheck, Sparkles, Upload, Wand
 import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, documentApi, documentStats, exportDocumentUrl, makeDocumentDownloadHeaders, summarizeDocument } from '../documents/model';
 
 import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
+import PaginatedDocumentWorkspace from "../components/documentstudio/PaginatedDocumentWorkspace";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
+import { DEFAULT_PAGE_LAYOUT, normalizePageLayout, pageDimensions } from "../components/documentstudio/editorModel";
 import {
   DOCUMENT_PROFILE_IDS,
   getDocumentProfileOptions,
@@ -59,6 +61,9 @@ export default function DocumentStudio() {
   const [intelligencePreview, setIntelligencePreview] = useState(null);
   const [outlineMode, setOutlineMode] = useState('page');
   const [page, setPage] = useState({ size: 'A4', orientation: 'portrait', zoom: 90, margin: 22, lineHeight: 1.55 });
+  const [pageLayout, setPageLayout] = useState(DEFAULT_PAGE_LAYOUT);
+  const [printPreview, setPrintPreview] = useState(false);
+  const [layoutWarning, setLayoutWarning] = useState('');
 
   const [luxuryDesigner, setLuxuryDesigner] = useState({
     profileId: DOCUMENT_PROFILE_IDS.BANK_OF_CYPRUS,
@@ -69,7 +74,10 @@ export default function DocumentStudio() {
   const [comments, setComments] = useState([]);
   const [history, setHistory] = useState({ past: [], future: [] });
   const editorApiRef = useRef(null);
+  const editorElementRef = useRef(null);
   const lastSavedHtmlRef = useRef('');
+  const [lexicalEditor, setLexicalEditor] = useState(null);
+  const [pageFlow, setPageFlow] = useState({ pageCount: 1, mode: 'paginated', warning: '' });
 
   const categories = useMemo(() => [...new Set(templates.map((item) => item.category))], [templates]);
 
@@ -136,6 +144,9 @@ export default function DocumentStudio() {
     []
   );
 
+  const normalizedPageLayout = useMemo(() => normalizePageLayout(pageLayout), [pageLayout]);
+  const activePageDimensions = useMemo(() => pageDimensions(normalizedPageLayout), [normalizedPageLayout]);
+
   const luxuryThemeOptions = useMemo(
     () => getDocumentThemeOptions('el'),
     []
@@ -178,6 +189,7 @@ export default function DocumentStudio() {
     if (!selected && docs?.[0]) {
       setSelected(docs[0]);
       setEditorHtml(docs[0].content_html || '');
+      setPageLayout(normalizePageLayout(docs[0].design?.pageLayout || docs[0].metadata?.page_layout));
       await loadVersions(docs[0]);
     }
     setLoading(false);
@@ -241,6 +253,7 @@ export default function DocumentStudio() {
       const created = await documentApi.generate(payload);
       setSelected(created);
       setEditorHtml(created.content_html || '');
+      setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout));
       setAnalysis(null); setQuality(null); setCompareResult(null);
       setGenerator((previous) => ({ ...previous, title: created.title, fields: { ...previous.fields, document_type: created.metadata?.document_class?.label || previous.fields.document_type, subject: '' } }));
       await refreshDocuments();
@@ -290,7 +303,9 @@ export default function DocumentStudio() {
       return;
     }
     const contentText = editorHtml.replace(/<[^>]+>/g, ' ');
-    const updated = await documentApi.update(selected.id, { content_html: editorHtml, content_text: contentText, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
+    const nextDesign = { ...(selected.design || {}), pageLayout: normalizedPageLayout };
+    const nextMetadata = { ...(selected.metadata || {}), page_layout: normalizedPageLayout, page_count: pageFlow.pageCount };
+    const updated = await documentApi.update(selected.id, { content_html: editorHtml, content_text: contentText, design: nextDesign, metadata: nextMetadata, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
     setSelected(updated);
     lastSavedHtmlRef.current = updated.content_html || editorHtml;
     await refreshDocuments();
@@ -371,6 +386,10 @@ export default function DocumentStudio() {
   }
 
   function insertPremiumBlock(kind) {
+    if (kind === 'pageBreak') {
+      editorApiRef.current?.insertPageBreak();
+      return;
+    }
     const company = profile?.company_name || 'Company Name';
     const blocks = {
       title: '<h1 style="font-family:Georgia,serif;font-size:36px;letter-spacing:-.02em;margin:0 0 18px;color:#111827">Premium Document Title</h1><p style="font-size:14px;color:#4b5563">Professional opening paragraph with clear executive tone.</p>',
@@ -383,7 +402,7 @@ export default function DocumentStudio() {
       pageNumber: '<span style="display:inline-block;border-top:1px solid #d1d5db;margin-top:18px;padding-top:8px;font-size:11px;color:#6b7280">Page 1</span>',
       table: '<table style="width:100%;border-collapse:collapse;margin:24px 0;font-size:13px"><thead><tr><th style="border:1px solid #d1d5db;background:#111827;color:white;padding:10px;text-align:left">Item</th><th style="border:1px solid #d1d5db;background:#111827;color:white;padding:10px;text-align:left">Description</th><th style="border:1px solid #d1d5db;background:#111827;color:white;padding:10px;text-align:left">Value</th></tr></thead><tbody><tr><td style="border:1px solid #d1d5db;padding:10px">1</td><td style="border:1px solid #d1d5db;padding:10px">Professional service</td><td style="border:1px solid #d1d5db;padding:10px">TBD</td></tr></tbody></table>',
       signature: `<section style="margin-top:48px"><h2 style="font-family:Georgia,serif;font-size:22px;color:#111827">Signature</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:36px;margin-top:42px"><div style="border-top:1px solid #111827;padding-top:10px;min-height:90px">Authorized Signatory<br/>${company}<br/>Name:<br/>Date:</div><div style="border-top:1px solid #111827;padding-top:10px;min-height:90px">Counterparty<br/>Name:<br/>Title:<br/>Date:</div></div></section>`,
-      pageBreak: '<div style="break-after:page;page-break-after:always;border-top:1px dashed #B9985A;margin:36px 0"><span style="font-size:10px;color:#B9985A">PAGE BREAK</span></div>',
+      pageBreak: '<div data-lumina-page-break="true" style="break-after:page;page-break-after:always;border-top:1px dashed #B9985A;margin:36px 0"><span style="font-size:10px;color:#B9985A">PAGE BREAK</span></div>',
     };
     insertHtml(blocks[kind] || blocks.paragraph);
   }
@@ -398,9 +417,12 @@ export default function DocumentStudio() {
         tags: ['draft'],
         content_html: `<article><h1>${title}</h1><p>Start writing your premium document.</p></article>`,
         content_text: `${title} Start writing your premium document.`,
+        design: { pageLayout: normalizedPageLayout },
+        metadata: { page_layout: normalizedPageLayout },
       });
       setSelected(created);
       setEditorHtml(created.content_html || '');
+      setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout));
       await refreshDocuments();
       await loadVersions(created);
       toast.success('New document created.');
@@ -419,10 +441,12 @@ export default function DocumentStudio() {
         ...selected,
         id: undefined,
         title: `Copy of ${selected.title}`,
+        design: { ...(selected.design || {}), pageLayout: normalizedPageLayout },
         metadata: { ...(selected.metadata || {}), duplicated_from: selected.id },
       });
       setSelected(copy);
       setEditorHtml(copy.content_html || '');
+      setPageLayout(normalizePageLayout(copy.design?.pageLayout || copy.metadata?.page_layout));
       await refreshDocuments();
       toast.success('Document duplicated.');
     } catch (error) {
@@ -452,6 +476,7 @@ export default function DocumentStudio() {
     if (docs[0]) {
       setSelected(docs[0]);
       setEditorHtml(docs[0].content_html || '');
+      setPageLayout(normalizePageLayout(docs[0].design?.pageLayout || docs[0].metadata?.page_layout));
       await loadVersions(docs[0]);
     }
     toast.success('Document deleted.');
@@ -613,6 +638,7 @@ export default function DocumentStudio() {
 
       setSelected(updated);
       setEditorHtml(updated.content_html || '');
+      setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout));
       setQuality(updated.quality_score || null);
 
       await refreshDocuments();
@@ -630,7 +656,7 @@ export default function DocumentStudio() {
   async function redesign() {
     if (!selected) return;
     const updated = await documentApi.redesign(selected.id);
-    setSelected(updated); setEditorHtml(updated.content_html || ''); setQuality(updated.quality_score); await refreshDocuments(); await loadVersions(updated); toast.success('Document redesigned without changing meaning.');
+    setSelected(updated); setEditorHtml(updated.content_html || ''); setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout)); setQuality(updated.quality_score); await refreshDocuments(); await loadVersions(updated); toast.success('Document redesigned without changing meaning.');
   }
 
   async function scoreDocument() {
@@ -644,7 +670,7 @@ export default function DocumentStudio() {
 
   async function buildPackage(package_type) {
     const created = await documentApi.createPackage({ package_type, title: `${package_type} executive package`, client: generator.parties[1] || 'Strategic Client', fields: generator.fields, tags: ['package', package_type, 'executive'] });
-    setSelected(created); setEditorHtml(created.content_html || ''); setQuality(created.quality_score); await refreshDocuments(); await loadVersions(created); toast.success(`${package_type} package generated.`);
+    setSelected(created); setEditorHtml(created.content_html || ''); setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout)); setQuality(created.quality_score); await refreshDocuments(); await loadVersions(created); toast.success(`${package_type} package generated.`);
   }
 
   async function compareWithFirstOther() {
@@ -662,6 +688,7 @@ export default function DocumentStudio() {
       const restored = refreshed.find((doc) => doc.id === selected.id) || selected;
       setSelected(restored);
       setEditorHtml(restored.content_html || '');
+      setPageLayout(normalizePageLayout(restored.design?.pageLayout || restored.metadata?.page_layout));
     }
     await loadVersions(selected);
     toast.success(`Version ${action} completed: ${result.version_id || version.id}`);
@@ -688,6 +715,7 @@ export default function DocumentStudio() {
       const imported = await documentApi.importFile(file, { title: file.name, category: 'Imported', tags: 'imported,ocr' });
       setSelected(imported);
       setEditorHtml(imported.content_html || '');
+      setPageLayout(normalizePageLayout(imported.design?.pageLayout || imported.metadata?.page_layout));
       await refreshDocuments();
       toast.success('Document imported and searchable text extracted.');
     } catch (error) {
@@ -936,8 +964,8 @@ export default function DocumentStudio() {
           <Panel title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>
             <div className="premium-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur">
               <div className="flex flex-wrap items-center gap-2">
-                <select className="field max-w-[110px] py-2" value={page.size} onChange={(e) => setPage({ ...page, size: e.target.value })}>{['A4', 'Letter', 'Legal'].map((x) => <option key={x}>{x}</option>)}</select>
-                <select className="field max-w-[130px] py-2" value={page.orientation} onChange={(e) => setPage({ ...page, orientation: e.target.value })}>{['portrait', 'landscape'].map((x) => <option key={x}>{x}</option>)}</select>
+                <select className="field max-w-[110px] py-2" value={normalizedPageLayout.size} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, size: e.target.value }))}>{['A4', 'Letter'].map((x) => <option key={x}>{x}</option>)}</select>
+                <select className="field max-w-[130px] py-2" value={normalizedPageLayout.orientation} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, orientation: e.target.value }))}>{['portrait', 'landscape'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[140px] py-2" onChange={(e) => format('fontName', e.target.value)} defaultValue="Inter">{['Inter', 'Georgia', 'Times New Roman', 'Arial', 'Calibri'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[90px] py-2" onChange={(e) => format('fontSize', e.target.value)} defaultValue="3">{[['2', '10'], ['3', '12'], ['4', '14'], ['5', '18'], ['6', '24']].map(([v, label]) => <option value={v} key={v}>{label}px</option>)}</select>
                 {[
@@ -951,73 +979,63 @@ export default function DocumentStudio() {
                 <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" disabled={!history.past.length} onClick={undoEditor}>Αναίρεση</button>
                 <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" disabled={!history.future.length} onClick={redoEditor}>Επανάληψη</button>
                 <label className="ml-auto flex items-center gap-2 text-xs text-white/60">Μεγέθυνση<input type="range" min="60" max="130" value={page.zoom} onChange={(e) => setPage({ ...page, zoom: Number(e.target.value) })} /></label>
+                <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" onClick={() => setPage({ ...page, zoom: 85 })}>Fit page</button>
+                <button className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/70 hover:border-gold" onClick={() => setPage({ ...page, zoom: normalizedPageLayout.orientation === 'landscape' ? 80 : 100 })}>Fit width</button>
+                <button className="rounded-lg border border-gold/30 bg-gold/10 px-3 py-2 text-xs text-gold hover:border-gold" onClick={() => setPrintPreview((value) => !value)}>{printPreview ? 'Return to editing' : 'Print preview'}</button>
               </div>
             </div>
-            <div className="rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-white/50">Paper: {page.size} · {page.orientation} · {page.zoom}% · drag images/signatures into the page</div>
+            <div className="grid gap-2 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-white/60 md:grid-cols-4">
+              <span>Pages: {pageFlow.pageCount}</span>
+              <span>Paper: {normalizedPageLayout.size} · {normalizedPageLayout.orientation}</span>
+              <span>Size: {Math.round(activePageDimensions.width)} × {Math.round(activePageDimensions.height)} mm</span>
+              <span>Zoom: {page.zoom}%</span>
+              {['top', 'right', 'bottom', 'left'].map((side) => <label key={side} className="flex items-center gap-2 capitalize">{side}<input className="field py-1" type="number" min="5" max="50" value={normalizedPageLayout.margins[side]} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, margins: { ...current.margins, [side]: Number(e.target.value) } }))} /></label>)}
+              <label className="md:col-span-2">Header<input className="field mt-1 py-2" value={normalizedPageLayout.header.text} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, header: { ...current.header, text: e.target.value, enabled: true } }))} /></label>
+              <label className="md:col-span-2">Footer<input className="field mt-1 py-2" value={normalizedPageLayout.footer.text} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, footer: { ...current.footer, text: e.target.value, enabled: true } }))} /></label>
+              <select className="field py-2" value={normalizedPageLayout.pageNumbers.position} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, pageNumbers: { ...current.pageNumbers, position: e.target.value, enabled: e.target.value !== 'none' } }))}>{['bottom-center', 'bottom-right', 'top-right', 'none'].map((x) => <option key={x}>{x}</option>)}</select>
+              <select className="field py-2" value={normalizedPageLayout.pageNumbers.format} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, pageNumbers: { ...current.pageNumbers, format: e.target.value } }))}>{['Page X of Y', 'Page X', 'X'].map((x) => <option key={x}>{x}</option>)}</select>
+              <input type="color" className="h-10 rounded-xl bg-transparent" value={normalizedPageLayout.background} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, background: e.target.value }))} />
+              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.printBackground} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, printBackground: e.target.checked }))} />Print background</label>
+            </div>
+            {(layoutWarning || pageFlow.warning) && <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">{layoutWarning || pageFlow.warning}</div>}
             <div className="premium-doc-shell overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-              <div
-                className="lumina-document lumina-document-page mx-auto shadow-2xl transition-transform"
-                data-design-profile={luxuryDesign.profile.id}
-                data-document-theme={luxuryDesign.theme.id}
-                data-typography-preset={luxuryDesign.typography.id}
-                data-layout-preset={luxuryDesign.layout.id}
-                style={{
-                  ...luxuryCssVariables,
-                  width: `${luxuryPageDimensions.widthMm}mm`,
-                  minHeight: `${luxuryPageDimensions.heightMm}mm`,
-                  paddingTop: `${luxuryDesign.layout.page.margins.top}mm`,
-                  paddingRight: `${luxuryDesign.layout.page.margins.right}mm`,
-                  paddingBottom: `${luxuryDesign.layout.page.margins.bottom}mm`,
-                  paddingLeft: `${luxuryDesign.layout.page.margins.left}mm`,
-                  background: luxuryDesign.theme.colors.background,
-                  color: luxuryDesign.theme.colors.text,
-                  fontFamily: luxuryDesign.typography.bodyFont,
-                  fontSize: `${luxuryDesign.typography.styles?.body?.fontSize || 11}px`,
-                  lineHeight: luxuryDesign.typography.styles?.body?.lineHeight || 1.55,
-                  border: `${luxuryDesign.theme.page.borderWidth || 1}px solid ${luxuryDesign.theme.colors.accent}`,
-                  transform: `scale(${page.zoom / 100})`,
-                  transformOrigin: 'top center',
-                  marginBottom: `${Math.max(0, page.zoom - 100) * 8}px`,
-                  boxSizing: 'border-box',
-                }}
-              >
-                <header
-                  contentEditable
-                  suppressContentEditableWarning
-                  className="mb-8 pb-3 text-xs"
-                  style={{
-                    minHeight: `${luxuryDesign.layout.header.heightMm}mm`,
-                    borderBottom: luxuryDesign.layout.header.borderBottom
-                      ? `1px solid ${luxuryDesign.theme.colors.border}`
-                      : 'none',
-                    color: luxuryDesign.theme.colors.mutedText,
-                    fontFamily: luxuryDesign.typography.bodyFont,
+              {printPreview ? <PaginatedDocumentWorkspace document={selected} html={editorHtml} layout={normalizedPageLayout} zoom={page.zoom} preview /> : (
+                <PaginatedDocumentWorkspace
+                  document={selected}
+                  html={editorHtml}
+                  layout={normalizedPageLayout}
+                  zoom={page.zoom}
+                  editor={lexicalEditor}
+                  editorElementRef={editorElementRef}
+                  onPageFlowChange={(nextFlow) => {
+                    setPageFlow(nextFlow);
+                    setLayoutWarning(nextFlow.warning || '');
                   }}
                 >
-                  {profile?.company_name || 'Company'} · {selected?.title || 'Untitled'} · Page 1
-                </header>
-                <DocumentRichEditor
-                  ref={editorApiRef}
-                  html={editorHtml || '<h1>Start typing your document</h1><p>Use the toolbar to format content.</p>'}
-                  onHtmlChange={onEditorChange}
-                  disabled={busy || !selected}
-                />
-                <footer
-                  contentEditable
-                  suppressContentEditableWarning
-                  className="mt-8 pt-3 text-xs"
-                  style={{
-                    minHeight: `${luxuryDesign.layout.footer.heightMm}mm`,
-                    borderTop: luxuryDesign.layout.footer.borderTop
-                      ? `1px solid ${luxuryDesign.theme.colors.border}`
-                      : 'none',
-                    color: luxuryDesign.theme.colors.mutedText,
-                    fontFamily: luxuryDesign.typography.bodyFont,
-                  }}
-                >
-                  {luxuryDesign.branding.confidentialLabel} · Page 1 · Document No. {selected?.metadata?.verification_code || 'DRAFT'}
-                </footer>
-              </div>
+                  <div
+                    className="lumina-document lumina-editor-page transition-transform"
+                    data-design-profile={luxuryDesign.profile.id}
+                    data-document-theme={luxuryDesign.theme.id}
+                    data-typography-preset={luxuryDesign.typography.id}
+                    data-layout-preset={luxuryDesign.layout.id}
+                    style={{
+                      ...luxuryCssVariables,
+                      color: luxuryDesign.theme.colors.text,
+                      fontFamily: luxuryDesign.typography.bodyFont,
+                      fontSize: `${luxuryDesign.typography.styles?.body?.fontSize || 11}px`,
+                      lineHeight: luxuryDesign.typography.styles?.body?.lineHeight || 1.55,
+                    }}
+                  >
+                    <DocumentRichEditor
+                      ref={editorApiRef}
+                      html={editorHtml || '<h1>Start typing your document</h1><p>Use the toolbar to format content.</p>'}
+                      onHtmlChange={onEditorChange}
+                      disabled={busy || !selected}
+                      onEditorReady={setLexicalEditor}
+                    />
+                  </div>
+                </PaginatedDocumentWorkspace>
+              )}
             </div>
             {comments.length > 0 && <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-white/70"><div className="mb-2 font-medium text-white">Σχόλια και Προτάσεις</div>{comments.map((comment) => <div key={comment.id} className="mb-2 rounded-xl border border-white/10 p-3"><div>{comment.text}</div><button className="mt-2 text-gold" onClick={() => setComments((items) => items.map((x) => x.id === comment.id ? { ...x, resolved: !x.resolved } : x))}>{comment.resolved ? 'Επαναφορά' : 'Επίλυση'}</button></div>)}</div>}
             <div className="flex flex-wrap gap-2">
