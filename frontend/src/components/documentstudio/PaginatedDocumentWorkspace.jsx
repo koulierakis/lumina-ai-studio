@@ -5,6 +5,7 @@ import {
   normalizePageLayout,
   pageContentBox,
   pageDimensions,
+  paginateDocumentHtml,
   renderLayoutText,
 } from './editorModel';
 
@@ -67,6 +68,7 @@ export default function PaginatedDocumentWorkspace({
   const contentBox = useMemo(() => pageContentBox(normalized), [normalized]);
   const scale = preview ? 1 : zoom / 100;
   const [flow, setFlow] = useState({ pageCount: 1, mode: 'paginated', warning: '' });
+  const pageModels = useMemo(() => paginateDocumentHtml(html || '', normalized), [html, normalized]);
   const measureTimerRef = useRef(null);
   const resizeObserverRef = useRef(null);
   const lastSignatureRef = useRef('');
@@ -116,8 +118,8 @@ export default function PaginatedDocumentWorkspace({
     return () => resizeObserverRef.current?.disconnect();
   }, [children, editorElementRef, preview, scheduleMeasure]);
 
-  const pageCount = preview ? Math.max(1, flow.pageCount) : Math.max(1, flow.pageCount);
-  const pages = Array.from({ length: pageCount }, (_, index) => index + 1);
+  const pageCount = Math.max(pageModels.length, flow.pageCount || 1);
+  const renderPages = Array.from({ length: pageCount }, (_, index) => pageModels[index] || { pageNumber: index + 1, html: '<p></p>' });
   const pageNumberPosition = normalized.pageNumbers.position || 'bottom-center';
   const scaledWidth = dimensions.width * scale;
 
@@ -125,11 +127,11 @@ export default function PaginatedDocumentWorkspace({
     <div className={`lumina-page-workspace ${preview ? 'is-preview' : ''} ${flow.mode === 'continuous' ? 'is-continuous-fallback' : ''}`} data-page-count={pageCount} data-page-flow-mode={flow.mode}>
       {flow.warning && <div className="lumina-page-flow-warning" role="status">{flow.warning}</div>}
       <div className="lumina-page-stack" style={{ width: `${scaledWidth}mm` }}>
-        {pages.map((pageNumber) => (
+        {renderPages.map((page) => (
           <section
-            key={pageNumber}
+            key={page.pageNumber}
             className="lumina-print-page"
-            aria-label={`Page ${pageNumber}`}
+            aria-label={`Page ${page.pageNumber}`}
             style={{
               width: `${dimensions.width}mm`,
               height: `${dimensions.height}mm`,
@@ -140,9 +142,19 @@ export default function PaginatedDocumentWorkspace({
               marginBottom: `${Math.max(28, dimensions.height * (scale - 1) + 36)}px`,
             }}
           >
-            <div className="lumina-page-content-guide" style={{ height: `${contentBox.heightMm}mm` }} />
+            {normalized.header.enabled && (!normalized.header.firstPageOnly || page.pageNumber === 1) && (
+              <header className="lumina-page-header" style={{ marginBottom: `${normalized.header.spacing}mm` }}>
+                {renderLayoutText(normalized.header.text, document, page.pageNumber, pageCount)}
+              </header>
+            )}
+            <main className="lumina-page-body" dangerouslySetInnerHTML={{ __html: page.html }} />
+            {normalized.footer.enabled && (!normalized.footer.firstPageOnly || page.pageNumber === 1) && (
+              <footer className="lumina-page-footer" style={{ marginTop: `${normalized.footer.spacing}mm` }}>
+                {renderLayoutText(normalized.footer.text, document, page.pageNumber, pageCount)}
+              </footer>
+            )}
             {normalized.pageNumbers.enabled && pageNumberPosition !== 'none' && (
-              <span className={`lumina-page-number ${pageNumberPosition}`}>{formatPageNumber(normalized.pageNumbers.format, pageNumber, pageCount)}</span>
+              <span className={`lumina-page-number ${pageNumberPosition}`}>{formatPageNumber(normalized.pageNumbers.format, page.pageNumber, pageCount)}</span>
             )}
           </section>
         ))}
@@ -170,28 +182,7 @@ export default function PaginatedDocumentWorkspace({
             </div>
           </div>
         )}
-        {preview && (
-          <PreviewBody document={document} html={html} layout={normalized} pageCount={pageCount} />
-        )}
       </div>
-    </div>
-  );
-}
-
-function PreviewBody({ document, html, layout, pageCount }) {
-  const dimensions = pageDimensions(layout);
-  const contentBox = pageContentBox(layout);
-  const pageNumberPosition = layout.pageNumbers.position || 'bottom-center';
-  return (
-    <div className="lumina-preview-html-layer" style={{ width: `${dimensions.width}mm` }}>
-      {Array.from({ length: pageCount }, (_, index) => (
-        <section key={index + 1} className="lumina-preview-page-body" style={{ minHeight: `${contentBox.heightMm}mm` }}>
-          {layout.header.enabled && (!layout.header.firstPageOnly || index === 0) && <header className="lumina-page-header">{renderLayoutText(layout.header.text, document, index + 1, pageCount)}</header>}
-          <main dangerouslySetInnerHTML={{ __html: index === 0 ? html || '<p></p>' : '' }} />
-          {layout.footer.enabled && (!layout.footer.firstPageOnly || index === 0) && <footer className="lumina-page-footer">{renderLayoutText(layout.footer.text, document, index + 1, pageCount)}</footer>}
-          {layout.pageNumbers.enabled && pageNumberPosition !== 'none' && <span className={`lumina-page-number ${pageNumberPosition}`}>{formatPageNumber(layout.pageNumbers.format, index + 1, pageCount)}</span>}
-        </section>
-      ))}
     </div>
   );
 }

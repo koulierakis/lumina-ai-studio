@@ -1,4 +1,7 @@
-import { measurePageFlow } from './PaginatedDocumentWorkspace';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import PaginatedDocumentWorkspace, { measurePageFlow } from './PaginatedDocumentWorkspace';
+import { DEFAULT_PAGE_LAYOUT } from './editorModel';
 
 function makeMeasuredElement({ blockHeights = [], scrollHeight = 0 } = {}) {
   const root = document.createElement('div');
@@ -45,5 +48,28 @@ describe('PaginatedDocumentWorkspace real page flow', () => {
 
   test('measurement failure preserves content path by throwing for fallback handling', () => {
     expect(() => measurePageFlow(null, {})).toThrow('Page flow measurement target is unavailable.');
+  });
+
+  test('renders actual paginated content and page numbering for multi-page documents', () => {
+    const html = '<p>First page content</p><div data-lumina-page-break="true"></div><p>Second page content</p>';
+    const markup = renderToStaticMarkup(
+      <PaginatedDocumentWorkspace document={{ title: 'Sample' }} html={html} layout={DEFAULT_PAGE_LAYOUT} />
+    );
+
+    expect(markup).toContain('First page content');
+    expect(markup).toContain('Second page content');
+    expect(markup).toContain('Page 1');
+    expect(markup).toContain('Page 2');
+  });
+
+  test('keeps measured blank page shells when live DOM flow exceeds estimated HTML pages', () => {
+    const markup = renderToStaticMarkup(
+      <PaginatedDocumentWorkspace document={{ title: 'Measured' }} html="<p>Short content</p>" layout={DEFAULT_PAGE_LAYOUT}>
+        <div>Editor content</div>
+      </PaginatedDocumentWorkspace>
+    );
+
+    expect(markup).toContain('data-page-count="1"');
+    expect(markup).toContain('Short content');
   });
 });

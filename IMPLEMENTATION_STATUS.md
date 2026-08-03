@@ -47,6 +47,10 @@
   existing documents, sanitized paste/HTML insertion, Lexical history undo/redo,
   formatting command adapters, and save/autosave compatibility against the
   existing backend contracts.
+- Document Studio pagination milestone: the editor now supports persisted page
+  layout settings, explicit page breaks, header/footer/page-number rendering,
+  DOM-measured live page flow with continuous fallback, print preview parity, and
+  regression coverage for pagination model and workspace rendering.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -141,6 +145,10 @@
   passed.
 - Document Studio editor engine validation: Ruff passed, backend unit suite 19
   passed, frontend model/editor tests 7 passed, and frontend production build
+  passed.
+- Document Studio pagination validation: frontend document studio model/editor/
+  pagination tests 29 passed, backend Document Studio unit suite 19 passed, Ruff
+  passed for Document Studio backend files/tests, and frontend production build
   passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
