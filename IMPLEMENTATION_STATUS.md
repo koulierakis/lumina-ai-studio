@@ -51,6 +51,11 @@
   layout settings, explicit page breaks, header/footer/page-number rendering,
   DOM-measured live page flow with continuous fallback, print preview parity, and
   regression coverage for pagination model and workspace rendering.
+- Document Studio headers/footers and page setup engine: document-level A4/Letter,
+  portrait/landscape, margins, background and print-background settings are
+  normalized and persisted only after edits, headers and footers support alignment,
+  first-page variants and structured placeholders, and automatic page numbering is
+  rendered outside body HTML for editor, print preview and export metadata.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -150,6 +155,9 @@
   pagination tests 29 passed, backend Document Studio unit suite 19 passed, Ruff
   passed for Document Studio backend files/tests, and frontend production build
   passed.
+- Document Studio headers/footers/page setup validation: frontend document studio
+  model/editor/pagination/document model tests 37 passed, backend Document Studio
+  unit suite 19 passed, and frontend production build passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

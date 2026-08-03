@@ -6,7 +6,7 @@ import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, documentApi, d
 import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
 import PaginatedDocumentWorkspace from "../components/documentstudio/PaginatedDocumentWorkspace";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
-import { DEFAULT_PAGE_LAYOUT, normalizePageLayout, pageDimensions } from "../components/documentstudio/editorModel";
+import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, buildExportLayoutPayload, normalizePageLayout, pageDimensions } from "../components/documentstudio/editorModel";
 import {
   DOCUMENT_PROFILE_IDS,
   getDocumentProfileOptions,
@@ -64,6 +64,8 @@ export default function DocumentStudio() {
   const [pageLayout, setPageLayout] = useState(DEFAULT_PAGE_LAYOUT);
   const [printPreview, setPrintPreview] = useState(false);
   const [layoutWarning, setLayoutWarning] = useState('');
+  const [layoutDirty, setLayoutDirty] = useState(false);
+  const saveSequenceRef = useRef(0);
 
   const [luxuryDesigner, setLuxuryDesigner] = useState({
     profileId: DOCUMENT_PROFILE_IDS.BANK_OF_CYPRUS,
@@ -147,6 +149,11 @@ export default function DocumentStudio() {
   const normalizedPageLayout = useMemo(() => normalizePageLayout(pageLayout), [pageLayout]);
   const activePageDimensions = useMemo(() => pageDimensions(normalizedPageLayout), [normalizedPageLayout]);
 
+  function updatePageLayout(mutator) {
+    setPageLayout((current) => normalizePageLayout(typeof mutator === 'function' ? mutator(current) : mutator));
+    setLayoutDirty(true);
+  }
+
   const luxuryThemeOptions = useMemo(
     () => getDocumentThemeOptions('el'),
     []
@@ -190,6 +197,7 @@ export default function DocumentStudio() {
       setSelected(docs[0]);
       setEditorHtml(docs[0].content_html || '');
       setPageLayout(normalizePageLayout(docs[0].design?.pageLayout || docs[0].metadata?.page_layout));
+      setLayoutDirty(false);
       await loadVersions(docs[0]);
     }
     setLoading(false);
@@ -254,6 +262,7 @@ export default function DocumentStudio() {
       setSelected(created);
       setEditorHtml(created.content_html || '');
       setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout));
+      setLayoutDirty(false);
       setAnalysis(null); setQuality(null); setCompareResult(null);
       setGenerator((previous) => ({ ...previous, title: created.title, fields: { ...previous.fields, document_type: created.metadata?.document_class?.label || previous.fields.document_type, subject: '' } }));
       await refreshDocuments();
@@ -295,19 +304,26 @@ export default function DocumentStudio() {
 
   async function saveEditor(autosave = false) {
     if (!selected) return;
+    const saveSequence = ++saveSequenceRef.current;
+    const htmlAtSave = editorHtml;
+    const layoutAtSave = normalizedPageLayout;
     setBusy(true);
     setStatusText(autosave ? 'Autosaving…' : 'Saving version…');
     try {
-    if (autosave && editorHtml === lastSavedHtmlRef.current) {
+    if (autosave && htmlAtSave === lastSavedHtmlRef.current && !layoutDirty) {
       setStatusText('Ready');
       return;
     }
-    const contentText = editorHtml.replace(/<[^>]+>/g, ' ');
-    const nextDesign = { ...(selected.design || {}), pageLayout: normalizedPageLayout };
-    const nextMetadata = { ...(selected.metadata || {}), page_layout: normalizedPageLayout, page_count: pageFlow.pageCount };
-    const updated = await documentApi.update(selected.id, { content_html: editorHtml, content_text: contentText, design: nextDesign, metadata: nextMetadata, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
+    const contentText = htmlAtSave.replace(/<[^>]+>/g, ' ');
+    const exportLayout = buildExportLayoutPayload(layoutAtSave);
+    const nextDesign = { ...(selected.design || {}), pageLayout: layoutAtSave, exportLayout };
+    const nextMetadata = { ...(selected.metadata || {}), page_layout: layoutAtSave, export_layout: exportLayout, page_count: pageFlow.pageCount };
+    const updated = await documentApi.update(selected.id, { content_html: htmlAtSave, content_text: contentText, design: nextDesign, metadata: nextMetadata, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
+    if (saveSequence !== saveSequenceRef.current) return;
     setSelected(updated);
-    lastSavedHtmlRef.current = updated.content_html || editorHtml;
+    lastSavedHtmlRef.current = updated.content_html || htmlAtSave;
+    setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout || layoutAtSave));
+    setLayoutDirty(false);
     await refreshDocuments();
     await loadVersions(updated);
     toast.success(autosave ? 'Autosaved.' : 'Document saved with version history.');
@@ -423,6 +439,7 @@ export default function DocumentStudio() {
       setSelected(created);
       setEditorHtml(created.content_html || '');
       setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout));
+      setLayoutDirty(false);
       await refreshDocuments();
       await loadVersions(created);
       toast.success('New document created.');
@@ -447,6 +464,7 @@ export default function DocumentStudio() {
       setSelected(copy);
       setEditorHtml(copy.content_html || '');
       setPageLayout(normalizePageLayout(copy.design?.pageLayout || copy.metadata?.page_layout));
+      setLayoutDirty(false);
       await refreshDocuments();
       toast.success('Document duplicated.');
     } catch (error) {
@@ -477,6 +495,7 @@ export default function DocumentStudio() {
       setSelected(docs[0]);
       setEditorHtml(docs[0].content_html || '');
       setPageLayout(normalizePageLayout(docs[0].design?.pageLayout || docs[0].metadata?.page_layout));
+      setLayoutDirty(false);
       await loadVersions(docs[0]);
     }
     toast.success('Document deleted.');
@@ -639,6 +658,7 @@ export default function DocumentStudio() {
       setSelected(updated);
       setEditorHtml(updated.content_html || '');
       setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout));
+      setLayoutDirty(false);
       setQuality(updated.quality_score || null);
 
       await refreshDocuments();
@@ -656,7 +676,7 @@ export default function DocumentStudio() {
   async function redesign() {
     if (!selected) return;
     const updated = await documentApi.redesign(selected.id);
-    setSelected(updated); setEditorHtml(updated.content_html || ''); setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout)); setQuality(updated.quality_score); await refreshDocuments(); await loadVersions(updated); toast.success('Document redesigned without changing meaning.');
+    setSelected(updated); setEditorHtml(updated.content_html || ''); setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout)); setLayoutDirty(false); setQuality(updated.quality_score); await refreshDocuments(); await loadVersions(updated); toast.success('Document redesigned without changing meaning.');
   }
 
   async function scoreDocument() {
@@ -670,7 +690,7 @@ export default function DocumentStudio() {
 
   async function buildPackage(package_type) {
     const created = await documentApi.createPackage({ package_type, title: `${package_type} executive package`, client: generator.parties[1] || 'Strategic Client', fields: generator.fields, tags: ['package', package_type, 'executive'] });
-    setSelected(created); setEditorHtml(created.content_html || ''); setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout)); setQuality(created.quality_score); await refreshDocuments(); await loadVersions(created); toast.success(`${package_type} package generated.`);
+    setSelected(created); setEditorHtml(created.content_html || ''); setPageLayout(normalizePageLayout(created.design?.pageLayout || created.metadata?.page_layout)); setLayoutDirty(false); setQuality(created.quality_score); await refreshDocuments(); await loadVersions(created); toast.success(`${package_type} package generated.`);
   }
 
   async function compareWithFirstOther() {
@@ -689,6 +709,7 @@ export default function DocumentStudio() {
       setSelected(restored);
       setEditorHtml(restored.content_html || '');
       setPageLayout(normalizePageLayout(restored.design?.pageLayout || restored.metadata?.page_layout));
+      setLayoutDirty(false);
     }
     await loadVersions(selected);
     toast.success(`Version ${action} completed: ${result.version_id || version.id}`);
@@ -716,6 +737,7 @@ export default function DocumentStudio() {
       setSelected(imported);
       setEditorHtml(imported.content_html || '');
       setPageLayout(normalizePageLayout(imported.design?.pageLayout || imported.metadata?.page_layout));
+      setLayoutDirty(false);
       await refreshDocuments();
       toast.success('Document imported and searchable text extracted.');
     } catch (error) {
@@ -871,6 +893,8 @@ export default function DocumentStudio() {
           onSelectDocument={(document) => {
             setSelected(document);
             setEditorHtml(document.content_html || "");
+            setPageLayout(normalizePageLayout(document.design?.pageLayout || document.metadata?.page_layout));
+            setLayoutDirty(false);
             setAnalysis(null);
             setQuality(document.quality_score || null);
             setCompareResult(null);
@@ -964,8 +988,8 @@ export default function DocumentStudio() {
           <Panel title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>
             <div className="premium-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur">
               <div className="flex flex-wrap items-center gap-2">
-                <select className="field max-w-[110px] py-2" value={normalizedPageLayout.size} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, size: e.target.value }))}>{['A4', 'Letter'].map((x) => <option key={x}>{x}</option>)}</select>
-                <select className="field max-w-[130px] py-2" value={normalizedPageLayout.orientation} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, orientation: e.target.value }))}>{['portrait', 'landscape'].map((x) => <option key={x}>{x}</option>)}</select>
+                <select className="field max-w-[110px] py-2" value={normalizedPageLayout.size} onChange={(e) => updatePageLayout((current) => ({ ...current, size: e.target.value }))}>{['A4', 'Letter'].map((x) => <option key={x}>{x}</option>)}</select>
+                <select className="field max-w-[130px] py-2" value={normalizedPageLayout.orientation} onChange={(e) => updatePageLayout((current) => ({ ...current, orientation: e.target.value }))}>{['portrait', 'landscape'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[140px] py-2" onChange={(e) => format('fontName', e.target.value)} defaultValue="Inter">{['Inter', 'Georgia', 'Times New Roman', 'Arial', 'Calibri'].map((x) => <option key={x}>{x}</option>)}</select>
                 <select className="field max-w-[90px] py-2" onChange={(e) => format('fontSize', e.target.value)} defaultValue="3">{[['2', '10'], ['3', '12'], ['4', '14'], ['5', '18'], ['6', '24']].map(([v, label]) => <option value={v} key={v}>{label}px</option>)}</select>
                 {[
@@ -985,17 +1009,28 @@ export default function DocumentStudio() {
               </div>
             </div>
             <div className="grid gap-2 rounded-2xl border border-white/10 bg-black/20 p-3 text-xs text-white/60 md:grid-cols-4">
+              <b className="text-gold md:col-span-4">Page Setup</b>
               <span>Pages: {pageFlow.pageCount}</span>
               <span>Paper: {normalizedPageLayout.size} · {normalizedPageLayout.orientation}</span>
               <span>Size: {Math.round(activePageDimensions.width)} × {Math.round(activePageDimensions.height)} mm</span>
               <span>Zoom: {page.zoom}%</span>
-              {['top', 'right', 'bottom', 'left'].map((side) => <label key={side} className="flex items-center gap-2 capitalize">{side}<input className="field py-1" type="number" min="5" max="50" value={normalizedPageLayout.margins[side]} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, margins: { ...current.margins, [side]: Number(e.target.value) } }))} /></label>)}
-              <label className="md:col-span-2">Header<input className="field mt-1 py-2" value={normalizedPageLayout.header.text} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, header: { ...current.header, text: e.target.value, enabled: true } }))} /></label>
-              <label className="md:col-span-2">Footer<input className="field mt-1 py-2" value={normalizedPageLayout.footer.text} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, footer: { ...current.footer, text: e.target.value, enabled: true } }))} /></label>
-              <select className="field py-2" value={normalizedPageLayout.pageNumbers.position} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, pageNumbers: { ...current.pageNumbers, position: e.target.value, enabled: e.target.value !== 'none' } }))}>{['bottom-center', 'bottom-right', 'top-right', 'none'].map((x) => <option key={x}>{x}</option>)}</select>
-              <select className="field py-2" value={normalizedPageLayout.pageNumbers.format} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, pageNumbers: { ...current.pageNumbers, format: e.target.value } }))}>{['Page X of Y', 'Page X', 'X'].map((x) => <option key={x}>{x}</option>)}</select>
-              <input type="color" className="h-10 rounded-xl bg-transparent" value={normalizedPageLayout.background} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, background: e.target.value }))} />
-              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.printBackground} onChange={(e) => setPageLayout((current) => normalizePageLayout({ ...current, printBackground: e.target.checked }))} />Print background</label>
+              {['top', 'right', 'bottom', 'left'].map((side) => <label key={side} className="flex items-center gap-2 capitalize">{side}<input className="field py-1" type="number" min="5" max="50" value={normalizedPageLayout.margins[side]} onChange={(e) => updatePageLayout((current) => ({ ...current, margins: { ...current.margins, [side]: Number(e.target.value) } }))} /></label>)}
+              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.header.enabled} onChange={(e) => updatePageLayout((current) => ({ ...current, header: { ...current.header, enabled: e.target.checked } }))} />Header enabled</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.header.differentFirstPage} onChange={(e) => updatePageLayout((current) => ({ ...current, header: { ...current.header, differentFirstPage: e.target.checked } }))} />First-page header</label>
+              <select className="field py-2" value={normalizedPageLayout.header.align} onChange={(e) => updatePageLayout((current) => ({ ...current, header: { ...current.header, align: e.target.value } }))}>{['left', 'center', 'right'].map((x) => <option key={x}>{x}</option>)}</select>
+              <label>Header top distance<input className="field mt-1 py-1" type="number" min="0" max="40" value={normalizedPageLayout.header.distanceMm} onChange={(e) => updatePageLayout((current) => ({ ...current, header: { ...current.header, distanceMm: Number(e.target.value) } }))} /></label>
+              <label className="md:col-span-2">Header<input className="field mt-1 py-2" value={normalizedPageLayout.header.text} onChange={(e) => updatePageLayout((current) => ({ ...current, header: { ...current.header, text: e.target.value, enabled: true } }))} /></label>
+              <label className="md:col-span-2">First-page header<input className="field mt-1 py-2" value={normalizedPageLayout.header.firstPageText} onChange={(e) => updatePageLayout((current) => ({ ...current, header: { ...current.header, firstPageText: e.target.value, differentFirstPage: true, enabled: true } }))} /></label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.footer.enabled} onChange={(e) => updatePageLayout((current) => ({ ...current, footer: { ...current.footer, enabled: e.target.checked } }))} />Footer enabled</label>
+              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.footer.differentFirstPage} onChange={(e) => updatePageLayout((current) => ({ ...current, footer: { ...current.footer, differentFirstPage: e.target.checked } }))} />First-page footer</label>
+              <select className="field py-2" value={normalizedPageLayout.footer.align} onChange={(e) => updatePageLayout((current) => ({ ...current, footer: { ...current.footer, align: e.target.value } }))}>{['left', 'center', 'right'].map((x) => <option key={x}>{x}</option>)}</select>
+              <label>Footer bottom distance<input className="field mt-1 py-1" type="number" min="0" max="40" value={normalizedPageLayout.footer.distanceMm} onChange={(e) => updatePageLayout((current) => ({ ...current, footer: { ...current.footer, distanceMm: Number(e.target.value) } }))} /></label>
+              <label className="md:col-span-2">Footer<input className="field mt-1 py-2" value={normalizedPageLayout.footer.text} onChange={(e) => updatePageLayout((current) => ({ ...current, footer: { ...current.footer, text: e.target.value, enabled: true } }))} /></label>
+              <label className="md:col-span-2">First-page footer<input className="field mt-1 py-2" value={normalizedPageLayout.footer.firstPageText} onChange={(e) => updatePageLayout((current) => ({ ...current, footer: { ...current.footer, firstPageText: e.target.value, differentFirstPage: true, enabled: true } }))} /></label>
+              <select className="field py-2" value={normalizedPageLayout.pageNumbers.position} onChange={(e) => updatePageLayout((current) => ({ ...current, pageNumbers: { ...current.pageNumbers, position: e.target.value, enabled: e.target.value !== 'none' } }))}>{PAGE_NUMBER_POSITIONS.map((x) => <option key={x}>{x}</option>)}</select>
+              <select className="field py-2" value={normalizedPageLayout.pageNumbers.format} onChange={(e) => updatePageLayout((current) => ({ ...current, pageNumbers: { ...current.pageNumbers, format: e.target.value } }))}>{PAGE_NUMBER_FORMATS.map((x) => <option key={x}>{x}</option>)}</select>
+              <input type="color" className="h-10 rounded-xl bg-transparent" value={normalizedPageLayout.background} onChange={(e) => updatePageLayout((current) => ({ ...current, background: e.target.value }))} />
+              <label className="flex items-center gap-2"><input type="checkbox" checked={normalizedPageLayout.printBackground} onChange={(e) => updatePageLayout((current) => ({ ...current, printBackground: e.target.checked }))} />Print background</label>
             </div>
             {(layoutWarning || pageFlow.warning) && <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">{layoutWarning || pageFlow.warning}</div>}
             <div className="premium-doc-shell overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>

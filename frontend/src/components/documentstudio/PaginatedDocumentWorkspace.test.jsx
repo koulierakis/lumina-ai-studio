@@ -53,7 +53,7 @@ describe('PaginatedDocumentWorkspace real page flow', () => {
   test('renders actual paginated content and page numbering for multi-page documents', () => {
     const html = '<p>First page content</p><div data-lumina-page-break="true"></div><p>Second page content</p>';
     const markup = renderToStaticMarkup(
-      <PaginatedDocumentWorkspace document={{ title: 'Sample' }} html={html} layout={DEFAULT_PAGE_LAYOUT} />
+      <PaginatedDocumentWorkspace document={{ title: 'Sample' }} html={html} layout={{ ...DEFAULT_PAGE_LAYOUT, pageNumbers: { position: 'bottom-center', format: 'Page 1 of 5', enabled: true } }} />
     );
 
     expect(markup).toContain('First page content');
@@ -71,5 +71,44 @@ describe('PaginatedDocumentWorkspace real page flow', () => {
 
     expect(markup).toContain('data-page-count="1"');
     expect(markup).toContain('Short content');
+  });
+
+  test('renders editable header and footer placeholders outside the body HTML', () => {
+    const markup = renderToStaticMarkup(
+      <PaginatedDocumentWorkspace
+        document={{ title: 'Board Resolution' }}
+        html="<p>Body stays clean</p>"
+        layout={{
+          ...DEFAULT_PAGE_LAYOUT,
+          header: { enabled: true, text: '{{DOCUMENT_TITLE}} · {{PAGE_NUMBER}}/{{TOTAL_PAGES}}', align: 'left', distanceMm: 7, repeat: true },
+          footer: { enabled: true, text: '{{CURRENT_DATE}}', align: 'right', distanceMm: 9, repeat: true },
+        }}
+      />
+    );
+
+    expect(markup).toContain('lumina-page-header align-left');
+    expect(markup).toContain('Board Resolution · 1/1');
+    expect(markup).toContain('lumina-page-footer align-right');
+    expect(markup).toContain('Body stays clean');
+  });
+
+  test('renders different first-page header and footer variants', () => {
+    const html = '<p>First page content</p><div data-lumina-page-break="true"></div><p>Second page content</p>';
+    const markup = renderToStaticMarkup(
+      <PaginatedDocumentWorkspace
+        document={{ title: 'Variant' }}
+        html={html}
+        layout={{
+          ...DEFAULT_PAGE_LAYOUT,
+          header: { enabled: true, text: 'Repeated header', firstPageText: 'First header', align: 'center', distanceMm: 8, repeat: true, differentFirstPage: true },
+          footer: { enabled: true, text: 'Repeated footer', firstPageText: 'First footer', align: 'center', distanceMm: 8, repeat: true, differentFirstPage: true },
+        }}
+      />
+    );
+
+    expect(markup).toContain('First header');
+    expect(markup).toContain('Repeated header');
+    expect(markup).toContain('First footer');
+    expect(markup).toContain('Repeated footer');
   });
 });

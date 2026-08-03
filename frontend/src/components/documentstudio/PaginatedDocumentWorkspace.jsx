@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   calculateMeasuredPages,
   formatPageNumber,
+  getPageRegionText,
   normalizePageLayout,
   pageContentBox,
   pageDimensions,
   paginateDocumentHtml,
-  renderLayoutText,
 } from './editorModel';
 
 const MEASURE_DEBOUNCE_MS = 80;
@@ -142,15 +142,15 @@ export default function PaginatedDocumentWorkspace({
               marginBottom: `${Math.max(28, dimensions.height * (scale - 1) + 36)}px`,
             }}
           >
-            {normalized.header.enabled && (!normalized.header.firstPageOnly || page.pageNumber === 1) && (
-              <header className="lumina-page-header" style={{ marginBottom: `${normalized.header.spacing}mm` }}>
-                {renderLayoutText(normalized.header.text, document, page.pageNumber, pageCount)}
+            {normalized.header.enabled && getPageRegionText(normalized.header, document, page.pageNumber, pageCount) && (
+              <header className={`lumina-page-header align-${normalized.header.align}`} style={{ top: `${normalized.header.distanceMm}mm` }}>
+                {getPageRegionText(normalized.header, document, page.pageNumber, pageCount)}
               </header>
             )}
             <main className="lumina-page-body" dangerouslySetInnerHTML={{ __html: page.html }} />
-            {normalized.footer.enabled && (!normalized.footer.firstPageOnly || page.pageNumber === 1) && (
-              <footer className="lumina-page-footer" style={{ marginTop: `${normalized.footer.spacing}mm` }}>
-                {renderLayoutText(normalized.footer.text, document, page.pageNumber, pageCount)}
+            {normalized.footer.enabled && getPageRegionText(normalized.footer, document, page.pageNumber, pageCount) && (
+              <footer className={`lumina-page-footer align-${normalized.footer.align}`} style={{ bottom: `${normalized.footer.distanceMm}mm` }}>
+                {getPageRegionText(normalized.footer, document, page.pageNumber, pageCount)}
               </footer>
             )}
             {normalized.pageNumbers.enabled && pageNumberPosition !== 'none' && (
@@ -176,6 +176,8 @@ export default function PaginatedDocumentWorkspace({
               style={{
                 width: `${contentBox.widthMm}mm`,
                 minHeight: `${contentBox.heightMm}mm`,
+                marginTop: normalized.header.enabled ? `${normalized.header.distanceMm + 8}mm` : 0,
+                marginBottom: normalized.footer.enabled ? `${normalized.footer.distanceMm + 8}mm` : 0,
               }}
             >
               {children}

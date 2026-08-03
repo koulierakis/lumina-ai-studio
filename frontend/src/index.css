@@ -257,6 +257,60 @@ body {
   right: 12mm;
 }
 
+.lumina-page-number.top-left {
+  top: 8mm;
+  left: 12mm;
+}
+
+.lumina-page-number.top-center {
+  top: 8mm;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.lumina-page-number.bottom-left {
+  bottom: 8mm;
+  left: 12mm;
+}
+
+.lumina-page-header,
+.lumina-page-footer {
+  position: absolute;
+  left: 18mm;
+  right: 18mm;
+  z-index: 2;
+  min-height: 5mm;
+  color: #6b7280;
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.lumina-page-footer {
+  border-top: 1px solid rgba(185, 152, 90, 0.18);
+  padding-top: 2mm;
+}
+
+.lumina-page-header {
+  border-bottom: 1px solid rgba(185, 152, 90, 0.18);
+  padding-bottom: 2mm;
+}
+
+.lumina-page-header.align-left,
+.lumina-page-footer.align-left {
+  text-align: left;
+}
+
+.lumina-page-header.align-center,
+.lumina-page-footer.align-center {
+  text-align: center;
+}
+
+.lumina-page-header.align-right,
+.lumina-page-footer.align-right {
+  text-align: right;
+}
+
 .lumina-page-flow-warning {
   position: sticky;
   top: 8px;

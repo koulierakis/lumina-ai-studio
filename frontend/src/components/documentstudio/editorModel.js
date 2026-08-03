@@ -100,15 +100,19 @@ export const PAGE_SIZES_MM = {
   'US Letter': { width: 215.9, height: 279.4 },
 };
 
+export const PAGE_NUMBER_POSITIONS = ['none', 'top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-center', 'bottom-right'];
+export const PAGE_NUMBER_FORMATS = ['1', 'Page 1', 'Page 1 of 5'];
+export const PAGE_ALIGNMENTS = ['left', 'center', 'right'];
+
 export const DEFAULT_PAGE_LAYOUT = {
   size: 'A4',
   orientation: 'portrait',
   margins: { top: 22, right: 18, bottom: 22, left: 18 },
   background: '#ffffff',
   printBackground: true,
-  header: { enabled: true, text: '{{title}}', spacing: 8, firstPageOnly: false },
-  footer: { enabled: true, text: '{{date}}', spacing: 8, firstPageOnly: false },
-  pageNumbers: { enabled: true, position: 'bottom-center', format: 'Page X of Y' },
+  header: { enabled: true, text: '{{DOCUMENT_TITLE}}', firstPageText: '', align: 'center', distanceMm: 8, repeat: true, differentFirstPage: false, logoPlaceholder: '' },
+  footer: { enabled: true, text: '{{CURRENT_DATE}}', firstPageText: '', align: 'center', distanceMm: 8, repeat: true, differentFirstPage: false },
+  pageNumbers: { enabled: true, position: 'bottom-center', format: 'Page 1 of 5' },
 };
 
 export function normalizePageLayout(layout = {}) {
@@ -116,6 +120,10 @@ export function normalizePageLayout(layout = {}) {
   const requestedSize = layout.size === 'US Letter' ? 'Letter' : layout.size;
   const size = PAGE_SIZES_MM[requestedSize] ? requestedSize : DEFAULT_PAGE_LAYOUT.size;
   const orientation = layout.orientation === 'landscape' ? 'landscape' : 'portrait';
+  const header = normalizeHeaderFooter(layout.header, DEFAULT_PAGE_LAYOUT.header);
+  const footer = normalizeHeaderFooter(layout.footer, DEFAULT_PAGE_LAYOUT.footer);
+  const rawPageNumbers = { ...DEFAULT_PAGE_LAYOUT.pageNumbers, ...(layout.pageNumbers || {}) };
+  const pageNumberPosition = PAGE_NUMBER_POSITIONS.includes(rawPageNumbers.position) ? rawPageNumbers.position : DEFAULT_PAGE_LAYOUT.pageNumbers.position;
   return {
     ...DEFAULT_PAGE_LAYOUT,
     ...layout,
@@ -127,10 +135,51 @@ export function normalizePageLayout(layout = {}) {
       bottom: clampMargin(margins.bottom, DEFAULT_PAGE_LAYOUT.margins.bottom),
       left: clampMargin(margins.left, DEFAULT_PAGE_LAYOUT.margins.left),
     },
-    header: { ...DEFAULT_PAGE_LAYOUT.header, ...(layout.header || {}) },
-    footer: { ...DEFAULT_PAGE_LAYOUT.footer, ...(layout.footer || {}) },
-    pageNumbers: { ...DEFAULT_PAGE_LAYOUT.pageNumbers, ...(layout.pageNumbers || {}) },
+    background: normalizeColor(layout.background, DEFAULT_PAGE_LAYOUT.background),
+    printBackground: layout.printBackground !== false,
+    header,
+    footer,
+    pageNumbers: {
+      ...rawPageNumbers,
+      enabled: rawPageNumbers.enabled !== false && pageNumberPosition !== 'none',
+      position: pageNumberPosition,
+      format: normalizePageNumberFormat(rawPageNumbers.format),
+    },
   };
+}
+
+function normalizeHeaderFooter(value = {}, defaults = {}) {
+  const source = { ...defaults, ...(value || {}) };
+  const distanceSource = value?.distanceMm ?? value?.spacing ?? defaults.distanceMm;
+  return {
+    ...source,
+    enabled: source.enabled !== false,
+    text: String(source.text ?? ''),
+    firstPageText: String(source.firstPageText ?? ''),
+    align: PAGE_ALIGNMENTS.includes(source.align) ? source.align : defaults.align,
+    distanceMm: clampDistance(distanceSource, defaults.distanceMm),
+    repeat: source.repeat !== false,
+    differentFirstPage: Boolean(source.differentFirstPage || source.firstPageOnly),
+    logoPlaceholder: String(source.logoPlaceholder ?? ''),
+  };
+}
+
+function normalizeColor(value, fallback) {
+  const text = String(value || '').trim();
+  return /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(text) ? text : fallback;
+}
+
+function clampDistance(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return Math.min(40, parsed);
+}
+
+function normalizePageNumberFormat(format = '') {
+  if (format === 'X') return '1';
+  if (format === 'Page X') return 'Page 1';
+  if (format === 'Page X of Y') return 'Page 1 of 5';
+  return PAGE_NUMBER_FORMATS.includes(format) ? format : DEFAULT_PAGE_LAYOUT.pageNumbers.format;
 }
 
 function clampMargin(value, fallback) {
@@ -161,6 +210,19 @@ export function pageContentBox(layout = {}) {
     heightMm: Math.max(20, dimensions.height - normalized.margins.top - normalized.margins.bottom),
     widthPx: mmToPx(Math.max(20, dimensions.width - normalized.margins.left - normalized.margins.right)),
     heightPx: mmToPx(Math.max(20, dimensions.height - normalized.margins.top - normalized.margins.bottom)),
+  };
+}
+
+export function pageBodyContentBox(layout = {}) {
+  const normalized = normalizePageLayout(layout);
+  const box = pageContentBox(normalized);
+  const headerReserve = normalized.header.enabled ? normalized.header.distanceMm + 8 : 0;
+  const footerReserve = normalized.footer.enabled ? normalized.footer.distanceMm + 8 : 0;
+  const pageNumberReserve = normalized.pageNumbers.enabled ? 6 : 0;
+  return {
+    ...box,
+    heightMm: Math.max(20, box.heightMm - headerReserve - footerReserve - pageNumberReserve),
+    heightPx: mmToPx(Math.max(20, box.heightMm - headerReserve - footerReserve - pageNumberReserve)),
   };
 }
 
@@ -223,8 +285,7 @@ export function estimateBlockWeight(block = '') {
 
 export function paginateDocumentHtml(html = '', layout = {}) {
   const normalized = normalizePageLayout(layout);
-  const dimensions = pageDimensions(normalized);
-  const bodyHeight = dimensions.height - normalized.margins.top - normalized.margins.bottom - (normalized.header.enabled ? 14 : 0) - (normalized.footer.enabled ? 14 : 0);
+  const bodyHeight = pageBodyContentBox(normalized).heightMm;
   const capacity = Math.max(12, Math.floor(bodyHeight / 4.2));
   const pages = [[]];
   let used = 0;
@@ -248,16 +309,44 @@ export function paginateDocumentHtml(html = '', layout = {}) {
 }
 
 export function formatPageNumber(format = 'Page X of Y', pageNumber = 1, pageCount = 1) {
-  if (format === 'X') return String(pageNumber);
-  if (format === 'Page X') return `Page ${pageNumber}`;
+  const normalized = normalizePageNumberFormat(format);
+  if (normalized === '1') return String(pageNumber);
+  if (normalized === 'Page 1') return `Page ${pageNumber}`;
   return `Page ${pageNumber} of ${pageCount}`;
 }
 
 export function renderLayoutText(template = '', document = {}, pageNumber = 1, pageCount = 1) {
   const today = new Date().toISOString().slice(0, 10);
   return String(template || '')
+    .replaceAll('{{DOCUMENT_TITLE}}', document.title || 'Untitled')
+    .replaceAll('{{CURRENT_DATE}}', today)
+    .replaceAll('{{PAGE_NUMBER}}', String(pageNumber))
+    .replaceAll('{{TOTAL_PAGES}}', String(pageCount))
     .replaceAll('{{title}}', document.title || 'Untitled')
     .replaceAll('{{date}}', today)
     .replaceAll('{{page}}', String(pageNumber))
     .replaceAll('{{pages}}', String(pageCount));
+}
+
+export function getPageRegionText(region = {}, document = {}, pageNumber = 1, pageCount = 1) {
+  if (!region.enabled) return '';
+  if (!region.repeat && pageNumber > 1) return '';
+  const template = region.differentFirstPage && pageNumber === 1 && region.firstPageText ? region.firstPageText : region.text;
+  return renderLayoutText(template, document, pageNumber, pageCount);
+}
+
+export function buildExportLayoutPayload(layout = {}) {
+  const normalized = normalizePageLayout(layout);
+  return {
+    page: {
+      size: normalized.size,
+      orientation: normalized.orientation,
+      margins: normalized.margins,
+      background: normalized.background,
+      printBackground: normalized.printBackground,
+    },
+    header: normalized.header,
+    footer: normalized.footer,
+    pageNumbers: normalized.pageNumbers,
+  };
 }

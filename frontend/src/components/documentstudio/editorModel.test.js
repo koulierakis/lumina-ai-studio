@@ -1,12 +1,17 @@
 import {
   DEFAULT_PAGE_LAYOUT,
+  PAGE_NUMBER_POSITIONS,
   PageBreakNode,
+  buildExportLayoutPayload,
   createPageBreakNode,
   formatPageNumber,
+  getPageRegionText,
   normalizeLegacyPageBreaks,
   normalizePageLayout,
   pageDimensions,
+  pageContentBox,
   paginateDocumentHtml,
+  renderLayoutText,
 } from './editorModel';
 
 describe('document studio page layout model', () => {
@@ -31,14 +36,22 @@ describe('document studio page layout model', () => {
 
   it('keeps header, footer and page-number settings intact', () => {
     const layout = normalizePageLayout({
-      header: { enabled: true, text: '{{title}}', spacing: 10, firstPageOnly: true },
-      footer: { enabled: false, text: '{{date}}', spacing: 6, firstPageOnly: false },
-      pageNumbers: { enabled: true, position: 'top-right', format: 'Page X' },
+      header: { enabled: true, text: '{{DOCUMENT_TITLE}}', firstPageText: 'Cover', align: 'left', distanceMm: 10, differentFirstPage: true },
+      footer: { enabled: false, text: '{{CURRENT_DATE}}', align: 'right', distanceMm: 6, differentFirstPage: false },
+      pageNumbers: { enabled: true, position: 'top-right', format: 'Page 1' },
     });
 
-    expect(layout.header).toEqual({ enabled: true, text: '{{title}}', spacing: 10, firstPageOnly: true });
-    expect(layout.footer).toEqual({ enabled: false, text: '{{date}}', spacing: 6, firstPageOnly: false });
-    expect(layout.pageNumbers).toEqual({ enabled: true, position: 'top-right', format: 'Page X' });
+    expect(layout.header).toMatchObject({ enabled: true, text: '{{DOCUMENT_TITLE}}', firstPageText: 'Cover', align: 'left', distanceMm: 10, differentFirstPage: true });
+    expect(layout.footer).toMatchObject({ enabled: false, text: '{{CURRENT_DATE}}', align: 'right', distanceMm: 6, differentFirstPage: false });
+    expect(layout.pageNumbers).toEqual({ enabled: true, position: 'top-right', format: 'Page 1' });
+  });
+
+  it('normalizes old document defaults and legacy placeholder formats safely', () => {
+    const layout = normalizePageLayout({ header: { text: '{{title}}', spacing: 12, firstPageOnly: true }, pageNumbers: { format: 'Page X of Y' } });
+    expect(layout.header.distanceMm).toBe(12);
+    expect(layout.header.differentFirstPage).toBe(true);
+    expect(layout.pageNumbers.format).toBe('Page 1 of 5');
+    expect(renderLayoutText('{{title}} {{date}} {{page}}/{{pages}}', { title: 'Legacy' }, 2, 9)).toContain('Legacy');
   });
 
   it('returns the expected page dimensions for portrait and landscape choices', () => {
@@ -71,9 +84,45 @@ describe('document studio page layout model', () => {
   });
 
   it('formats page numbering for the supported styles', () => {
-    expect(formatPageNumber('Page X of Y', 2, 5)).toBe('Page 2 of 5');
-    expect(formatPageNumber('Page X', 2, 5)).toBe('Page 2');
-    expect(formatPageNumber('X', 2, 5)).toBe('2');
+    expect(formatPageNumber('Page 1 of 5', 2, 5)).toBe('Page 2 of 5');
+    expect(formatPageNumber('Page 1', 2, 5)).toBe('Page 2');
+    expect(formatPageNumber('1', 2, 5)).toBe('2');
+  });
+
+  it('supports every page-number position', () => {
+    PAGE_NUMBER_POSITIONS.forEach((position) => {
+      const layout = normalizePageLayout({ pageNumbers: { position } });
+      expect(layout.pageNumbers.position).toBe(position);
+      expect(layout.pageNumbers.enabled).toBe(position !== 'none');
+    });
+  });
+
+  it('resolves structured placeholders without mutating stored header/footer content', () => {
+    const template = '{{DOCUMENT_TITLE}} · {{CURRENT_DATE}} · {{PAGE_NUMBER}}/{{TOTAL_PAGES}}';
+    const rendered = renderLayoutText(template, { title: 'Board Pack' }, 3, 7);
+    expect(rendered).toContain('Board Pack');
+    expect(rendered).toContain('3/7');
+    expect(template).toContain('{{DOCUMENT_TITLE}}');
+  });
+
+  it('applies first-page header and footer variations without storing them in body HTML', () => {
+    const header = normalizePageLayout({ header: { text: 'Repeated', firstPageText: 'First only', differentFirstPage: true } }).header;
+    expect(getPageRegionText(header, { title: 'Doc' }, 1, 2)).toBe('First only');
+    expect(getPageRegionText(header, { title: 'Doc' }, 2, 2)).toBe('Repeated');
+  });
+
+  it('recalculates pagination capacity after margin changes', () => {
+    const compact = pageContentBox({ margins: { top: 10, bottom: 10, left: 10, right: 10 } });
+    const wide = pageContentBox({ margins: { top: 50, bottom: 50, left: 10, right: 10 } });
+    expect(wide.heightMm).toBeLessThan(compact.heightMm);
+  });
+
+  it('builds print/export layout payload with page setup, header, footer and numbering', () => {
+    const payload = buildExportLayoutPayload({ size: 'Letter', orientation: 'landscape', margins: { top: 12, right: 13, bottom: 14, left: 15 }, pageNumbers: { position: 'bottom-left', format: 'Page 1 of 5' } });
+    expect(payload.page).toMatchObject({ size: 'Letter', orientation: 'landscape', margins: { top: 12, right: 13, bottom: 14, left: 15 } });
+    expect(payload.header.text).toBe('{{DOCUMENT_TITLE}}');
+    expect(payload.footer.text).toBe('{{CURRENT_DATE}}');
+    expect(payload.pageNumbers.position).toBe('bottom-left');
   });
 
   it('normalizes legacy page-break markup', () => {
