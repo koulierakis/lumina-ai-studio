@@ -23,6 +23,9 @@ describe('Document Studio model helpers', () => {
     expect(documentApi.createCollection).toBeInstanceOf(Function);
     expect(documentApi.batch).toBeInstanceOf(Function);
     expect(documentApi.activity).toBeInstanceOf(Function);
+    expect(documentApi.templateLibrary).toBeInstanceOf(Function);
+    expect(documentApi.createTemplate).toBeInstanceOf(Function);
+    expect(documentApi.mergeTemplate).toBeInstanceOf(Function);
   });
 
   test('document filters support archive and trash explorer status values', () => {

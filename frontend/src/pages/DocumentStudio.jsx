@@ -30,6 +30,10 @@ const defaultGenerator = {
 export default function DocumentStudio() {
   const [documents, setDocuments] = useState([]);
   const [templates, setTemplates] = useState([]);
+  const [templateLibrary, setTemplateLibrary] = useState([]);
+  const [templateDraft, setTemplateDraft] = useState({ name: 'Banking Certificate Template', category: 'Banking', tags: ['banking', 'kyc'], content_html: '<article><h1>{{title}}</h1><p>{{company.name}}</p>{{#if signer}}<p>Signer: {{signer}}</p>{{/if}}{{#each items}}<p>{{item.name}} · {{item.amount|currency}}</p>{{/each}}</article>', merge_schema: { required: ['title', 'company.name'] } });
+  const [mergeVariables, setMergeVariables] = useState('{"title":"Certificate of Authority","company":{"name":"JSA GLOBAL PARTNERS LLC"},"signer":"GIANNIS KOULIERAKIS","items":[{"name":"Service Fee","amount":12500}]}');
+  const [mergePreview, setMergePreview] = useState(null);
   const [companies, setCompanies] = useState([]);
   const [people, setPeople] = useState([]);
   const [banks, setBanks] = useState([]);
@@ -146,8 +150,9 @@ export default function DocumentStudio() {
 
   async function loadAll() {
     setLoading(true);
-    const [templatePayload, profilePayload, companyPayload, peoplePayload, bankPayload, clausePayload, folderPayload, collectionPayload, docs] = await Promise.all([
+    const [templatePayload, templateLibraryPayload, profilePayload, companyPayload, peoplePayload, bankPayload, clausePayload, folderPayload, collectionPayload, docs] = await Promise.all([
       documentApi.templates(),
+      documentApi.templateLibrary(),
       documentApi.profile(),
       documentApi.companies(),
       documentApi.people(),
@@ -158,6 +163,7 @@ export default function DocumentStudio() {
       documentApi.list(filters),
     ]);
     setTemplates(templatePayload.templates || []);
+    setTemplateLibrary(templateLibraryPayload || []);
     setProfile(profilePayload);
     setCompanies(companyPayload || []);
     setPeople(peoplePayload || []);
@@ -241,6 +247,33 @@ export default function DocumentStudio() {
     } finally {
       setBusy(false);
       setStatusText('Ready');
+    }
+  }
+
+  async function saveTemplateDraft(action = 'save') {
+    setBusy(true);
+    try {
+      const payload = { ...templateDraft, tags: templateDraft.tags || [] };
+      const saved = templateDraft.id ? await documentApi.updateTemplate(templateDraft.id, payload) : await documentApi.createTemplate(payload);
+      const finalTemplate = action === 'publish' ? await documentApi.templateAction(saved.id, 'publish') : saved;
+      setTemplateDraft(finalTemplate);
+      setTemplateLibrary(await documentApi.templateLibrary());
+      toast.success(action === 'publish' ? 'Template published.' : 'Template saved.');
+    } catch (error) {
+      toast.error(error.message || 'Template save failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function previewTemplate(template = templateDraft) {
+    try {
+      const variables = JSON.parse(mergeVariables || '{}');
+      const preview = template.id ? await documentApi.mergeTemplate(template.id, { variables }) : { content_html: template.content_html, diagnostics: { valid: true, missing_variables: [] } };
+      setMergePreview(preview);
+      toast[preview.diagnostics?.valid ? 'success' : 'error'](preview.diagnostics?.valid ? 'Merge preview ready.' : 'Merge diagnostics found missing variables.');
+    } catch (error) {
+      toast.error(error.message || 'Merge preview failed.');
     }
   }
 
@@ -754,6 +787,32 @@ export default function DocumentStudio() {
               </select>
             </div>}
             <button className="btn gold disabled:opacity-50 disabled:cursor-not-allowed" disabled={busy || loading || !generator.title.trim()} onClick={generateDocument}><Wand2 className="h-4 w-4" />{busy ? 'Επεξεργασία…' : 'Παραγωγή Εγγράφου'}</button>
+          </Panel>
+
+          <Panel title="Template & Merge Engine" icon={FileText}>
+            <div className="grid md:grid-cols-2 gap-3">
+              <input className="field" value={templateDraft.name || ''} onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })} placeholder="Template name" />
+              <input className="field" value={templateDraft.category || ''} onChange={(e) => setTemplateDraft({ ...templateDraft, category: e.target.value })} placeholder="Category" />
+              <input className="field md:col-span-2" value={(templateDraft.tags || []).join(', ')} onChange={(e) => setTemplateDraft({ ...templateDraft, tags: e.target.value.split(',').map((tag) => tag.trim()).filter(Boolean) })} placeholder="Tags" />
+            </div>
+            <textarea className="field min-h-[150px] font-mono text-xs" value={templateDraft.content_html || ''} onChange={(e) => setTemplateDraft({ ...templateDraft, content_html: e.target.value })} />
+            <textarea className="field min-h-[110px] font-mono text-xs" value={mergeVariables} onChange={(e) => setMergeVariables(e.target.value)} />
+            <div className="flex flex-wrap gap-2">
+              <button className="btn gold" disabled={busy} onClick={() => saveTemplateDraft('save')}>Save template</button>
+              <button className="btn secondary" disabled={busy || !templateDraft.id} onClick={() => saveTemplateDraft('publish')}>Publish</button>
+              <button className="btn secondary" disabled={busy} onClick={() => previewTemplate()}>Merge preview</button>
+            </div>
+            <div className="grid md:grid-cols-2 gap-3">
+              <div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/60">
+                <b className="text-white">Template Library</b>
+                {templateLibrary.slice(0, 8).map((template) => <button key={template.id} className="mt-2 block w-full rounded-lg border border-white/10 p-2 text-left hover:border-gold" onClick={() => setTemplateDraft(template)}>{template.name} · {template.status}</button>)}
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white p-3 text-xs text-black">
+                <b>Diagnostics</b>
+                <pre className="whitespace-pre-wrap">{JSON.stringify(mergePreview?.diagnostics || {}, null, 2)}</pre>
+                <div dangerouslySetInnerHTML={{ __html: mergePreview?.content_html || '<p>No preview</p>' }} />
+              </div>
+            </div>
           </Panel>
 
           <Panel title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>

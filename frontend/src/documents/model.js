@@ -23,6 +23,12 @@ export const DEFAULT_COMPANY_PROFILE = {
 
 export const documentApi = {
   templates: () => apiGet('/documents/templates'),
+  templateLibrary: (params = {}) => apiGet('/documents/template-library', { params }),
+  createTemplate: (payload) => apiPost('/documents/template-library', payload),
+  updateTemplate: (id, payload) => apiPatch(`/documents/template-library/${id}`, payload),
+  templateAction: (id, action) => apiPost(`/documents/template-library/${id}/${action}`, {}),
+  deleteTemplate: (id) => apiDelete(`/documents/template-library/${id}`),
+  mergeTemplate: (id, payload) => apiPost(`/documents/template-library/${id}/merge`, payload),
   companies: () => apiGet('/documents/companies'),
   searchCompanies: (q) => apiGet('/documents/companies/search', { params: { q } }),
   companyDashboard: (id) => apiGet(`/documents/companies/${id}/dashboard`),

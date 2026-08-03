@@ -176,6 +176,39 @@ class CorporateTemplate(BaseModel):
     design_schema: dict = Field(default_factory=dict)
 
 
+class DocumentTemplateVersion(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    template_id: str
+    owner_email: str
+    version_number: int = 1
+    name: str
+    content_html: str = ""
+    merge_schema: dict = Field(default_factory=dict)
+    change_note: str = "Template update"
+    created_at: str = Field(default_factory=now_iso)
+
+
+class EnterpriseDocumentTemplate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    name: str
+    category: str = "General"
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    status: str = "draft"
+    favorite: bool = False
+    locked: bool = False
+    content_html: str = ""
+    merge_schema: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+    version_number: int = 1
+    recently_used_at: str | None = None
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
 class DocumentVersion(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=new_id)

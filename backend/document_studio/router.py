@@ -27,7 +27,9 @@ from .models import (
     DocumentGenerationRequest,
     DocumentOperationRequest,
     DocumentTag,
+    DocumentTemplateVersion,
     DocumentVersion,
+    EnterpriseDocumentTemplate,
     PackageBuildRequest,
     VersionActionRequest,
 )
@@ -56,6 +58,7 @@ from .service import (
     render_classified_document,
     render_document_html,
     render_docx_bytes,
+    render_merge_template,
     render_pdf_bytes,
     render_text_export,
 )
@@ -64,7 +67,9 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 documents_coll = versions_coll = profiles_coll = company_versions_coll = folders_coll = (
     collections_coll
-) = tags_coll = people_coll = banks_coll = clauses_coll = media_coll = notifications_coll = None
+) = templates_coll = template_versions_coll = tags_coll = people_coll = banks_coll = (
+    clauses_coll
+) = media_coll = notifications_coll = None
 
 ALLOWED_DOCUMENT_MIMES = {
     "application/pdf",
@@ -90,6 +95,8 @@ def configure_document_studio_router(
         company_versions_coll, \
         folders_coll, \
         collections_coll, \
+        templates_coll, \
+        template_versions_coll, \
         tags_coll, \
         people_coll, \
         banks_coll, \
@@ -107,6 +114,12 @@ def configure_document_studio_router(
     company_versions_coll = LocalPersistenceCollection(persistence_provider, "company_versions")
     folders_coll = LocalPersistenceCollection(persistence_provider, "document_folders")
     collections_coll = LocalPersistenceCollection(persistence_provider, "document_collections")
+    templates_coll = LocalPersistenceCollection(
+        persistence_provider, "enterprise_document_templates"
+    )
+    template_versions_coll = LocalPersistenceCollection(
+        persistence_provider, "enterprise_document_template_versions"
+    )
     tags_coll = LocalPersistenceCollection(persistence_provider, "document_tags")
     people_coll = LocalPersistenceCollection(persistence_provider, "document_people")
     banks_coll = LocalPersistenceCollection(persistence_provider, "document_banks")
@@ -165,6 +178,22 @@ async def _save_company_version(profile: CompanyProfile, owner: str, note: str) 
     return version
 
 
+async def _save_template_version(
+    template: EnterpriseDocumentTemplate, owner: str, note: str
+) -> DocumentTemplateVersion:
+    version = DocumentTemplateVersion(
+        template_id=template.id,
+        owner_email=owner,
+        version_number=template.version_number,
+        name=template.name,
+        content_html=template.content_html,
+        merge_schema=template.merge_schema,
+        change_note=note,
+    )
+    await template_versions_coll.insert_one(version.model_dump())
+    return version
+
+
 async def _hydrate_profile(owner: str, profile: CompanyProfile) -> CompanyProfile:
     data = profile.model_dump()
     people = [
@@ -218,6 +247,158 @@ async def list_templates(_: str = Depends(require_owner)) -> dict:
             "hot_add": True,
         },
     }
+
+
+@router.get("/template-library", response_model=list[EnterpriseDocumentTemplate])
+async def list_template_library(
+    owner: str = Depends(require_owner), q: str = "", category: str = "", tag: str = ""
+) -> list[EnterpriseDocumentTemplate]:
+    query: dict = {"owner_email": owner}
+    if category:
+        query["category"] = category
+    if tag:
+        query["tags"] = tag
+    if q.strip():
+        query["$or"] = [
+            {"name": {"$regex": q.strip(), "$options": "i"}},
+            {"description": {"$regex": q.strip(), "$options": "i"}},
+            {"tags": {"$regex": q.strip(), "$options": "i"}},
+        ]
+    return [
+        EnterpriseDocumentTemplate(**doc)
+        async for doc in templates_coll.find(query, {"_id": 0}).sort("updated_at", -1)
+    ]
+
+
+@router.post("/template-library", response_model=EnterpriseDocumentTemplate)
+async def create_template_library_item(
+    body: dict, owner: str = Depends(require_owner)
+) -> EnterpriseDocumentTemplate:
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Template name is required")
+    template = EnterpriseDocumentTemplate(
+        owner_email=owner,
+        name=name,
+        category=str(body.get("category") or "General"),
+        description=str(body.get("description") or ""),
+        tags=[str(tag).strip() for tag in body.get("tags", []) if str(tag).strip()][:20],
+        content_html=str(body.get("content_html") or "<article><h1>{{title}}</h1></article>"),
+        merge_schema=body.get("merge_schema") or {"required": ["title"]},
+        metadata=body.get("metadata") or {},
+    )
+    await templates_coll.insert_one(template.model_dump())
+    await _save_template_version(template, owner, "Created template")
+    return template
+
+
+@router.patch("/template-library/{template_id}", response_model=EnterpriseDocumentTemplate)
+async def update_template_library_item(
+    template_id: str, body: dict, owner: str = Depends(require_owner)
+) -> EnterpriseDocumentTemplate:
+    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    if doc.get("locked") and not body.get("unlock"):
+        raise HTTPException(423, "Template is locked")
+    data = {**doc}
+    for field in (
+        "name",
+        "category",
+        "description",
+        "tags",
+        "favorite",
+        "locked",
+        "content_html",
+        "merge_schema",
+        "metadata",
+    ):
+        if field in body:
+            data[field] = body[field]
+    if any(field in body for field in ("content_html", "merge_schema", "name")):
+        data["version_number"] = int(data.get("version_number", 1)) + 1
+    data["updated_at"] = now_iso()
+    template = EnterpriseDocumentTemplate(**data)
+    await templates_coll.replace_one(
+        {"id": template_id, "owner_email": owner}, template.model_dump()
+    )
+    await _save_template_version(
+        template, owner, str(body.get("change_note") or "Updated template")
+    )
+    return template
+
+
+@router.post("/template-library/{template_id}/{action}", response_model=EnterpriseDocumentTemplate)
+async def template_action(
+    template_id: str, action: str, owner: str = Depends(require_owner)
+) -> EnterpriseDocumentTemplate:
+    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    data = {**doc, "updated_at": now_iso()}
+    if action == "duplicate":
+        data.update(
+            {
+                "id": EnterpriseDocumentTemplate(owner_email=owner, name=data["name"]).id,
+                "name": f"Copy of {data['name']}",
+                "status": "draft",
+                "locked": False,
+                "created_at": now_iso(),
+                "version_number": 1,
+            }
+        )
+        template = EnterpriseDocumentTemplate(**data)
+        await templates_coll.insert_one(template.model_dump())
+        await _save_template_version(template, owner, "Duplicated template")
+        return template
+    status_map = {
+        "publish": "published",
+        "draft": "draft",
+        "archive": "archived",
+        "lock": "draft",
+        "favorite": data.get("status", "draft"),
+        "use": data.get("status", "draft"),
+    }
+    if action not in status_map:
+        raise HTTPException(400, "Unsupported template action")
+    data["status"] = status_map[action]
+    if action == "lock":
+        data["locked"] = True
+    if action == "favorite":
+        data["favorite"] = not bool(data.get("favorite"))
+    if action == "use":
+        data["recently_used_at"] = now_iso()
+    template = EnterpriseDocumentTemplate(**data)
+    await templates_coll.replace_one(
+        {"id": template_id, "owner_email": owner}, template.model_dump()
+    )
+    await _save_template_version(template, owner, f"Template action: {action}")
+    return template
+
+
+@router.delete("/template-library/{template_id}")
+async def delete_template_library_item(
+    template_id: str, owner: str = Depends(require_owner)
+) -> dict:
+    result = await templates_coll.delete_one({"id": template_id, "owner_email": owner})
+    if not result.deleted_count:
+        raise HTTPException(404, "Template not found")
+    await template_versions_coll.delete_many({"template_id": template_id, "owner_email": owner})
+    return {"ok": True, "template_id": template_id}
+
+
+@router.post("/template-library/{template_id}/merge")
+async def merge_template_library_item(
+    template_id: str, body: dict, owner: str = Depends(require_owner)
+) -> dict:
+    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    template = EnterpriseDocumentTemplate(**doc)
+    content_html, content_text, diagnostics = render_merge_template(
+        template.content_html, body.get("variables") or {}, template.merge_schema
+    )
+    return {"content_html": content_html, "content_text": content_text, "diagnostics": diagnostics}
 
 
 @router.post("/classify")

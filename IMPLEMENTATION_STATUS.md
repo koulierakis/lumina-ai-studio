@@ -28,6 +28,9 @@
   support status filters, the workspace exposes Trash, Archive and All views,
   and selected documents have an editable metadata panel for category, tags,
   status and custom metadata.
+- Document Studio validation hardening: backend service imports now satisfy the
+  active Ruff Python 3.11 rules, UTC timestamps use the standard alias, and
+  generated-document validation branches are expanded for lint-clean execution.
 - Central platform foundation: shared module registry, navigable Projects,
   unified image/video/voice job aggregation, owner-private workspace search,
   and settings readiness diagnostics without secret disclosure.
@@ -110,6 +113,9 @@
 - Document Studio archive/trash metadata validation: backend unit suite 16
   passed, Ruff passed, frontend model tests 4 passed, and frontend production
   build passed.
+- Document Studio final validation: Ruff passed for `backend/document_studio`
+  and `backend/tests/test_document_studio_unit.py`, backend unit suite 17
+  passed, frontend model tests 4 passed, and frontend production build passed.
 - Existing `backend/tests/test_document_studio_unit.py` passed once before the
   route-signature correction, then the repository-wide backend test harness
   could not start its local server on port 8000 in this runtime.

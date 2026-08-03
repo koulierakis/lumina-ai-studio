@@ -3,7 +3,12 @@ from __future__ import annotations
 import zipfile
 from io import BytesIO
 
-from document_studio.models import CompanyProfile, CorporateDocument, DocumentCollection
+from document_studio.models import (
+    CompanyProfile,
+    CorporateDocument,
+    DocumentCollection,
+    EnterpriseDocumentTemplate,
+)
 from document_studio.service import (
     CHART_TYPES,
     CLAUSE_LIBRARY,
@@ -26,6 +31,7 @@ from document_studio.service import (
     render_classified_document,
     render_document_html,
     render_docx_bytes,
+    render_merge_template,
     render_pdf_bytes,
     render_text_export,
 )
@@ -579,3 +585,26 @@ def test_document_activity_metadata_supports_timeline_filtering_shape():
     ]
 
     assert archive_events[0]["type"] == "batch"
+
+
+def test_template_merge_engine_supports_conditionals_repeats_and_formatting():
+    template = EnterpriseDocumentTemplate(
+        owner_email="owner@example.com",
+        name="Banking Merge Template",
+        content_html="<h1>{{title}}</h1>{{#if signer}}<p>{{signer}}</p>{{/if}}{{#each fees}}<p>{{item.name}} {{item.amount|currency}}</p>{{/each}}",
+        merge_schema={"required": ["title", "signer"]},
+    )
+
+    html, text, diagnostics = render_merge_template(
+        template.content_html,
+        {
+            "title": "Authority Certificate",
+            "signer": "GK",
+            "fees": [{"name": "Fee", "amount": 1250}],
+        },
+        template.merge_schema,
+    )
+
+    assert "Authority Certificate" in text
+    assert "$1,250.00" in html
+    assert diagnostics["valid"] is True
