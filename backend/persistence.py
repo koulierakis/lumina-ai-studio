@@ -96,7 +96,10 @@ class SQLitePersistenceProvider(PersistenceProvider):
         "voice_projects", "voice_recordings", "transcription_jobs", "talking_face_jobs",
         "projects", "preferences", "notifications", "editor_sessions", "ai_edit_jobs",
         "photo_collections", "photo_batch_jobs", "documents", "document_versions",
-        "company_profiles", "company_versions", "document_folders", "document_people", "document_banks", "document_clauses", "talking_portrait_jobs",
+        "company_profiles", "company_versions", "document_folders", "document_collections",
+        "document_tags", "enterprise_document_templates",
+        "enterprise_document_template_versions", "document_people", "document_banks",
+        "document_clauses", "talking_portrait_jobs",
         "talking_portrait_install_jobs", "talking_portrait_logs", "talking_portrait_outputs",
         "provider_status",
     }
@@ -375,6 +378,10 @@ class LocalPersistenceCollection:
 
     async def update_one(self, query: dict[str, Any], update: dict[str, Any]) -> None:
         await self.provider.update_one(self.table, query, update)
+
+    async def update_many(self, query: dict[str, Any], update: dict[str, Any]) -> Any:
+        modified = await self.provider.update_many(self.table, query, update)
+        return type("UpdateResult", (), {"modified_count": modified})()
 
     async def replace_one(self, query: dict[str, Any], document: dict[str, Any], upsert: bool = False) -> None:
         if upsert or await self.provider.find_one(self.table, query):

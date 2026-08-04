@@ -1408,30 +1408,77 @@ def create_track_change(
 def apply_track_change_action(
     document: CorporateDocument, action: str, actor: str, change_ids: list[str] | None = None
 ) -> tuple[str, str, dict]:
+    action = str(action or "").strip().lower()
+    if action not in {"accept", "reject", "accept-all", "reject-all"}:
+        raise ValueError("Unsupported track change action")
     metadata = {**(document.metadata or {})}
     track = {**metadata.get("track_changes", {})}
-    changes = list(track.get("changes", []))
+    changes = [dict(change) for change in track.get("changes", [])]
     selected = set(change_ids or [])
     apply_all = action in {"accept-all", "reject-all"} or not selected
     target_status = "accepted" if action in {"accept", "accept-all"} else "rejected"
     content_text = document.content_text or normalize_text(document.content_html)
-    for change in changes:
-        if change.get("status") != "pending":
-            continue
-        if not apply_all and change.get("id") not in selected:
-            continue
+    content_html = document.content_html or f"<article><p>{html.escape(content_text)}</p></article>"
+    known_ids = {str(change.get("id")) for change in changes}
+    missing_ids = selected - known_ids
+    if missing_ids:
+        raise ValueError(f"Track changes not found: {', '.join(sorted(missing_ids))}")
+    targets = [
+        change
+        for change in changes
+        if change.get("status") == "pending"
+        and (apply_all or change.get("id") in selected)
+    ]
+    if not targets:
+        raise ValueError("No pending track changes matched the request")
+
+    def replace_visible_text(markup: str, before: str, after: str) -> tuple[str, bool]:
+        replaced = False
+
+        def replace_segment(match):
+            nonlocal replaced
+            if replaced:
+                return match.group(0)
+            prefix, raw_text = match.group(1), match.group(2)
+            decoded = html.unescape(raw_text)
+            if before not in decoded:
+                return match.group(0)
+            replaced = True
+            updated = decoded.replace(before, after, 1)
+            return f"{prefix}{html.escape(updated, quote=False)}"
+
+        updated_markup = re.sub(r"(^|>)([^<]+)(?=<|$)", replace_segment, markup)
+        return updated_markup, replaced
+
+    for change in targets:
+        if target_status == "accepted":
+            change_type = change.get("type")
+            before = str(change.get("before") or "")
+            after = str(change.get("after") or "")
+            if change_type == "insertion":
+                separator = "" if not content_text or content_text.endswith((" ", "\n")) else "\n"
+                content_text = f"{content_text}{separator}{after}"
+                insertion = f'<p data-track-change="{html.escape(str(change.get("id")))}">{html.escape(after)}</p>'
+                if "</article>" in content_html:
+                    content_html = content_html.replace("</article>", f"{insertion}</article>", 1)
+                else:
+                    content_html += insertion
+            elif change_type in {"deletion", "replacement", "move"}:
+                if not before or before not in content_text:
+                    raise ValueError(
+                        f"Tracked source text is no longer present for change {change.get('id')}"
+                    )
+                replacement = "" if change_type == "deletion" else after
+                updated_html, replaced = replace_visible_text(content_html, before, replacement)
+                if not replaced:
+                    raise ValueError(
+                        f"Tracked source markup is no longer present for change {change.get('id')}"
+                    )
+                content_html = updated_html
+                content_text = content_text.replace(before, replacement, 1)
         change["status"] = target_status
         change["reviewed_by"] = actor
         change["reviewed_at"] = now_iso()
-        if target_status == "accepted":
-            if change.get("type") == "insertion":
-                content_text += str(change.get("after") or "")
-            elif change.get("type") == "deletion":
-                content_text = content_text.replace(str(change.get("before") or ""), "", 1)
-            elif change.get("type") in {"replacement", "move"}:
-                content_text = content_text.replace(
-                    str(change.get("before") or ""), str(change.get("after") or ""), 1
-                )
     track.update(
         {
             "changes": changes,
@@ -1446,7 +1493,7 @@ def apply_track_change_action(
         {"at": now_iso(), "type": "track-change", "action": action, "actor": actor},
         *(metadata.get("activity") or []),
     ][:100]
-    return f"<article><p>{html.escape(content_text)}</p></article>", content_text, metadata
+    return content_html, content_text, metadata
 
 
 def build_package(

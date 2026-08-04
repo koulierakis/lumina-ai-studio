@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
+import json
 import zipfile
 from io import BytesIO
+
+import pytest
+from fastapi import HTTPException
 
 from document_studio.models import (
     CompanyProfile,
@@ -40,6 +46,129 @@ from document_studio.service import (
     render_text_export,
     validate_merge_template,
 )
+from persistence import SQLitePersistenceProvider
+
+document_router = importlib.import_module("document_studio.router")
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def test_folder_management_routes_preserve_hierarchy_and_document_integrity(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "document-studio.db")
+    run(provider.initialize())
+    document_router.configure_document_studio_router(provider, None, None)
+    owner = "owner@example.com"
+
+    parent = run(document_router.create_folder({"name": "Legal"}, owner))
+    child = run(
+        document_router.create_folder(
+            {"name": "Agreements", "parent_id": parent.id}, owner
+        )
+    )
+    renamed = run(document_router.rename_folder(child.id, {"name": "Contracts"}, owner))
+    assert renamed.name == "Contracts"
+
+    with pytest.raises(HTTPException, match="descendants"):
+        run(document_router.move_folder(parent.id, {"parent_id": child.id}, owner))
+
+    document = CorporateDocument(
+        owner_email=owner, title="Master Agreement", folder_id=child.id
+    )
+    run(document_router.documents_coll.insert_one(document.model_dump()))
+    result = run(document_router.delete_folder(child.id, owner))
+    stored = run(document_router.documents_coll.find_one({"id": document.id}, {"_id": 0}))
+
+    assert result == {"ok": True, "folder_id": child.id}
+    assert stored["folder_id"] is None
+
+
+def test_manual_document_creation_preserves_authored_structure_for_duplication(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "document-create.db")
+    run(provider.initialize())
+    document_router.configure_document_studio_router(provider, None, None)
+    owner = "owner@example.com"
+    collection = run(
+        document_router.create_collection({"name": "Board Packs"}, owner)
+    )
+    source = {
+        "title": "Copy of Board Pack",
+        "document_type": "board_pack",
+        "category": "Governance",
+        "collection_ids": [collection.id],
+        "template_id": "template-1",
+        "company_profile_id": "company-1",
+        "content_html": "<article><h1>Board Pack</h1></article>",
+        "content_text": "Board Pack",
+        "design": {"pageLayout": {"size": "A4"}},
+        "components": [{"type": "cover_page"}],
+        "tables": [{"type": "agenda"}],
+        "charts": [{"type": "bar"}],
+        "quality_score": {"Overall Score": 96},
+        "metadata": {"duplicated_from": "source-1"},
+    }
+
+    created = run(document_router.create_document(source, owner))
+
+    assert created.document_type == "board_pack"
+    stored_collection = run(
+        document_router.collections_coll.find_one({"id": collection.id}, {"_id": 0})
+    )
+    assert created.collection_ids == [collection.id]
+    assert created.id in stored_collection["document_ids"]
+    assert created.design == source["design"]
+    assert created.components == source["components"]
+    assert created.tables == source["tables"]
+    assert created.charts == source["charts"]
+    assert created.quality_score["Overall Score"] == 96
+    assert created.metadata["duplicated_from"] == "source-1"
+
+    updated = run(
+        document_router.update_document(
+            created.id,
+            {
+                "design": {"pageLayout": {"size": "Letter", "orientation": "landscape"}},
+                "components": [{"type": "signature_blocks"}],
+                "tables": [{"type": "financial"}],
+                "charts": [{"type": "line"}],
+            },
+            owner,
+        )
+    )
+    reloaded = run(document_router.get_document(created.id, owner))
+
+    assert updated.design["pageLayout"]["size"] == "Letter"
+    assert reloaded.design == updated.design
+    assert reloaded.components == [{"type": "signature_blocks"}]
+    assert reloaded.tables == [{"type": "financial"}]
+    assert reloaded.charts == [{"type": "line"}]
+
+
+def test_collection_updates_reject_cycles_and_dangling_documents(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "collections.db")
+    run(provider.initialize())
+    document_router.configure_document_studio_router(provider, None, None)
+    owner = "owner@example.com"
+    parent = run(document_router.create_collection({"name": "Parent"}, owner))
+    child = run(
+        document_router.create_collection(
+            {"name": "Child", "parent_id": parent.id}, owner
+        )
+    )
+
+    with pytest.raises(HTTPException, match="descendants"):
+        run(
+            document_router.update_collection(
+                parent.id, {"parent_id": child.id}, owner
+            )
+        )
+    with pytest.raises(HTTPException, match="Document not found"):
+        run(
+            document_router.update_collection(
+                child.id, {"document_ids": ["missing-document"]}, owner
+            )
+        )
 
 
 def test_document_generation_template_rendering_has_luxury_sections():
@@ -86,6 +215,42 @@ def test_pdf_and_docx_generation_are_valid_binary_contracts():
     with zipfile.ZipFile(BytesIO(docx)) as archive:
         assert "word/document.xml" in archive.namelist()
         assert "Board Resolution" in archive.read("word/document.xml").decode("utf-8")
+
+
+def test_export_headers_support_unicode_titles_and_batch_manifest_is_json():
+    disposition = document_router._download_content_disposition(
+        "Απόφαση Διοικητικού Συμβουλίου", "pdf"
+    )
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Εταιρική Απόφαση",
+        content_text="Approved by the board.",
+    )
+    rtf, mime, extension = document_router._render_export_bytes(
+        document, CompanyProfile(owner_email="owner@example.com"), "rtf"
+    )
+    manifest = [{"document_id": document.id, "filename": "Εταιρική_Απόφαση.rtf"}]
+
+    assert disposition.isascii()
+    assert "filename*=UTF-8''" in disposition
+    assert "%CE%91" in disposition
+    assert rtf.startswith(b"{\\rtf1")
+    assert mime == "application/rtf"
+    assert extension == "rtf"
+    assert json.loads(json.dumps(manifest, ensure_ascii=False)) == manifest
+
+
+def test_import_preview_escapes_active_markup_and_preserves_paragraphs():
+    imported_html = document_router._safe_import_html(
+        '<img src=x onerror="alert(1)">',
+        '<script>alert(1)</script>\nApproved & signed',
+    )
+
+    assert "<script>" not in imported_html
+    assert "<img" not in imported_html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in imported_html
+    assert "Approved &amp; signed" in imported_html
+    assert imported_html.count("<p>") == 2
 
 
 def _layout_fixture(**overrides):
@@ -809,6 +974,152 @@ def test_enterprise_review_track_changes_and_diff_foundations():
     assert "Delta" in text and html.startswith("<article")
     assert final_metadata["track_changes"]["accepted_count"] == 1
     assert diff["side_by_side"]
+
+
+def test_track_change_acceptance_preserves_document_markup_and_rejects_stale_source():
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Structured Draft",
+        content_text="Executive Terms Beta Amount",
+        content_html=(
+            "<article><h1>Executive Terms</h1><table><tr><td>Beta Amount</td></tr></table>"
+            '<img src="https://example.com/chart.png" alt="Chart"></article>'
+        ),
+    )
+    metadata, change = create_track_change(
+        document, "reviewer@example.com", "replacement", "Beta", "Delta"
+    )
+    tracked = CorporateDocument(**{**document.model_dump(), "metadata": metadata})
+
+    updated_html, updated_text, _ = apply_track_change_action(
+        tracked, "accept", "owner@example.com", [change["id"]]
+    )
+
+    assert "<h1>Executive Terms</h1>" in updated_html
+    assert "<table>" in updated_html and "<img " in updated_html
+    assert "Delta Amount" in updated_html
+    assert "Delta Amount" in updated_text
+
+    stale = CorporateDocument(
+        **{**tracked.model_dump(), "content_text": "Source changed", "content_html": "<p>Source changed</p>"}
+    )
+    with pytest.raises(ValueError, match="no longer present"):
+        apply_track_change_action(stale, "accept", "owner@example.com", [change["id"]])
+    with pytest.raises(ValueError, match="Unsupported"):
+        apply_track_change_action(tracked, "discard", "owner@example.com", [change["id"]])
+
+
+def test_custom_clause_insertion_escapes_markup_and_stays_inside_article(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "clauses.db")
+    run(provider.initialize())
+    document_router.configure_document_studio_router(provider, None, None)
+    owner = "owner@example.com"
+    document = CorporateDocument(
+        owner_email=owner,
+        title="Agreement",
+        content_html="<article><h1>Agreement</h1></article>",
+        content_text="Agreement",
+    )
+    clause = document_router.ClauseTemplate(
+        owner_email=owner,
+        category="Custom",
+        title='<img src=x onerror="alert(1)">',
+        body="Payment <script>alert(1)</script>\nSecond line",
+    )
+    run(document_router.documents_coll.insert_one(document.model_dump()))
+    run(document_router.clauses_coll.insert_one(clause.model_dump()))
+
+    updated = run(document_router.insert_clause(document.id, clause.id, owner))
+
+    assert "<script>" not in updated.content_html
+    assert "<img src=x" not in updated.content_html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in updated.content_html
+    assert "<br/>Second line" in updated.content_html
+    assert updated.content_html.endswith("</section></article>")
+
+
+def test_workflow_actions_do_not_duplicate_content_version_numbers(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "versions.db")
+    run(provider.initialize())
+    document_router.configure_document_studio_router(provider, None, None)
+    owner = "owner@example.com"
+    document = run(
+        document_router.create_document(
+            {"title": "Approval Pack", "content_text": "Initial content"}, owner
+        )
+    )
+
+    reviewed = run(document_router.document_lifecycle(document.id, "submit-review", owner))
+    locked = run(
+        document_router.document_lock_action(
+            document.id,
+            document_router.DocumentLockRequest(action="check-out"),
+            owner,
+        )
+    )
+    versions = run(document_router.list_versions(document.id, owner))
+
+    assert reviewed.status == "in_review"
+    assert locked.metadata["lock"]["locked"] is True
+    assert [version.version_number for version in versions] == [1]
+
+    duplicate = run(
+        document_router.version_action(
+            document.id,
+            versions[0].id,
+            document_router.VersionActionRequest(action="duplicate"),
+            owner,
+        )
+    )
+    duplicated_version = run(
+        document_router.versions_coll.find_one(
+            {"id": duplicate["version_id"], "owner_email": owner}, {"_id": 0}
+        )
+    )
+    assert duplicated_version["version_number"] == 2
+
+
+def test_accepting_review_suggestion_updates_document_and_versions_markup(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "review-suggestion.db")
+    run(provider.initialize())
+    document_router.configure_document_studio_router(provider, None, None)
+    owner = "owner@example.com"
+    document = run(
+        document_router.create_document(
+            {
+                "title": "Review Draft",
+                "content_text": "Alpha Beta Gamma",
+                "content_html": "<article><h1>Terms</h1><p>Alpha <strong>Beta</strong> Gamma</p></article>",
+            },
+            owner,
+        )
+    )
+    review_payload = run(
+        document_router.create_document_review_item(
+            document.id,
+            document_router.DocumentReviewRequest(
+                kind="suggestion",
+                body="Use Delta",
+                anchor={"selected_text": "Beta"},
+                suggestion={"before": "Beta", "after": "Delta"},
+            ),
+            owner,
+        )
+    )
+
+    accepted = run(
+        document_router.document_review_action(
+            document.id,
+            review_payload["item"]["id"],
+            document_router.ReviewActionRequest(action="accept-suggestion"),
+            owner,
+        )
+    )
+
+    assert accepted["document"]["version_number"] == 2
+    assert "<strong>Delta</strong>" in accepted["document"]["content_html"]
+    assert "Beta" not in accepted["document"]["content_text"]
+    assert accepted["review"]["comments"][0]["status"] == "accepted"
 
 
 def test_merge_template_validation_supports_repeat_boolean_and_formatters():

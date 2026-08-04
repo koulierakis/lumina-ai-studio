@@ -170,6 +170,16 @@ describe('document studio page layout model', () => {
     expect(extractDocumentImages(dirty)).toHaveLength(1);
   });
 
+  it('removes active containers, embedded documents and unsafe link protocols', () => {
+    const dirty = '<h1>Safe title</h1><iframe srcdoc="<script>alert(1)</script>"></iframe><object data="bad"></object><form><input value="secret"></form><a href="data:text/html;base64,AAAA">bad link</a><a href="https://example.com">safe link</a>';
+    const safe = sanitizeEditorHtml(dirty);
+
+    expect(safe).toContain('<h1>Safe title</h1>');
+    expect(safe).not.toMatch(/iframe|object|form|input|srcdoc|data:text\/html/i);
+    expect(safe).toContain('<a>bad link</a>');
+    expect(safe).toContain('href="https://example.com"');
+  });
+
   it('normalizes advanced table dimensions and style defaults', () => {
     const table = normalizeTableModel({ rows: 500, columns: 99, headerRows: 400, style: 'bad', width: 4 });
 

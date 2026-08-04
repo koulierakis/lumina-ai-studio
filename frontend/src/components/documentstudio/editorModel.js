@@ -1,4 +1,4 @@
-import { ElementNode } from 'lexical';
+﻿import { ElementNode } from 'lexical';
 
 const SAFE_IMAGE_SRC_PATTERN = /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,|blob:)/i;
 
@@ -18,17 +18,30 @@ function clampNumber(value, fallback, min, max) {
 }
 
 export function sanitizeEditorHtml(html = '') {
-  return String(html || '')
+  const source = String(html || '')
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+    .replace(/<(iframe|object|embed|form|meta|link|base)\b[\s\S]*?<\/\1>/gi, '')
+    .replace(/<\/?(iframe|object|embed|form|input|button|textarea|select|option|meta|link|base)\b[^>]*>/gi, '')
     .replace(/\son\w+=("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/\ssrcdoc=("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '')
+    .replace(/vbscript:/gi, '')
+    .replace(/data:text\/html/gi, '')
     .replace(/<img\b([^>]*)>/gi, (match, attributes = '') => {
       const srcMatch = attributes.match(/\ssrc=("([^"]*)"|'([^']*)'|([^\s>]+))/i);
       const src = srcMatch?.[2] || srcMatch?.[3] || srcMatch?.[4] || '';
       if (!SAFE_IMAGE_SRC_PATTERN.test(src)) return '';
       return match;
     });
+  return source.replace(/<(a)\b([^>]*)>/gi, (match, tag, attributes = '') => {
+    const hrefMatch = attributes.match(/\shref=("([^"]*)"|'([^']*)'|([^\s>]+))/i);
+    const href = (hrefMatch?.[2] || hrefMatch?.[3] || hrefMatch?.[4] || '').trim();
+    if (href && !/^(https?:|mailto:|tel:|#|\/)/i.test(href)) {
+      return `<${tag}${attributes.replace(hrefMatch[0], '')}>`;
+    }
+    return match;
+  });
 }
 
 export const IMAGE_WRAP_STYLES = ['inline', 'center', 'left', 'right', 'full-width'];
@@ -603,22 +616,25 @@ export function formatPageNumber(format = 'Page X of Y', pageNumber = 1, pageCou
 }
 
 export function renderLayoutText(template = '', document = {}, pageNumber = 1, pageCount = 1) {
+  document = document || {};
   const today = new Date().toISOString().slice(0, 10);
   return String(template || '')
-    .replaceAll('{{DOCUMENT_TITLE}}', document.title || 'Untitled')
+    .replaceAll('{{DOCUMENT_TITLE}}', (document?.title ?? 'Untitled'))
     .replaceAll('{{CURRENT_DATE}}', today)
     .replaceAll('{{PAGE_NUMBER}}', String(pageNumber))
     .replaceAll('{{TOTAL_PAGES}}', String(pageCount))
-    .replaceAll('{{title}}', document.title || 'Untitled')
+    .replaceAll('{{title}}', (document?.title ?? 'Untitled'))
     .replaceAll('{{date}}', today)
     .replaceAll('{{page}}', String(pageNumber))
     .replaceAll('{{pages}}', String(pageCount));
 }
 
 export function getPageRegionText(region = {}, document = {}, pageNumber = 1, pageCount = 1) {
+  region = region || {};
+  document = document || {};
   if (!region.enabled) return '';
   if (!region.repeat && pageNumber > 1) return '';
-  const template = region.differentFirstPage && pageNumber === 1 && region.firstPageText ? region.firstPageText : region.text;
+  const template = region?.differentFirstPage && pageNumber === 1 && region?.firstPageText ? region.firstPageText : (region?.text ?? '');
   return renderLayoutText(template, document, pageNumber, pageCount);
 }
 

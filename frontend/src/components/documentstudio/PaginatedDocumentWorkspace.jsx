@@ -7,6 +7,7 @@ import {
   pageContentBox,
   pageDimensions,
   paginateDocumentHtml,
+  sanitizeEditorHtml,
 } from './editorModel';
 
 const MEASURE_DEBOUNCE_MS = 80;
@@ -68,7 +69,8 @@ export default function PaginatedDocumentWorkspace({
   const contentBox = useMemo(() => pageContentBox(normalized), [normalized]);
   const scale = preview ? 1 : zoom / 100;
   const [flow, setFlow] = useState({ pageCount: 1, mode: 'paginated', warning: '' });
-  const pageModels = useMemo(() => paginateDocumentHtml(html || '', normalized), [html, normalized]);
+  const safeHtml = useMemo(() => sanitizeEditorHtml(html || ''), [html]);
+  const pageModels = useMemo(() => paginateDocumentHtml(safeHtml, normalized), [safeHtml, normalized]);
   const measureTimerRef = useRef(null);
   const resizeObserverRef = useRef(null);
   const lastSignatureRef = useRef('');

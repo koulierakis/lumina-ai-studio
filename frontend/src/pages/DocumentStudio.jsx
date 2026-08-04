@@ -6,7 +6,7 @@ import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, PROFESSIONAL_T
 import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
 import PaginatedDocumentWorkspace from "../components/documentstudio/PaginatedDocumentWorkspace";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
-import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, applyFindReplace, buildAdvancedTableHtml, buildExportLayoutPayload, buildImageFigureHtml, documentAccessibilityAudit, documentPerformanceAudit, extractDocumentImages, extractDocumentOutline, findReplacePreview, normalizeImageAsset, normalizePageLayout, pageDimensions, spellCheckFoundation, summarizeTables } from "../components/documentstudio/editorModel";
+import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, applyFindReplace, buildAdvancedTableHtml, buildExportLayoutPayload, buildImageFigureHtml, documentAccessibilityAudit, documentPerformanceAudit, extractDocumentImages, extractDocumentOutline, findReplacePreview, normalizeImageAsset, normalizePageLayout, pageDimensions, sanitizeEditorHtml, spellCheckFoundation, summarizeTables } from "../components/documentstudio/editorModel";
 import {
   DOCUMENT_PROFILE_IDS,
   getDocumentProfileOptions,
@@ -18,6 +18,7 @@ import {
   resolvePageDimensions,
 } from "../documents/design";
 const initialFilters = { q: '', category: '', tag: '', folder_id: '' };
+const AUTOSAVE_DELAY_MS = 8000;
 const defaultGenerator = {
   template_id: 'premium-agreement',
   title: 'Premium Corporate Services Agreement',
@@ -98,6 +99,7 @@ export default function DocumentStudio() {
   const [findReplace, setFindReplace] = useState({ find: '', replace: '' });
   const imageInputRef = useRef(null);
   const saveSequenceRef = useRef(0);
+  const autosaveTimerRef = useRef(null);
 
   const [luxuryDesigner, setLuxuryDesigner] = useState({
     profileId: DOCUMENT_PROFILE_IDS.BANK_OF_CYPRUS,
@@ -261,6 +263,24 @@ export default function DocumentStudio() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    lastSavedHtmlRef.current = selected?.content_html || '';
+  }, [selected?.content_html, selected?.id]);
+
+  useEffect(() => {
+    window.clearTimeout(autosaveTimerRef.current);
+    const contentDirty = Boolean(selected) && editorHtml !== lastSavedHtmlRef.current;
+    if (loading || busy || reviewMode === 'viewing' || (!contentDirty && !layoutDirty)) {
+      return undefined;
+    }
+    autosaveTimerRef.current = window.setTimeout(() => {
+      saveEditor(true);
+    }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(autosaveTimerRef.current);
+    // saveEditor is intentionally resolved at execution time with the latest render state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, editorHtml, layoutDirty, loading, reviewMode, selected?.id]);
+
   async function refreshDocuments(nextFilters = filters) {
     const docs = await documentApi.list(nextFilters);
     setDocuments(docs || []);
@@ -385,7 +405,7 @@ export default function DocumentStudio() {
     const exportLayout = buildExportLayoutPayload(layoutAtSave);
     const nextDesign = { ...(selected.design || {}), pageLayout: layoutAtSave, exportLayout };
     const nextMetadata = { ...(selected.metadata || {}), page_layout: layoutAtSave, export_layout: exportLayout, page_count: pageFlow.pageCount };
-    const updated = await documentApi.update(selected.id, { content_html: htmlAtSave, content_text: contentText, design: nextDesign, metadata: nextMetadata, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
+    const updated = await documentApi.update(selected.id, { content_html: htmlAtSave, content_text: contentText, design: nextDesign, metadata: nextMetadata, expected_version: selected.version_number, autosave, change_note: autosave ? 'Autosave' : 'Manual editor save' });
     if (saveSequence !== saveSequenceRef.current) return;
     setSelected(updated);
     lastSavedHtmlRef.current = updated.content_html || htmlAtSave;
@@ -578,12 +598,30 @@ export default function DocumentStudio() {
     if (!selected) return;
     setBusy(true);
     try {
+      const reusableMetadata = { ...(selected.metadata || {}) };
+      ['lock', 'review', 'track_changes', 'export_jobs', 'activity'].forEach((key) => {
+        delete reusableMetadata[key];
+      });
       const copy = await documentApi.create({
-        ...selected,
-        id: undefined,
         title: `Copy of ${selected.title}`,
+        document_type: selected.document_type,
+        category: selected.category,
+        folder_id: selected.folder_id,
+        collection_ids: selected.collection_ids,
+        tags: selected.tags,
+        country: selected.country,
+        language: selected.language,
+        template_id: selected.template_id,
+        company_profile_id: selected.company_profile_id,
+        content_html: selected.content_html,
+        content_text: selected.content_text,
         design: { ...(selected.design || {}), pageLayout: normalizedPageLayout },
-        metadata: { ...(selected.metadata || {}), duplicated_from: selected.id },
+        components: selected.components,
+        tables: selected.tables,
+        charts: selected.charts,
+        quality_score: selected.quality_score,
+        imported_media_id: selected.imported_media_id,
+        metadata: { ...reusableMetadata, duplicated_from: selected.id },
       });
       setSelected(copy);
       setEditorHtml(copy.content_html || '');
@@ -883,6 +921,13 @@ export default function DocumentStudio() {
     try {
       const payload = await documentApi.reviewAction(selected.id, commentId, { action: normalizeReviewAction(action) });
       setReviewState(payload.review || reviewState);
+      if (payload.document) {
+        setSelected(payload.document);
+        setEditorHtml(payload.document.content_html || '');
+        lastSavedHtmlRef.current = payload.document.content_html || '';
+        await loadVersions(payload.document);
+        await refreshDocuments();
+      }
       toast.success(`Review item ${action}.`);
     } catch (error) {
       toast.error(error.message || 'Review action failed.');
@@ -1218,7 +1263,7 @@ export default function DocumentStudio() {
               <div className="rounded-xl border border-white/10 bg-white p-3 text-xs text-black">
                 <b>Diagnostics</b>
                 <pre className="whitespace-pre-wrap">{JSON.stringify(mergePreview?.diagnostics || {}, null, 2)}</pre>
-                <div dangerouslySetInnerHTML={{ __html: mergePreview?.content_html || '<p>No preview</p>' }} />
+                <div dangerouslySetInnerHTML={{ __html: sanitizeEditorHtml(mergePreview?.content_html || '<p>No preview</p>') }} />
               </div>
             </div>
           </Panel>

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import html
 import io
+import json
 import zipfile
 from typing import Annotated
+from urllib.parse import quote
 
 from ai_runtime.manager import runtime_manager
 from ai_runtime.schemas import RuntimeJob, RuntimeJobStatus
@@ -98,6 +101,30 @@ ALLOWED_DOCUMENT_MIMES = {
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 
 
+def _download_content_disposition(title: str, extension: str) -> str:
+    safe_extension = "".join(ch for ch in extension.lower() if ch.isalnum()) or "bin"
+    ascii_stem = "".join(
+        ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_"
+        for ch in str(title or "document")
+    ).strip("_")[:80] or "document"
+    unicode_name = quote(f"{str(title or 'document')}.{safe_extension}", safe="")
+    return (
+        f'attachment; filename="{ascii_stem}.{safe_extension}"; '
+        f"filename*=UTF-8''{unicode_name}"
+    )
+
+
+def _safe_import_html(title: str, extracted_text: str) -> str:
+    safe_title = html.escape(str(title or "Imported document"), quote=True)
+    paragraphs = [
+        f"<p>{html.escape(part, quote=True)}</p>"
+        for part in str(extracted_text or "").splitlines()
+        if part.strip()
+    ]
+    body = "".join(paragraphs) or "<p></p>"
+    return f"<article><h1>{safe_title}</h1>{body}</article>"
+
+
 def configure_document_studio_router(
     persistence_provider, media_collection, notifications_collection
 ) -> None:
@@ -158,6 +185,33 @@ async def _document(document_id: str, owner: str) -> CorporateDocument:
     if not doc:
         raise HTTPException(404, "Document not found")
     return CorporateDocument(**doc)
+
+
+async def _validate_folder(folder_id: str | None, owner: str) -> str | None:
+    normalized = str(folder_id or "").strip() or None
+    if normalized and not await folders_coll.find_one(
+        {"id": normalized, "owner_email": owner}, {"_id": 0, "id": 1}
+    ):
+        raise HTTPException(404, "Folder not found")
+    return normalized
+
+
+async def _validate_collection_ids(collection_ids: list, owner: str) -> list[str]:
+    requested = list(
+        dict.fromkeys(str(item).strip() for item in collection_ids if str(item).strip())
+    )[:100]
+    if not requested:
+        return []
+    existing = {
+        item["id"]
+        async for item in collections_coll.find(
+            {"owner_email": owner, "id": {"$in": requested}}, {"_id": 0, "id": 1}
+        )
+    }
+    missing = [item for item in requested if item not in existing]
+    if missing:
+        raise HTTPException(404, {"message": "Collection not found", "ids": missing})
+    return requested
 
 
 async def _save_version(document: CorporateDocument, owner: str, note: str) -> DocumentVersion:
@@ -992,6 +1046,99 @@ async def create_folder(body: dict, owner: str = Depends(require_owner)) -> Docu
     return folder
 
 
+@router.put("/folders/{folder_id}", response_model=DocumentFolder)
+async def rename_folder(
+    folder_id: str, body: dict, owner: str = Depends(require_owner)
+) -> DocumentFolder:
+    current = await folders_coll.find_one(
+        {"id": folder_id, "owner_email": owner}, {"_id": 0}
+    )
+    if not current:
+        raise HTTPException(404, "Folder not found")
+    name = str(body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Folder name is required")
+    duplicate = await folders_coll.find_one(
+        {
+            "owner_email": owner,
+            "name": name,
+            "parent_id": current.get("parent_id"),
+            "id": {"$ne": folder_id},
+        },
+        {"_id": 0},
+    )
+    if duplicate:
+        raise HTTPException(409, "A folder with this name already exists")
+    updated = DocumentFolder(**{**current, "name": name, "updated_at": now_iso()})
+    await folders_coll.replace_one(
+        {"id": folder_id, "owner_email": owner}, updated.model_dump()
+    )
+    return updated
+
+
+@router.post("/folders/{folder_id}/move", response_model=DocumentFolder)
+async def move_folder(
+    folder_id: str, body: dict, owner: str = Depends(require_owner)
+) -> DocumentFolder:
+    current = await folders_coll.find_one(
+        {"id": folder_id, "owner_email": owner}, {"_id": 0}
+    )
+    if not current:
+        raise HTTPException(404, "Folder not found")
+    parent_id = body.get("parent_id") or None
+    if parent_id == folder_id:
+        raise HTTPException(400, "A folder cannot be nested inside itself")
+    ancestor_id = parent_id
+    visited: set[str] = set()
+    while ancestor_id:
+        if ancestor_id == folder_id:
+            raise HTTPException(400, "A folder cannot be moved into one of its descendants")
+        if ancestor_id in visited:
+            raise HTTPException(409, "The folder hierarchy contains a cycle")
+        visited.add(ancestor_id)
+        ancestor = await folders_coll.find_one(
+            {"id": ancestor_id, "owner_email": owner}, {"_id": 0}
+        )
+        if not ancestor:
+            raise HTTPException(404, "Parent folder not found")
+        ancestor_id = ancestor.get("parent_id")
+    duplicate = await folders_coll.find_one(
+        {
+            "owner_email": owner,
+            "name": current["name"],
+            "parent_id": parent_id,
+            "id": {"$ne": folder_id},
+        },
+        {"_id": 0},
+    )
+    if duplicate:
+        raise HTTPException(409, "A folder with this name already exists")
+    updated = DocumentFolder(
+        **{**current, "parent_id": parent_id, "updated_at": now_iso()}
+    )
+    await folders_coll.replace_one(
+        {"id": folder_id, "owner_email": owner}, updated.model_dump()
+    )
+    return updated
+
+
+@router.delete("/folders/{folder_id}")
+async def delete_folder(folder_id: str, owner: str = Depends(require_owner)) -> dict:
+    result = await folders_coll.delete_one({"id": folder_id, "owner_email": owner})
+    if not result.deleted_count:
+        raise HTTPException(404, "Folder not found")
+    timestamp = now_iso()
+    await folders_coll.update_many(
+        {"owner_email": owner, "parent_id": folder_id},
+        {"$set": {"parent_id": None, "updated_at": timestamp}},
+    )
+    await documents_coll.update_many(
+        {"owner_email": owner, "folder_id": folder_id},
+        {"$set": {"folder_id": None, "updated_at": timestamp}},
+    )
+    return {"ok": True, "folder_id": folder_id}
+
+
 @router.get("/collections", response_model=list[DocumentCollection])
 async def list_collections(
     owner: str = Depends(require_owner), q: str = "", parent_id: str | None = None
@@ -1064,10 +1211,55 @@ async def update_collection(
     for field in ("name", "description", "parent_id", "smart_query", "color", "icon"):
         if field in body:
             data[field] = body[field]
-    if data.get("parent_id") == collection_id:
+    data["name"] = str(data.get("name") or "").strip()
+    if not data["name"]:
+        raise HTTPException(400, "Collection name is required")
+    data["parent_id"] = data.get("parent_id") or None
+    if data["parent_id"] == collection_id:
         raise HTTPException(400, "A collection cannot be nested inside itself")
+    ancestor_id = data["parent_id"]
+    visited: set[str] = set()
+    while ancestor_id:
+        if ancestor_id == collection_id:
+            raise HTTPException(400, "A collection cannot be moved into one of its descendants")
+        if ancestor_id in visited:
+            raise HTTPException(409, "The collection hierarchy contains a cycle")
+        visited.add(ancestor_id)
+        ancestor = await collections_coll.find_one(
+            {"id": ancestor_id, "owner_email": owner}, {"_id": 0}
+        )
+        if not ancestor:
+            raise HTTPException(404, "Parent collection not found")
+        ancestor_id = ancestor.get("parent_id")
+    duplicate = await collections_coll.find_one(
+        {
+            "owner_email": owner,
+            "name": data["name"],
+            "parent_id": data["parent_id"],
+            "id": {"$ne": collection_id},
+        },
+        {"_id": 0},
+    )
+    if duplicate:
+        raise HTTPException(409, "A collection with this name already exists")
     if "document_ids" in body:
-        data["document_ids"] = [str(item) for item in body.get("document_ids", [])][:500]
+        requested = list(
+            dict.fromkeys(
+                str(item).strip()
+                for item in body.get("document_ids", [])
+                if str(item).strip()
+            )
+        )[:500]
+        existing = {
+            item["id"]
+            async for item in documents_coll.find(
+                {"owner_email": owner, "id": {"$in": requested}}, {"_id": 0, "id": 1}
+            )
+        }
+        missing = [item for item in requested if item not in existing]
+        if missing:
+            raise HTTPException(404, {"message": "Document not found", "ids": missing})
+        data["document_ids"] = requested
     data["updated_at"] = now_iso()
     updated = DocumentCollection(**data)
     await collections_coll.replace_one(
@@ -1089,11 +1281,14 @@ async def delete_collection(collection_id: str, owner: str = Depends(require_own
     result = await collections_coll.delete_one({"id": collection_id, "owner_email": owner})
     if not result.deleted_count:
         raise HTTPException(404, "Collection not found")
+    timestamp = now_iso()
     await collections_coll.update_many(
-        {"owner_email": owner, "parent_id": collection_id}, {"$set": {"parent_id": None}}
+        {"owner_email": owner, "parent_id": collection_id},
+        {"$set": {"parent_id": None, "updated_at": timestamp}},
     )
     await documents_coll.update_many(
-        {"owner_email": owner}, {"$pull": {"collection_ids": collection_id}}
+        {"owner_email": owner},
+        {"$pull": {"collection_ids": collection_id}, "$set": {"updated_at": timestamp}},
     )
     return {"ok": True, "collection_id": collection_id}
 
@@ -1251,12 +1446,13 @@ async def generate_document(
         )
     title = metadata.get("document_class", {}).get("title") or body.title.strip() or template.name
     category = metadata.get("document_class", {}).get("label") or template.category
+    folder_id = await _validate_folder(body.folder_id, owner)
     document = CorporateDocument(
         owner_email=owner,
         title=title,
         document_type=template.document_type,
         category=category,
-        folder_id=body.folder_id,
+        folder_id=folder_id,
         tags=[tag.strip() for tag in body.tags if tag.strip()][:20],
         country=body.country.strip().upper() or "GR",
         language=body.language.strip().lower() or "el",
@@ -1283,21 +1479,42 @@ async def create_document(body: dict, owner: str = Depends(require_owner)) -> Co
         raise HTTPException(
             422, {"message": "Legal review rejected save", "issues": review["issues"]}
         )
+    folder_id = await _validate_folder(body.get("folder_id"), owner)
+    collection_ids = await _validate_collection_ids(body.get("collection_ids", []), owner)
     document = CorporateDocument(
         owner_email=owner,
         title=title,
         document_type=str(body.get("document_type") or "document"),
         category=str(body.get("category") or "General"),
-        folder_id=body.get("folder_id"),
+        folder_id=folder_id,
+        collection_ids=collection_ids,
         tags=[str(tag).strip() for tag in body.get("tags", []) if str(tag).strip()][:20],
         country=str(body.get("country") or "GR").strip().upper(),
         language=str(body.get("language") or "el").strip().lower(),
+        favorite=bool(body.get("favorite", False)),
+        status=str(body.get("status") or "draft"),
+        template_id=body.get("template_id"),
+        company_profile_id=body.get("company_profile_id"),
         content_html=content_html,
         content_text=content_text,
         searchable_text=content_text or content_html,
         metadata={**(body.get("metadata") or {}), "legal_review": review},
+        design=body.get("design") or {},
+        components=body.get("components") or [],
+        tables=body.get("tables") or [],
+        charts=body.get("charts") or [],
+        quality_score=body.get("quality_score") or {},
+        imported_media_id=body.get("imported_media_id"),
     )
     await documents_coll.insert_one(document.model_dump())
+    if collection_ids:
+        await collections_coll.update_many(
+            {"owner_email": owner, "id": {"$in": collection_ids}},
+            {
+                "$addToSet": {"document_ids": document.id},
+                "$set": {"updated_at": now_iso()},
+            },
+        )
     await _save_version(document, owner, "Created manually")
     return document
 
@@ -1335,7 +1552,6 @@ async def document_lifecycle(
     await documents_coll.replace_one(
         {"id": document_id, "owner_email": owner}, updated.model_dump()
     )
-    await _save_version(updated, owner, f"Lifecycle action: {action}")
     return updated
 
 
@@ -1429,6 +1645,8 @@ async def update_document(
             },
         )
     data = document.model_dump()
+    if "folder_id" in body:
+        body = {**body, "folder_id": await _validate_folder(body.get("folder_id"), owner)}
     content_changed = any(field in body for field in ("title", "content_html", "content_text"))
     for field in (
         "title",
@@ -1442,6 +1660,11 @@ async def update_document(
         "content_html",
         "content_text",
         "metadata",
+        "design",
+        "components",
+        "tables",
+        "charts",
+        "quality_score",
     ):
         if field in body:
             data[field] = body[field]
@@ -1532,7 +1755,6 @@ async def document_lock_action(
     await documents_coll.replace_one(
         {"id": document_id, "owner_email": owner}, updated.model_dump()
     )
-    await _save_version(updated, owner, f"Document lock action: {action}")
     return updated
 
 
@@ -1550,6 +1772,7 @@ async def import_document(
     mime = (file.content_type or "").lower()
     if mime not in ALLOWED_DOCUMENT_MIMES:
         raise HTTPException(400, "Unsupported document type")
+    validated_folder_id = await _validate_folder(folder_id, owner)
     data = await file.read()
     if not data or len(data) > MAX_DOCUMENT_BYTES:
         raise HTTPException(400, "Document must be between 1 byte and 50 MB")
@@ -1571,11 +1794,11 @@ async def import_document(
         title=doc_title,
         document_type="scanned" if mime.startswith("image/") else "imported",
         category=category,
-        folder_id=folder_id,
+        folder_id=validated_folder_id,
         tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:20],
         country=country.strip().upper() or "GR",
         language=language.strip().lower() or "el",
-        content_html=f"<article><h1>{doc_title}</h1><p>{extracted}</p></article>",
+        content_html=_safe_import_html(doc_title, extracted),
         content_text=extracted,
         searchable_text=extracted,
         imported_media_id=media.id,
@@ -1687,6 +1910,70 @@ async def document_review_action(
         raise HTTPException(404, "Review item not found") from exc
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if body.action == "accept-suggestion":
+        comment = next(
+            (
+                item
+                for item in metadata.get("review", {}).get("comments", [])
+                if item.get("id") == comment_id
+            ),
+            None,
+        )
+        if not comment or comment.get("kind") != "suggestion":
+            raise HTTPException(400, "Only suggestion review items can be accepted")
+        suggestion = comment.get("suggestion") or {}
+        anchor = comment.get("anchor") or {}
+        before = str(
+            suggestion.get("before")
+            or suggestion.get("selected_text")
+            or anchor.get("selected_text")
+            or ""
+        )
+        after = str(suggestion.get("after") or suggestion.get("replacement") or "")
+        if not before or before == after:
+            raise HTTPException(409, "Suggestion must replace existing text with new text")
+        reviewed_document = CorporateDocument(
+            **{**document.model_dump(), "metadata": metadata}
+        )
+        tracked_metadata, change = create_track_change(
+            reviewed_document,
+            owner,
+            "replacement",
+            before,
+            after,
+            anchor,
+            metadata={"review_comment_id": comment_id},
+        )
+        tracked_document = CorporateDocument(
+            **{**reviewed_document.model_dump(), "metadata": tracked_metadata}
+        )
+        try:
+            content_html, content_text, final_metadata = apply_track_change_action(
+                tracked_document, "accept", owner, [change["id"]]
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        data = document.model_dump()
+        data.update(
+            {
+                "content_html": content_html,
+                "content_text": content_text,
+                "searchable_text": content_text,
+                "metadata": final_metadata,
+                "version_number": document.version_number + 1,
+                "updated_at": now_iso(),
+            }
+        )
+        updated = CorporateDocument(**data)
+        await documents_coll.replace_one(
+            {"id": document_id, "owner_email": owner}, updated.model_dump()
+        )
+        await _save_version(updated, owner, "Accepted review suggestion")
+        return {
+            "ok": True,
+            "review": final_metadata.get("review", {}),
+            "document": updated.model_dump(),
+        }
     await documents_coll.update_one(
         {"id": document_id, "owner_email": owner},
         {"$set": {"metadata": metadata, "updated_at": now_iso()}},
@@ -1738,9 +2025,12 @@ async def track_change_action(
     document_id: str, body: TrackChangeActionRequest, owner: str = Depends(require_owner)
 ) -> CorporateDocument:
     document = await _document(document_id, owner)
-    content_html, content_text, metadata = apply_track_change_action(
-        document, body.action, owner, body.change_ids
-    )
+    try:
+        content_html, content_text, metadata = apply_track_change_action(
+            document, body.action, owner, body.change_ids
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
     data = document.model_dump()
     data.update(
         {
@@ -1841,8 +2131,18 @@ async def insert_clause(
     )
     if not clause:
         raise HTTPException(404, "Clause not found")
-    html_clause = f"<section class='clause-library-insert'><h2>{clause.title}</h2><p>{clause.body}</p></section>"
-    content_html = (document.content_html or "") + html_clause
+    safe_clause_title = html.escape(clause.title, quote=True)
+    safe_clause_body = html.escape(clause.body, quote=True).replace("\n", "<br/>")
+    html_clause = (
+        "<section class='clause-library-insert'>"
+        f"<h2>{safe_clause_title}</h2><p>{safe_clause_body}</p></section>"
+    )
+    current_html = document.content_html or "<article></article>"
+    content_html = (
+        current_html.replace("</article>", f"{html_clause}</article>", 1)
+        if "</article>" in current_html
+        else f"{current_html}{html_clause}"
+    )
     content_text = (document.content_text or "") + f"\n\n{clause.title}\n{clause.body}"
     review = legal_review_document(document.title, content_html, document.metadata)
     data = document.model_dump()
@@ -2105,12 +2405,21 @@ async def version_action(
         )
         return {"ok": True, "version_id": version_id}
     if body.action == "duplicate":
+        existing_numbers = [
+            int(item.get("version_number") or 0)
+            async for item in versions_coll.find(
+                {"document_id": document_id, "owner_email": owner},
+                {"_id": 0, "version_number": 1},
+            )
+        ]
         copy = version.model_copy(
             update={
                 "id": DocumentVersion(
                     document_id=document_id, owner_email=owner, title=version.title
                 ).id,
+                "version_number": max(existing_numbers, default=0) + 1,
                 "change_note": body.name or f"Copy of {version.change_note}",
+                "created_at": now_iso(),
             }
         )
         await versions_coll.insert_one(copy.model_dump())
@@ -2159,7 +2468,7 @@ async def export_document(
         {"$addToSet": {"export_media_ids": media.id}, "$set": {"updated_at": now_iso()}},
     )
     headers = {
-        "Content-Disposition": f'attachment; filename="{document.title}.{ext}"',
+        "Content-Disposition": _download_content_disposition(document.title, ext),
         "X-Lumina-Media-Id": media.id,
     }
     return Response(content=data, media_type=mime, headers=headers)
@@ -2179,9 +2488,9 @@ def _render_export_bytes(
         )
     if fmt == "html":
         return document.content_html.encode(), "text/html", "html"
-    if fmt in {"markdown", "md", "txt"}:
+    if fmt in {"markdown", "md", "rtf", "txt"}:
         return render_text_export(document, fmt)
-    raise HTTPException(400, "Export format must be pdf, docx, html, markdown or txt")
+    raise HTTPException(400, "Export format must be pdf, docx, html, markdown, rtf or txt")
 
 
 @router.post("/export-jobs")
@@ -2192,7 +2501,7 @@ async def create_export_job(body: ExportJobRequest, owner: str = Depends(require
     formats = [
         fmt.lower()
         for fmt in body.formats
-        if fmt.lower() in {"pdf", "docx", "html", "markdown", "md", "txt"}
+        if fmt.lower() in {"pdf", "docx", "html", "markdown", "md", "rtf", "txt"}
     ]
     if not formats:
         raise HTTPException(400, "At least one supported export format is required")
@@ -2219,7 +2528,9 @@ async def create_export_job(body: ExportJobRequest, owner: str = Depends(require
                 name = f"{index:03d}-{safe_title}.{ext}"
                 archive.writestr(name, data)
                 manifest.append({"document_id": document.id, "filename": name, "mime_type": mime})
-        archive.writestr("manifest.json", str(manifest))
+        archive.writestr(
+            "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2)
+        )
     data = buffer.getvalue()
     filename, _, size = save_bytes(data, "application/zip", kind="generated")
     media = MediaAsset(

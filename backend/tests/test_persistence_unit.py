@@ -57,6 +57,21 @@ def test_database_persistence_after_restart(tmp_path):
     assert run(second.find_one("talking_portrait_jobs", {"id": "persisted"}))["title"] == "Persisted"
 
 
+def test_sqlite_supports_all_document_studio_library_tables(tmp_path):
+    provider = SQLitePersistenceProvider(tmp_path / "lumina.db")
+    run(provider.initialize())
+    tables = (
+        "document_collections",
+        "document_tags",
+        "enterprise_document_templates",
+        "enterprise_document_template_versions",
+    )
+
+    for table in tables:
+        run(provider.insert_one(table, {"id": f"{table}-1", "owner_email": "owner@lumina.local"}))
+        assert run(provider.find_one(table, {"id": f"{table}-1"}))["owner_email"] == "owner@lumina.local"
+
+
 def test_concurrent_sqlite_access(tmp_path):
     provider = SQLitePersistenceProvider(tmp_path / "lumina.db")
     run(provider.initialize())
