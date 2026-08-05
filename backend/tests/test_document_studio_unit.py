@@ -342,6 +342,38 @@ def test_pdf_export_falls_back_for_malformed_legacy_layout():
     assert b"Layout Fidelity Fixture" in pdf
 
 
+def test_pdf_export_excludes_script_style_head_title_meta_link_from_body():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Clean Document",
+        content_html=(
+            "<article>"
+            "<h1>Clean Document</h1>"
+            "<script>alert('malicious');</script>"
+            "<style>body { color: red; }</style>"
+            "<head><title>Hidden Title</title></head>"
+            "<meta name='keywords' content='secret keywords'>"
+            "<link rel='stylesheet' href='evil.css'>"
+            "<p>Visible paragraph text.</p>"
+            "</article>"
+        ),
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    assert pdf.startswith(b"%PDF-1.4")
+    assert b"alert" not in pdf
+    assert b"malicious" not in pdf
+    assert b"color" not in pdf
+    assert b"red" not in pdf
+    assert b"Hidden Title" not in pdf
+    assert b"secret keywords" not in pdf
+    assert b"evil.css" not in pdf
+    assert b"Visible paragraph text" in pdf
+    assert b"Clean Document" in pdf
+
+
 def test_docx_export_honors_section_headers_footers_fields_and_breaks():
     profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
     layout = _layout_fixture(

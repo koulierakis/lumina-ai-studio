@@ -1825,8 +1825,23 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
     blocks: list[dict] = []
     current: list[str] = []
     in_list = False
+    skip_until = ""
+    skip_container_tags = ("script", "style", "head", "title")
+    skip_void_tags = ("meta", "link")
     for token in tokens:
         lower = token.lower()
+        if skip_until and lower.startswith(f"</{skip_until}"):
+            skip_until = ""
+            continue
+        if skip_until:
+            continue
+        if token.startswith("<") and not lower.startswith("</"):
+            tag_name = lower[1:].split(" ")[0].rstrip("/>")
+            if tag_name in skip_container_tags and not lower.endswith("/>"):
+                skip_until = tag_name
+                continue
+            if tag_name in skip_void_tags:
+                continue
         if re.search(
             r"data-lumina-page-break=['\"]true|page-break-after\s*:\s*always|break-after\s*:\s*page",
             token,
