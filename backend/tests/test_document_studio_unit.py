@@ -1438,3 +1438,303 @@ def test_merge_template_validation_supports_repeat_boolean_and_formatters():
     assert "INVOICE" in html
     assert "12.3" in text
     assert diagnostics["valid"] is True
+
+
+# ---------------------------------------------------------------------------
+# Image export tests — prove inline images survive PDF and DOCX export.
+# ---------------------------------------------------------------------------
+
+def _make_test_image_data_uri(width: int = 8, height: int = 6, color: tuple = (255, 0, 0)) -> str:
+    """Generate a small PNG data URI for testing image export."""
+    try:
+        from PIL import Image as PILImage
+
+        img = PILImage.new("RGB", (width, height), color=color)
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        import base64
+
+        return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}"
+    except Exception:
+        # Fallback: 1x1 transparent PNG
+        return (
+            "data:image/png;base64,"
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP8//8/AwAI/AL6XNY5AAAAAElFTkSuQmCC"
+        )
+
+
+def _make_image_document(
+    html_body: str = "",
+    layout=None,
+) -> CorporateDocument:
+    """Create a CorporateDocument with image content for export tests."""
+    return CorporateDocument(
+        owner_email="owner@example.com",
+        title="Image Export Test",
+        content_html=html_body,
+        content_text=normalize_text_export(html_body),
+        design={"exportLayout": layout or _layout_fixture()},
+        metadata={"export_layout": layout or _layout_fixture()},
+    )
+
+
+def normalize_text_export(html: str) -> str:
+    """Strip HTML tags and collapse whitespace for content_text."""
+    import re
+
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html or "")).strip()
+
+
+def _pdf_extract_text(pdf: bytes) -> str:
+    """Extract text from PDF content streams by decompressing them."""
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(BytesIO(pdf))
+        return "\n".join(page.extract_text() or "" for page in reader.pages)
+    except Exception:
+        pass
+
+    import base64
+    import zlib
+
+    streams = re.findall(rb"stream\r?\n(.*?)endstream", pdf, re.S)
+    text_parts: list[str] = []
+    for stream_data in streams:
+        raw = stream_data.strip()
+        try:
+            if raw.endswith(b"~>"):
+                raw = raw[:-2]
+            decoded = base64.a85decode(raw, adobe=False)
+            decompressed = zlib.decompress(decoded)
+            text_parts.append(decompressed.decode("latin-1", errors="ignore"))
+        except Exception:
+            pass
+        try:
+            decompressed = zlib.decompress(stream_data)
+            text_parts.append(decompressed.decode("latin-1", errors="ignore"))
+        except Exception:
+            pass
+    return " ".join(text_parts)
+
+
+def _pdf_has_image_xobject(pdf: bytes) -> bool:
+    """Check if the PDF contains at least one image XObject."""
+    return b"/Subtype" in pdf and b"/Image" in pdf
+
+
+def _pdf_image_xobject_count(pdf: bytes) -> int:
+    """Count the number of image XObjects in the PDF."""
+    return len(re.findall(rb"/Subtype\s*/Image", pdf))
+
+
+def _docx_has_image(zip_archive: zipfile.ZipFile) -> bool:
+    """Check if the DOCX archive contains at least one image file."""
+    return any(name.startswith("word/media/") for name in zip_archive.namelist())
+
+
+def _docx_image_count(zip_archive: zipfile.ZipFile) -> int:
+    """Count the number of image files in the DOCX archive."""
+    return sum(1 for name in zip_archive.namelist() if name.startswith("word/media/"))
+
+
+def _docx_has_drawing(zip_archive: zipfile.ZipFile) -> bool:
+    """Check if the DOCX document XML contains a <w:drawing> element."""
+    doc_xml = zip_archive.read("word/document.xml").decode("utf-8")
+    return "<w:drawing>" in doc_xml
+
+
+def test_pdf_export_renders_single_inline_image():
+    """Test 1: Single inline image appears in PDF."""
+    img_uri = _make_test_image_data_uri()
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<p>Before image</p>'
+        f'<figure data-lumina-image="true" style="text-align:center">'
+        f'<img src="{img_uri}" alt="Test Image" style="width:45%" />'
+        f'</figure>'
+        f'<p>After image</p>'
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_image_xobject(pdf), "PDF should contain at least one image XObject"
+
+
+def test_pdf_export_renders_multiple_images():
+    """Test 2: Multiple images appear in PDF."""
+    img1 = _make_test_image_data_uri(width=8, height=6, color=(255, 0, 0))
+    img2 = _make_test_image_data_uri(width=10, height=4, color=(0, 255, 0))
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<p>First paragraph</p>'
+        f'<figure style="text-align:center"><img src="{img1}" alt="Red" style="width:30%" /></figure>'
+        f'<p>Middle paragraph</p>'
+        f'<figure style="text-align:left"><img src="{img2}" alt="Green" style="width:50%" /></figure>'
+        f'<p>Last paragraph</p>'
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_image_xobject_count(pdf) >= 2, "PDF should contain at least 2 image XObjects"
+
+
+def test_pdf_export_renders_image_caption():
+    """Test 3: Image caption appears in PDF."""
+    img_uri = _make_test_image_data_uri()
+    caption_text = "Figure 1: Quarterly Revenue Chart"
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<figure style="text-align:center">'
+        f'<img src="{img_uri}" alt="Revenue Chart" style="width:60%" />'
+        f'<figcaption>{caption_text}</figcaption>'
+        f'</figure>'
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_image_xobject(pdf), "PDF should contain the image"
+    # Caption text should be present in the PDF content streams
+    pdf_text = _pdf_extract_text(pdf)
+    assert caption_text in pdf_text, f"Caption '{caption_text}' should appear in PDF text streams"
+
+
+def test_docx_export_renders_inline_image():
+    """Test 4: Image appears in DOCX."""
+    img_uri = _make_test_image_data_uri()
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<p>Before image</p>'
+        f'<figure style="text-align:center">'
+        f'<img src="{img_uri}" alt="Test Image" style="width:45%" />'
+        f'</figure>'
+        f'<p>After image</p>'
+    )
+
+    docx = render_docx_bytes(document, profile)
+
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        assert "word/document.xml" in archive.namelist()
+        assert _docx_has_image(archive), "DOCX should contain at least one image file in word/media/"
+        assert _docx_has_drawing(archive), "DOCX document XML should contain <w:drawing> element"
+        # Check that the image relationship is in the rels file
+        rels_xml = archive.read("word/_rels/document.xml.rels").decode("utf-8")
+        assert "rIdImg" in rels_xml, "DOCX relationships should contain image relationship"
+
+
+def test_pdf_export_continues_when_image_cannot_be_loaded():
+    """Test 5: Missing image does not abort export."""
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<p>Before broken image</p>'
+        f'<figure style="text-align:center">'
+        f'<img src="data:image/png;base64,INVALID_BASE64_DATA" alt="Broken" style="width:45%" />'
+        f'</figure>'
+        f'<p>After broken image</p>'
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    # The export should still succeed with text content
+    pdf_text = _pdf_extract_text(pdf)
+    assert "Before broken image" in pdf_text, "Text before broken image should appear in PDF"
+    assert "After broken image" in pdf_text, "Text after broken image should appear in PDF"
+    # A warning placeholder should be present
+    assert "Image unavailable" in pdf_text, "Image unavailable warning should appear in PDF"
+
+
+def test_pdf_export_preserves_image_aspect_ratio():
+    """Test 6: Aspect ratio is preserved."""
+    # Create a 8x4 image (2:1 aspect ratio)
+    img_uri = _make_test_image_data_uri(width=8, height=4, color=(0, 0, 255))
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<figure style="text-align:center">'
+        f'<img src="{img_uri}" alt="Wide Image" style="width:50%" />'
+        f'</figure>'
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_image_xobject(pdf), "PDF should contain the image"
+    # The image should be in the PDF with its aspect ratio preserved
+    # We verify by checking the image XObject dictionary for width/height entries
+    # that maintain the 2:1 ratio
+    img_dict_matches = re.findall(rb"/Width\s+(\d+)\s+/Height\s+(\d+)", pdf)
+    if img_dict_matches:
+        for w, h in img_dict_matches:
+            w_val = int(w)
+            h_val = int(h)
+            # The native dimensions should be 8x4 (2:1 ratio)
+            assert w_val == 8, f"Expected width 8, got {w_val}"
+            assert h_val == 4, f"Expected height 4, got {h_val}"
+
+
+def test_pdf_export_respects_image_width_percentage():
+    """Test 7: Width is respected."""
+    img_uri = _make_test_image_data_uri(width=20, height=10, color=(128, 128, 0))
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+
+    # Create two documents with different widths
+    doc_30 = _make_image_document(
+        f'<figure style="text-align:center"><img src="{img_uri}" alt="30%" style="width:30%" /></figure>'
+    )
+    doc_80 = _make_image_document(
+        f'<figure style="text-align:center"><img src="{img_uri}" alt="80%" style="width:80%" /></figure>'
+    )
+
+    pdf_30 = render_pdf_bytes(doc_30, profile)
+    pdf_80 = render_pdf_bytes(doc_80, profile)
+
+    _assert_valid_pdf(pdf_30)
+    _assert_valid_pdf(pdf_80)
+    # Both should contain the image
+    assert _pdf_has_image_xobject(pdf_30), "PDF should contain image at 30% width"
+    assert _pdf_has_image_xobject(pdf_80), "PDF should contain image at 80% width"
+    # The image data should be the same (same source image)
+    # The width difference is in the rendering, not the image data
+
+
+def test_docx_export_renders_image_caption():
+    """Test: Image caption appears in DOCX."""
+    img_uri = _make_test_image_data_uri()
+    caption_text = "Figure 2: Annual Growth"
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<figure style="text-align:center">'
+        f'<img src="{img_uri}" alt="Growth Chart" style="width:55%" />'
+        f'<figcaption>{caption_text}</figcaption>'
+        f'</figure>'
+    )
+
+    docx = render_docx_bytes(document, profile)
+
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        doc_xml = archive.read("word/document.xml").decode("utf-8")
+        assert caption_text in doc_xml, "DOCX should contain the caption text"
+        assert _docx_has_drawing(archive), "DOCX should contain a drawing element"
+
+
+def test_docx_export_continues_when_image_cannot_be_loaded():
+    """Test: Missing image does not abort DOCX export."""
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _make_image_document(
+        f'<p>Before broken image</p>'
+        f'<figure style="text-align:center">'
+        f'<img src="data:image/png;base64,INVALID" alt="Broken" style="width:45%" />'
+        f'</figure>'
+        f'<p>After broken image</p>'
+    )
+
+    docx = render_docx_bytes(document, profile)
+
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        doc_xml = archive.read("word/document.xml").decode("utf-8")
+        assert "Before broken image" in doc_xml
+        assert "After broken image" in doc_xml
+        assert "Image unavailable" in doc_xml

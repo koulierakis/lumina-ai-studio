@@ -16,6 +16,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
+    Image as RLImage,
     PageBreak,
     PageTemplate,
     Paragraph,
@@ -1832,6 +1833,89 @@ def _resolve_export_text(template: str, document: CorporateDocument, page: int, 
     )
 
 
+def _extract_img_attrs(tag: str) -> dict:
+    """Extract src, alt, and style attributes from an <img> tag."""
+    src_match = re.search(r'\ssrc=["\']([^"\']+)["\']', tag, re.I)
+    alt_match = re.search(r'\salt=["\']([^"\']*)["\']', tag, re.I)
+    style_match = re.search(r'\sstyle=["\']([^"\']*)["\']', tag, re.I)
+    return {
+        "src": src_match.group(1) if src_match else "",
+        "alt": alt_match.group(1) if alt_match else "",
+        "style": style_match.group(1) if style_match else "",
+    }
+
+
+def _extract_figure_align(style: str) -> str:
+    """Extract alignment from figure style."""
+    if "display:inline-block" in style:
+        return "inline"
+    if "width:100%" in style:
+        return "full-width"
+    align_match = re.search(r'text-align:(left|right|center)', style, re.I)
+    if align_match:
+        return align_match.group(1)
+    return "center"
+
+
+def _extract_img_width(style: str) -> float:
+    """Extract width percentage from img style."""
+    width_match = re.search(r'width:(\d+(?:\.\d+)?)%', style, re.I)
+    if width_match:
+        return float(width_match.group(1))
+    return 45.0
+
+
+def _is_safe_image_src(src: str) -> bool:
+    """Check if image source is safe for export."""
+    return bool(re.match(r'^(https?://|data:image/)', src or "", re.I))
+
+
+def _load_image_data(src: str) -> tuple[bytes, str] | None:
+    """Load image data from a data URI or URL.
+
+    Returns (data, format) or None if loading fails.
+    """
+    if not src:
+        return None
+    data_match = re.match(r'data:image/(\w+);base64,(.+)', src, re.I)
+    if data_match:
+        import base64
+
+        fmt = data_match.group(1).lower()
+        if fmt == "svg+xml":
+            fmt = "svg"
+        try:
+            data = base64.b64decode(data_match.group(2))
+            return data, fmt
+        except Exception:
+            return None
+    if src.startswith(('http://', 'https://')):
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(src, timeout=10) as response:
+                data = response.read()
+                content_type = response.headers.get('Content-Type', 'image/png')
+                fmt = content_type.split('/')[-1].lower() if '/' in content_type else 'png'
+                if fmt == 'svg+xml':
+                    fmt = 'svg'
+                return data, fmt
+        except Exception:
+            return None
+    return None
+
+
+def _get_image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """Get image dimensions in pixels using PIL."""
+    try:
+        from PIL import Image as PILImage
+
+        img = PILImage.open(io.BytesIO(data))
+        return img.size
+    except Exception:
+        return None
+
+
 def _export_blocks(document: CorporateDocument) -> list[dict]:
     source = document.content_html or html.escape(document.content_text or document.title)
     source = re.sub(r"<br\s*/?>", "\n", source, flags=re.I)
@@ -1842,6 +1926,11 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
     skip_until = ""
     skip_container_tags = ("script", "style", "head", "title")
     skip_void_tags = ("meta", "link")
+    in_figure = False
+    in_figcaption = False
+    figure_img: dict = {}
+    figure_caption: list[str] = []
+    figure_style = ""
     for token in tokens:
         lower = token.lower()
         if skip_until and lower.startswith(f"</{skip_until}"):
@@ -1865,6 +1954,51 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
                 blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
                 current = []
             blocks.append({"type": "page_break"})
+        elif lower.startswith("<figure"):
+            if current:
+                blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+                current = []
+            in_figure = True
+            figure_img = {}
+            figure_caption = []
+            style_match = re.search(r'\sstyle=["\']([^"\']*)["\']', token, re.I)
+            figure_style = style_match.group(1) if style_match else ""
+        elif lower.startswith("</figure"):
+            if in_figure and figure_img.get("src"):
+                align = _extract_figure_align(figure_style)
+                width = _extract_img_width(figure_img.get("style", ""))
+                blocks.append({
+                    "type": "image",
+                    "src": figure_img["src"],
+                    "alt": figure_img.get("alt", ""),
+                    "caption": normalize_text(" ".join(figure_caption)),
+                    "align": align,
+                    "width": width,
+                })
+            in_figure = False
+            figure_img = {}
+            figure_caption = []
+            figure_style = ""
+        elif lower.startswith("<img"):
+            img_attrs = _extract_img_attrs(token)
+            if in_figure:
+                figure_img = img_attrs
+            elif img_attrs.get("src") and _is_safe_image_src(img_attrs["src"]):
+                if current:
+                    blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
+                    current = []
+                blocks.append({
+                    "type": "image",
+                    "src": img_attrs["src"],
+                    "alt": img_attrs.get("alt", ""),
+                    "caption": "",
+                    "align": "center",
+                    "width": _extract_img_width(img_attrs.get("style", "")),
+                })
+        elif lower.startswith("<figcaption"):
+            in_figcaption = True
+        elif lower.startswith("</figcaption"):
+            in_figcaption = False
         elif lower.startswith("<h1") or lower.startswith("<h2") or lower.startswith("<h3"):
             if current:
                 blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
@@ -1900,10 +2034,13 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
         else:
             text = html.unescape(token).strip()
             if text:
-                current.append(text)
+                if in_figcaption:
+                    figure_caption.append(text)
+                else:
+                    current.append(text)
     if current:
         blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
-    return [block for block in blocks if block.get("type") == "page_break" or block.get("text")]
+    return [block for block in blocks if block.get("type") in ("page_break", "image") or block.get("text")]
 
 
 def _paginate_blocks(blocks: list[dict], layout: dict) -> list[list[dict]]:
@@ -1920,9 +2057,12 @@ def _paginate_blocks(blocks: list[dict], layout: dict) -> list[list[dict]]:
                 pages.append([])
                 used = 0
             continue
-        weight = max(
-            1, (len(block["text"]) // chars_per_line) + (2 if block["type"] == "heading" else 1)
-        )
+        if block["type"] == "image":
+            weight = 18
+        else:
+            weight = max(
+                1, (len(block["text"]) // chars_per_line) + (2 if block["type"] == "heading" else 1)
+            )
         if used and used + weight > lines_per_page:
             pages.append([])
             used = 0
@@ -2030,6 +2170,63 @@ def _make_pdf_page_callback(document: CorporateDocument, layout: dict):
     return _on_page
 
 
+def _append_pdf_image(
+    flowables: list,
+    block: dict,
+    avail_width: float,
+    body_style: ParagraphStyle,
+) -> None:
+    """Append an image flowable to the PDF flowables list.
+
+    Handles errors gracefully: if the image cannot be loaded, a warning
+    paragraph is emitted instead and the export continues.
+    """
+    src = block.get("src", "")
+    alt = block.get("alt", "")
+    caption = block.get("caption", "")
+    align = block.get("align", "center")
+    width_pct = block.get("width", 45)
+
+    img_data = _load_image_data(src)
+    if img_data is None:
+        flowables.append(Paragraph(f"[Image unavailable: {html.escape(alt)}]", body_style))
+        return
+
+    data, _fmt = img_data
+    dims = _get_image_dimensions(data)
+    if dims is None:
+        flowables.append(Paragraph(f"[Image unavailable: {html.escape(alt)}]", body_style))
+        return
+
+    native_w, native_h = dims
+    target_width = avail_width * (width_pct / 100.0)
+    if target_width > native_w:
+        target_width = float(native_w)
+    aspect = native_h / native_w if native_w else 1.0
+    target_height = target_width * aspect
+
+    try:
+        img_io = io.BytesIO(data)
+        rl_img = RLImage(img_io, width=target_width, height=target_height)
+        rl_img.hAlign = _rl_align(align)
+        flowables.append(rl_img)
+    except Exception:
+        flowables.append(Paragraph(f"[Image unavailable: {html.escape(alt)}]", body_style))
+        return
+
+    if caption:
+        caption_style = ParagraphStyle(
+            name="Caption",
+            fontName=_PDF_FONT_NAME,
+            fontSize=9,
+            leading=12,
+            alignment=1,
+            spaceBefore=4,
+            spaceAfter=10,
+        )
+        flowables.append(Paragraph(html.escape(caption), caption_style))
+
+
 def render_pdf_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
     _register_pdf_fonts()
     layout = _normalize_export_layout(document)
@@ -2083,6 +2280,8 @@ def render_pdf_bytes(document: CorporateDocument, profile: CompanyProfile) -> by
             flowables.append(Paragraph(f"• {html.escape(text)}", list_style))
         elif block["type"] == "table":
             flowables.append(Paragraph(html.escape(block["text"]), body_style))
+        elif block["type"] == "image":
+            _append_pdf_image(flowables, block, page_w - left_m - right_m, body_style)
         else:
             flowables.append(Paragraph(html.escape(block["text"]), body_style))
 
@@ -2144,16 +2343,140 @@ def _page_number_x(position: str, left: float, right: float, width: float) -> fl
     return width / 2 - 24
 
 
+def _prepare_docx_images(blocks: list[dict], layout: dict) -> list[dict]:
+    """Prepare image blocks for DOCX export.
+
+    Returns a list of image info dicts with decoded data and EMU dimensions.
+    Images that cannot be loaded are silently skipped.
+    """
+    width_pt, _height_pt = _page_size_points(layout)
+    margins = layout["page"]["margins"]
+    content_width_pt = width_pt - (margins["left"] + margins["right"]) * 72 / 25.4
+    content_width_emu = int(content_width_pt * 12700)
+
+    images: list[dict] = []
+    img_counter = 0
+    for i, block in enumerate(blocks):
+        if block.get("type") != "image":
+            continue
+        img_data = _load_image_data(block.get("src", ""))
+        if img_data is None:
+            continue
+        data, fmt = img_data
+        dims = _get_image_dimensions(data)
+        if dims is None:
+            continue
+        native_w, native_h = dims
+        target_width_emu = int(content_width_emu * (block.get("width", 45) / 100.0))
+        native_width_emu = int(native_w * 9525)
+        if target_width_emu > native_width_emu:
+            target_width_emu = native_width_emu
+        aspect = native_h / native_w if native_w else 1.0
+        target_height_emu = int(target_width_emu * aspect)
+        img_counter += 1
+        ext = fmt
+        if ext == "jpeg":
+            ext = "jpg"
+        images.append({
+            "id": f"rIdImg{img_counter}",
+            "data": data,
+            "ext": ext,
+            "width_emu": target_width_emu,
+            "height_emu": target_height_emu,
+            "align": block.get("align", "center"),
+            "caption": block.get("caption", ""),
+            "alt": block.get("alt", ""),
+            "block_index": i,
+            "pic_id": img_counter,
+        })
+    return images
+
+
+def _docx_image_xml(img: dict) -> str:
+    """Generate DOCX XML for an image block."""
+    align = img.get("align", "center")
+    jc = "center"
+    if align == "left":
+        jc = "left"
+    elif align == "right":
+        jc = "right"
+
+    width_emu = img["width_emu"]
+    height_emu = img["height_emu"]
+    rid = img["id"]
+    pic_id = img["pic_id"]
+    alt = html.escape(img.get("alt", f"Image {pic_id}"))
+
+    drawing = (
+        f"<w:drawing>"
+        f"<wp:inline distT='0' distB='0' distL='0' distR='0'>"
+        f"<wp:extent cx='{width_emu}' cy='{height_emu}'/>"
+        f"<wp:effectExtent l='0' t='0' r='0' b='0'/>"
+        f"<wp:docPr id='{pic_id}' name='Image {pic_id}' descr='{alt}'/>"
+        f"<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect='1'/></wp:cNvGraphicFramePr>"
+        f"<a:graphic xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main'>"
+        f"<a:graphicData uri='http://schemas.openxmlformats.org/drawingml/2006/picture'>"
+        f"<pic:pic xmlns:pic='http://schemas.openxmlformats.org/drawingml/2006/picture'>"
+        f"<pic:nvPicPr>"
+        f"<pic:cNvPr id='{pic_id}' name='Image {pic_id}'/>"
+        f"<pic:cNvPicPr/>"
+        f"</pic:nvPicPr>"
+        f"<pic:blipFill>"
+        f"<a:blip r:embed='{rid}'/>"
+        f"<a:stretch><a:fillRect/></a:stretch>"
+        f"</pic:blipFill>"
+        f"<pic:spPr>"
+        f"<a:xfrm>"
+        f"<a:off x='0' y='0'/>"
+        f"<a:ext cx='{width_emu}' cy='{height_emu}'/>"
+        f"</a:xfrm>"
+        f"<a:prstGeom prst='rect'><a:avLst/></a:prstGeom>"
+        f"</pic:spPr>"
+        f"</pic:pic>"
+        f"</a:graphicData>"
+        f"</a:graphic>"
+        f"</wp:inline>"
+        f"</w:drawing>"
+    )
+
+    result = f"<w:p><w:pPr><w:jc w:val='{jc}'/></w:pPr><w:r>{drawing}</w:r></w:p>"
+
+    if img.get("caption"):
+        result += (
+            f"<w:p><w:pPr><w:jc w:val='center'/>"
+            f"<w:rPr><w:sz w:val='18'/><w:i/></w:rPr>"
+            f"</w:pPr><w:r><w:rPr><w:sz w:val='18'/><w:i/></w:rPr>"
+            f"<w:t>{html.escape(img['caption'])}</w:t></w:r></w:p>"
+        )
+
+    return result
+
+
 def render_docx_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
     layout = _normalize_export_layout(document)
     blocks = _export_blocks(document)
-    body_xml = "".join(_docx_block_xml(block) for block in blocks)
+    images = _prepare_docx_images(blocks, layout)
+    image_map = {img["block_index"]: img for img in images}
+    body_parts: list[str] = []
+    for i, block in enumerate(blocks):
+        if block.get("type") == "image" and i in image_map:
+            body_parts.append(_docx_image_xml(image_map[i]))
+        elif block.get("type") == "image":
+            alt = html.escape(block.get("alt", "Image unavailable"))
+            body_parts.append(f"<w:p><w:r><w:t>[Image unavailable: {alt}]</w:t></w:r></w:p>")
+        else:
+            body_parts.append(_docx_block_xml(block))
+    body_xml = "".join(body_parts)
     sect_pr = _docx_section_properties(layout)
-    document_xml = f"<?xml version='1.0' encoding='UTF-8' standalone='yes'?><w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships'><w:body><w:p><w:r><w:t>{html.escape(document.title)}</w:t></w:r></w:p><w:p><w:r><w:t>{html.escape(profile.company_name)}</w:t></w:r></w:p>{body_xml}{sect_pr}</w:body></w:document>"
+    document_xml = f"<?xml version='1.0' encoding='UTF-8' standalone='yes'?><w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' xmlns:r='http://schemas.openxmlformats.org/officeDocument/2006/relationships' xmlns:wp='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing' xmlns:a='http://schemas.openxmlformats.org/drawingml/2006/main' xmlns:pic='http://schemas.openxmlformats.org/drawingml/2006/picture'><w:body><w:p><w:r><w:t>{html.escape(document.title)}</w:t></w:r></w:p><w:p><w:r><w:t>{html.escape(profile.company_name)}</w:t></w:r></w:p>{body_xml}{sect_pr}</w:body></w:document>"
     rels = [
         "<Relationship Id='rIdHeader1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/header' Target='header1.xml'/>",
         "<Relationship Id='rIdFooter1' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer' Target='footer1.xml'/>",
     ]
+    for img in images:
+        rels.append(
+            f"<Relationship Id='{img['id']}' Type='http://schemas.openxmlformats.org/officeDocument/2006/relationships/image' Target='media/image{img['pic_id']}.{img['ext']}'/>"
+        )
     content_overrides = [
         "<Override PartName='/word/header1.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml'/>",
         "<Override PartName='/word/footer1.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml'/>",
@@ -2172,11 +2495,28 @@ def render_docx_bytes(document: CorporateDocument, profile: CompanyProfile) -> b
         content_overrides.append(
             "<Override PartName='/word/footerFirst.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml'/>"
         )
+    image_defaults: list[str] = []
+    image_exts = {img["ext"] for img in images}
+    ext_content_types = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "webp": "image/webp",
+        "svg": "image/svg+xml",
+        "bmp": "image/bmp",
+        "tiff": "image/tiff",
+    }
+    for ext in image_exts:
+        ct = ext_content_types.get(ext, "application/octet-stream")
+        image_defaults.append(f"<Default Extension='{ext}' ContentType='{ct}'/>")
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(
             "[Content_Types].xml",
-            "<?xml version='1.0' encoding='UTF-8'?><Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml'/><Default Extension='xml' ContentType='application/xml'/><Override PartName='/word/document.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'/>"
+            "<?xml version='1.0' encoding='UTF-8'?><Types xmlns='http://schemas.openxmlformats.org/package/2006/content-types'><Default Extension='rels' ContentType='application/vnd.openxmlformats-package.relationships+xml'/><Default Extension='xml' ContentType='application/xml'/>"
+            + "".join(image_defaults)
+            + "<Override PartName='/word/document.xml' ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml'/>"
             + "".join(content_overrides)
             + "</Types>",
         )
@@ -2191,6 +2531,8 @@ def render_docx_bytes(document: CorporateDocument, profile: CompanyProfile) -> b
             + "</Relationships>",
         )
         zf.writestr("word/document.xml", document_xml)
+        for img in images:
+            zf.writestr(f"word/media/image{img['pic_id']}.{img['ext']}", img["data"])
         zf.writestr(
             "word/header1.xml",
             _docx_region_xml("hdr", _region_text(layout["header"], document, 2, 2)),
