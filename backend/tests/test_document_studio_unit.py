@@ -1738,3 +1738,458 @@ def test_docx_export_continues_when_image_cannot_be_loaded():
         assert "Before broken image" in doc_xml
         assert "After broken image" in doc_xml
         assert "Image unavailable" in doc_xml
+
+
+# ---------------------------------------------------------------------------
+# DOCX import structure preservation tests
+# ---------------------------------------------------------------------------
+
+_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+_PIC_NS = "http://schemas.openxmlformats.org/drawingml/2006/picture"
+
+
+def _build_docx(
+    paragraphs: list[str] = None,
+    headings: dict[int, str] = None,
+    tables: list[list[list[str]]] = None,
+    images: list[bytes] = None,
+    image_ext: str = "png",
+) -> bytes:
+    """Build a minimal DOCX file for testing.
+
+    Args:
+        paragraphs: List of paragraph texts, keyed by position (0-indexed).
+        headings: Dict mapping paragraph index to heading level (1, 2, or 3).
+        tables: List of tables, each a list of rows, each a list of cell texts.
+        images: List of image data bytes to embed.
+
+    Returns:
+        DOCX file as bytes.
+    """
+    import base64
+
+    paragraphs = paragraphs or []
+    headings = headings or {}
+    tables = tables or []
+    images = images or []
+
+    # Build document.xml body content
+    body_parts: list[str] = []
+
+    # Add paragraphs and headings in order
+    for i, text in enumerate(paragraphs):
+        if i in headings:
+            level = headings[i]
+            body_parts.append(
+                f'<w:p><w:pPr><w:pStyle w:val="Heading{level}"/></w:pPr>'
+                f'<w:r><w:t>{text}</w:t></w:r></w:p>'
+            )
+        else:
+            body_parts.append(
+                f'<w:p><w:r><w:t>{text}</w:t></w:r></w:p>'
+            )
+
+    # Add tables
+    for table in tables:
+        rows_xml = ""
+        for row in table:
+            cells_xml = ""
+            for cell in row:
+                cells_xml += (
+                    f'<w:tc><w:p><w:r><w:t>{cell}</w:t></w:r></w:p></w:tc>'
+                )
+            rows_xml += f'<w:tr>{cells_xml}</w:tr>'
+        body_parts.append(f'<w:tbl>{rows_xml}</w:tbl>')
+
+    # Add images
+    for i, img_data in enumerate(images):
+        rid = f"rIdImg{i + 1}"
+        b64 = base64.b64encode(img_data).decode("ascii")
+        body_parts.append(
+            f'<w:p><w:r><w:drawing>'
+            f'<wp:inline distT="0" distB="0" distL="0" distR="0">'
+            f'<wp:extent cx="190500" cy="190500"/>'
+            f'<wp:docPr id="{i + 1}" name="Image {i + 1}"/>'
+            f'<a:graphic xmlns:a="{_A_NS}">'
+            f'<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            f'<pic:pic xmlns:pic="{_PIC_NS}">'
+            f'<pic:nvPicPr><pic:cNvPr id="{i + 1}" name="Image {i + 1}"/>'
+            f'<pic:cNvPicPr/></pic:nvPicPr>'
+            f'<pic:blipFill><a:blip r:embed="{rid}"/>'
+            f'<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+            f'<pic:spPr><a:xfrm><a:off x="0" y="0"/>'
+            f'<a:ext cx="190500" cy="190500"/></a:xfrm>'
+            f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+            f'</pic:pic></a:graphicData></a:graphic>'
+            f'</wp:inline></w:drawing></w:r></w:p>'
+        )
+
+    body_xml = "".join(body_parts)
+    document_xml = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_W_NS}" xmlns:r="{_R_NS}" '
+        f'xmlns:wp="{_WP_NS}" xmlns:a="{_A_NS}">'
+        f'<w:body>{body_xml}</w:body></w:document>'
+    )
+
+    # Build relationships
+    rels_parts = []
+    for i in range(len(images)):
+        rels_parts.append(
+            f'<Relationship Id="rIdImg{i + 1}" '
+            f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="media/image{i + 1}.{image_ext}"/>'
+        )
+    rels_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'{"".join(rels_parts)}</Relationships>'
+    )
+
+    # Build content types
+    ct_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        f'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        f'<Default Extension="xml" ContentType="application/xml"/>'
+        f'<Default Extension="{image_ext}" ContentType="image/{image_ext}"/>'
+        f'<Override PartName="/word/document.xml" '
+        f'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        f'</Types>'
+    )
+
+    # Build root rels
+    root_rels = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'<Relationship Id="rId1" '
+        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        f'Target="word/document.xml"/></Relationships>'
+    )
+
+    # Assemble zip
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", ct_xml)
+        zf.writestr("_rels/.rels", root_rels)
+        zf.writestr("word/document.xml", document_xml)
+        zf.writestr("word/_rels/document.xml.rels", rels_xml)
+        for i, img_data in enumerate(images):
+            zf.writestr(f"word/media/image{i + 1}.{image_ext}", img_data)
+    return buf.getvalue()
+
+
+def _make_png_bytes(width: int = 4, height: int = 4, color: tuple = (255, 0, 0)) -> bytes:
+    """Generate a small PNG image as bytes."""
+    try:
+        from PIL import Image as PILImage
+
+        img = PILImage.new("RGB", (width, height), color=color)
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+    except Exception:
+        # Minimal 1x1 PNG
+        return (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\xcf"
+            b"\xc0\x00\x00\x00\x03\x00\x01\x8a\xeb\x19\x1e\x00\x00\x00\x00IEND\xaeB`\x82"
+        )
+
+
+def test_docx_import_preserves_heading_1_2_3():
+    """Test 1: Heading 1, 2, and 3 are preserved."""
+    docx = _build_docx(
+        paragraphs=["Main Title", "Section Title", "Subsection Title"],
+        headings={0: 1, 1: 2, 2: 3},
+    )
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    assert "<h1>" in result and "Main Title" in result
+    assert "<h2>" in result and "Section Title" in result
+    assert "<h3>" in result and "Subsection Title" in result
+
+
+def test_docx_import_preserves_normal_paragraphs():
+    """Test 2: Normal paragraphs are preserved."""
+    docx = _build_docx(
+        paragraphs=["This is the first paragraph.", "This is the second paragraph."],
+    )
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    assert "<p>" in result
+    assert "This is the first paragraph." in result
+    assert "This is the second paragraph." in result
+
+
+def test_docx_import_preserves_paragraph_and_heading_order():
+    """Test 3: Paragraph and heading order is preserved."""
+    docx = _build_docx(
+        paragraphs=["Introduction text", "Chapter One", "Body of chapter one"],
+        headings={1: 1},
+    )
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    # Extract elements in order
+    elements = re.findall(r"<(h1|p)>([^<]+)</\1>", result)
+    assert len(elements) == 3
+    assert elements[0] == ("p", "Introduction text")
+    assert elements[1] == ("h1", "Chapter One")
+    assert elements[2] == ("p", "Body of chapter one")
+
+
+def test_docx_import_preserves_table_rows_columns_and_empty_cells():
+    """Test 4: Tables preserve rows, columns, and empty cells."""
+    docx = _build_docx(
+        tables=[
+            [
+                ["Header A", "Header B", "Header C"],
+                ["Cell 1A", "", "Cell 1C"],
+                ["Cell 2A", "Cell 2B", "Cell 2C"],
+            ]
+        ],
+    )
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    assert "<table>" in result
+    assert "<tr>" in result
+    assert "<td>" in result
+    assert "Header A" in result and "Header B" in result and "Header C" in result
+    assert "Cell 1A" in result and "Cell 1C" in result
+    assert "Cell 2A" in result and "Cell 2B" in result and "Cell 2C" in result
+    # Check empty cell is preserved
+    assert "<td></td>" in result, "Empty cell should be preserved as <td></td>"
+
+
+def test_docx_import_embeds_png_images_as_base64():
+    """Test 5: Embedded PNG images become base64 img elements."""
+    png_data = _make_png_bytes(width=8, height=6, color=(255, 0, 0))
+    docx = _build_docx(
+        paragraphs=["Before image"],
+        images=[png_data],
+        image_ext="png",
+    )
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    assert "<figure" in result, "Image should be wrapped in <figure>"
+    assert "<img" in result, "Image should have <img> tag"
+    assert "data:image/png;base64," in result, "Image should be a base64 data URI"
+    assert "Before image" in result, "Text before image should be preserved"
+
+
+def test_docx_import_embeds_jpeg_images_as_base64():
+    """Test 5b: Embedded JPEG images become base64 img elements."""
+    try:
+        from PIL import Image as PILImage
+
+        img = PILImage.new("RGB", (8, 6), color=(0, 255, 0))
+        buf = BytesIO()
+        img.save(buf, format="JPEG")
+        jpeg_data = buf.getvalue()
+    except Exception:
+        pytest.skip("PIL not available for JPEG test")
+
+    docx = _build_docx(
+        images=[jpeg_data],
+        image_ext="jpeg",
+    )
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    assert "<figure" in result, "JPEG image should be wrapped in <figure>"
+    assert "data:image/jpeg;base64," in result, "JPEG should be a base64 data URI"
+
+
+def test_docx_import_preserves_text_table_and_image_order():
+    """Test 6: Text, table, and image order is preserved."""
+    png_data = _make_png_bytes(width=4, height=4, color=(0, 0, 255))
+
+    # Build a DOCX with text, then table, then image, then text
+    # We need to build the body manually to interleave elements
+    import base64
+
+    b64 = base64.b64encode(png_data).decode("ascii")
+    body_xml = (
+        f'<w:p><w:r><w:t>First paragraph</w:t></w:r></w:p>'
+        f'<w:tbl><w:tr><w:tc><w:p><w:r><w:t>Cell A</w:t></w:r></w:p></w:tc>'
+        f'<w:tc><w:p><w:r><w:t>Cell B</w:t></w:r></w:p></w:tc></w:tr></w:tbl>'
+        f'<w:p><w:r><w:drawing>'
+        f'<wp:inline distT="0" distB="0" distL="0" distR="0">'
+        f'<wp:extent cx="190500" cy="190500"/>'
+        f'<wp:docPr id="1" name="Image 1"/>'
+        f'<a:graphic xmlns:a="{_A_NS}">'
+        f'<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+        f'<pic:pic xmlns:pic="{_PIC_NS}">'
+        f'<pic:nvPicPr><pic:cNvPr id="1" name="Image 1"/><pic:cNvPicPr/></pic:nvPicPr>'
+        f'<pic:blipFill><a:blip r:embed="rIdImg1"/>'
+        f'<a:stretch><a:fillRect/></a:stretch></pic:blipFill>'
+        f'<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="190500" cy="190500"/></a:xfrm>'
+        f'<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
+        f'</pic:pic></a:graphicData></a:graphic>'
+        f'</wp:inline></w:drawing></w:r></w:p>'
+        f'<w:p><w:r><w:t>Last paragraph</w:t></w:r></w:p>'
+    )
+    document_xml = (
+        f'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        f'<w:document xmlns:w="{_W_NS}" xmlns:r="{_R_NS}" '
+        f'xmlns:wp="{_WP_NS}" xmlns:a="{_A_NS}">'
+        f'<w:body>{body_xml}</w:body></w:document>'
+    )
+    rels_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'<Relationship Id="rIdImg1" '
+        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+        f'Target="media/image1.png"/></Relationships>'
+    )
+    ct_xml = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        f'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        f'<Default Extension="xml" ContentType="application/xml"/>'
+        f'<Default Extension="png" ContentType="image/png"/>'
+        f'<Override PartName="/word/document.xml" '
+        f'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        f'</Types>'
+    )
+    root_rels = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        f'<Relationship Id="rId1" '
+        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        f'Target="word/document.xml"/></Relationships>'
+    )
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", ct_xml)
+        zf.writestr("_rels/.rels", root_rels)
+        zf.writestr("word/document.xml", document_xml)
+        zf.writestr("word/_rels/document.xml.rels", rels_xml)
+        zf.writestr("word/media/image1.png", png_data)
+    docx = buf.getvalue()
+
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    # Verify order: text, table, image, text
+    first_p = result.find("First paragraph")
+    table_pos = result.find("<table>")
+    figure_pos = result.find("<figure")
+    last_p = result.find("Last paragraph")
+
+    assert first_p != -1 and table_pos != -1 and figure_pos != -1 and last_p != -1
+    assert first_p < table_pos, "First paragraph should come before table"
+    assert table_pos < figure_pos, "Table should come before image"
+    assert figure_pos < last_p, "Image should come before last paragraph"
+
+
+def test_docx_import_does_not_alter_legal_text():
+    """Test 7: Legal text is not altered."""
+    legal_text = (
+        "The Party shall keep all confidential information strictly confidential "
+        "and shall not disclose it to any third party without prior written consent."
+    )
+    docx = _build_docx(paragraphs=[legal_text])
+    result = extract_text_from_upload(
+        docx,
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    # The legal text should appear exactly as-is (HTML-escaped)
+    assert legal_text in result, f"Legal text should be preserved exactly: got {result}"
+
+
+def test_docx_import_malformed_falls_back_without_crashing():
+    """Test 8: Malformed DOCX falls back without crashing."""
+    # Not a valid DOCX (not a zip)
+    result = extract_text_from_upload(
+        b"this is not a docx file",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    # Should return something (fallback plain text) without raising
+    assert isinstance(result, str)
+    assert len(result) >= 0
+
+
+def test_docx_import_corrupt_zip_falls_back_without_crashing():
+    """Test 8b: Corrupt zip falls back without crashing."""
+    # Valid zip but missing word/document.xml
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("random.txt", "not a docx")
+    result = extract_text_from_upload(
+        buf.getvalue(),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "test.docx",
+    )
+
+    assert isinstance(result, str), "Should return a string even for corrupt DOCX"
+
+
+def test_docx_import_existing_import_tests_still_pass():
+    """Test 9: Existing import tests still pass."""
+    # Test the existing DOCX import test from the test suite
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr(
+            "word/document.xml",
+            "<w:document><w:t>Imported NDA confidentiality obligations</w:t></w:document>",
+        )
+
+    text = extract_text_from_upload(
+        buffer.getvalue(),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "nda.docx",
+    )
+
+    assert "Imported NDA confidentiality obligations" in text
+
+
+def test_docx_import_existing_pdf_and_docx_export_tests_still_pass():
+    """Test 10: Existing PDF and DOCX export tests still pass."""
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Board Resolution",
+        content_text="The board resolved to approve the banking package. Confidentiality and compliance apply.",
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+    docx = render_docx_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    with zipfile.ZipFile(BytesIO(docx)) as archive:
+        assert "word/document.xml" in archive.namelist()
+        assert "Board Resolution" in archive.read("word/document.xml").decode("utf-8")

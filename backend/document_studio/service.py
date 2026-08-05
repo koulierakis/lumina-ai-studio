@@ -1674,6 +1674,164 @@ def render_text_export(document: CorporateDocument, fmt: str) -> tuple[bytes, st
     return text.encode("utf-8"), "text/plain", "txt"
 
 
+def _parse_docx_to_html(data: bytes) -> str | None:
+    """Parse a DOCX file and return semantic HTML preserving headings, paragraphs, tables, and images.
+
+    Returns ``None`` if the DOCX is malformed so the caller can fall back to plain-text extraction.
+    """
+    import base64
+    import xml.etree.ElementTree as ET
+
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    NS = {"w": W_NS, "r": R_NS, "a": A_NS, "wp": WP_NS}
+
+    HEADING_MAP = {
+        "Heading1": "h1",
+        "Heading2": "h2",
+        "Heading3": "h3",
+        "heading 1": "h1",
+        "heading 2": "h2",
+        "heading 3": "h3",
+    }
+
+    def _text_of_paragraph(p_elem: ET.Element) -> str:
+        """Extract concatenated text from all w:r/w:t runs in a paragraph."""
+        parts: list[str] = []
+        for t in p_elem.iter(f"{{{W_NS}}}t"):
+            if t.text:
+                parts.append(t.text)
+        return "".join(parts)
+
+    def _para_style(p_elem: ET.Element) -> str:
+        """Return the pStyle val if present, else empty string."""
+        ppr = p_elem.find(f"{{{W_NS}}}pPr")
+        if ppr is not None:
+            pstyle = ppr.find(f"{{{W_NS}}}pStyle")
+            if pstyle is not None:
+                return pstyle.get(f"{{{W_NS}}}val", "")
+        return ""
+
+    def _para_has_page_break(p_elem: ET.Element) -> bool:
+        for br in p_elem.iter(f"{{{W_NS}}}br"):
+            if br.get(f"{{{W_NS}}}type") == "page":
+                return True
+        return False
+
+    def _resolve_image_rids(p_elem: ET.Element) -> list[str]:
+        """Return list of r:embed attribute values from a:blip elements in a paragraph."""
+        rids: list[str] = []
+        for blip in p_elem.iter(f"{{{A_NS}}}blip"):
+            rid = blip.get(f"{{{R_NS}}}embed")
+            if rid:
+                rids.append(rid)
+        return rids
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = set(zf.namelist())
+            if "word/document.xml" not in names:
+                return None
+
+            doc_xml = zf.read("word/document.xml")
+
+            # Build relationship map: rId -> media path
+            rels_map: dict[str, str] = {}
+            if "word/_rels/document.xml.rels" in names:
+                rels_xml = zf.read("word/_rels/document.xml.rels")
+                rels_root = ET.fromstring(rels_xml)
+                for rel in rels_root:
+                    rid = rel.get("Id", "")
+                    target = rel.get("Target", "")
+                    if rid and target and "image" in target.lower():
+                        rels_map[rid] = "word/" + target.lstrip("/")
+
+            # Read media files
+            media_cache: dict[str, bytes] = {}
+            for media_path in rels_map.values():
+                if media_path in names and media_path not in media_cache:
+                    media_cache[media_path] = zf.read(media_path)
+
+            root = ET.fromstring(doc_xml)
+            body = root.find(f"{{{W_NS}}}body")
+            if body is None:
+                return None
+
+            html_parts: list[str] = ["<article>"]
+
+            for child in body:
+                tag = child.tag
+
+                if tag == f"{{{W_NS}}}p":
+                    # Check for page break — skip per scope
+                    if _para_has_page_break(child):
+                        # Still extract text if the paragraph has text content
+                        text = _text_of_paragraph(child)
+                        if text.strip():
+                            html_parts.append(f"<p>{html.escape(text)}</p>")
+                        continue
+
+                    # Check for images in this paragraph
+                    rids = _resolve_image_rids(child)
+                    for rid in rids:
+                        media_path = rels_map.get(rid)
+                        if media_path and media_path in media_cache:
+                            img_data = media_cache[media_path]
+                            ext = media_path.rsplit(".", 1)[-1].lower() if "." in media_path else "png"
+                            mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp"}
+                            img_mime = mime_map.get(ext, "image/png")
+                            b64 = base64.b64encode(img_data).decode("ascii")
+                            html_parts.append(
+                                f'<figure data-lumina-image="true" style="text-align:center">'
+                                f'<img src="data:{img_mime};base64,{b64}" alt="" />'
+                                f"</figure>"
+                            )
+
+                    # Extract text content
+                    text = _text_of_paragraph(child)
+                    if not text.strip():
+                        continue
+
+                    style = _para_style(child)
+                    heading_tag = HEADING_MAP.get(style, "")
+                    if heading_tag:
+                        html_parts.append(f"<{heading_tag}>{html.escape(text)}</{heading_tag}>")
+                    else:
+                        html_parts.append(f"<p>{html.escape(text)}</p>")
+
+                elif tag == f"{{{W_NS}}}tbl":
+                    # Parse table
+                    rows_html: list[str] = []
+                    for tr in child.findall(f"{{{W_NS}}}tr"):
+                        cells_html: list[str] = []
+                        for tc in tr.findall(f"{{{W_NS}}}tc"):
+                            cell_parts: list[str] = []
+                            for p in tc.findall(f"{{{W_NS}}}p"):
+                                cell_text = _text_of_paragraph(p)
+                                if cell_text.strip():
+                                    cell_parts.append(html.escape(cell_text))
+                            cells_html.append(
+                                f"<td>{' '.join(cell_parts)}</td>" if cell_parts else "<td></td>"
+                            )
+                        if cells_html:
+                            rows_html.append(f"<tr>{''.join(cells_html)}</tr>")
+                    if rows_html:
+                        html_parts.append(f"<table>{''.join(rows_html)}</table>")
+
+            html_parts.append("</article>")
+            result = "".join(html_parts)
+
+            # Sanity check — if we produced nothing meaningful, signal fallback
+            if result == "<article></article>":
+                return None
+            return result
+
+    except Exception:
+        return None
+
+
 def extract_text_from_upload(data: bytes, mime: str, filename: str = "document") -> str:
     if mime in {"text/plain", "text/markdown", "text/html"}:
         return data.decode("utf-8", errors="ignore")
@@ -1686,6 +1844,9 @@ def extract_text_from_upload(data: bytes, mime: str, filename: str = "document")
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/zip",
     }:
+        structured = _parse_docx_to_html(data)
+        if structured:
+            return structured
         try:
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 xml = zf.read("word/document.xml").decode("utf-8", errors="ignore")
