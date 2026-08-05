@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import io
 import json
+import uuid
 import zipfile
 from typing import Annotated
 from urllib.parse import quote
@@ -2511,7 +2512,7 @@ async def create_export_job(body: ExportJobRequest, owner: str = Depends(require
     ]
     if not docs:
         raise HTTPException(404, "No matching documents found")
-    job_id = f"export-{abs(hash((owner, ids, formats, now_iso()))) % 100000000:08d}"
+    job_id = f"export-{uuid.uuid4().hex}"
     buffer = io.BytesIO()
     manifest = []
     profile_cache: dict[str, CompanyProfile] = {}

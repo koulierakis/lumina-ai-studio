@@ -283,6 +283,59 @@ def test_company_export_filename_preserves_existing_document_export_behavior():
     assert "filename*=UTF-8''Board%20Resolution.pdf" in doc_disposition
 
 
+def _export_job_setup(tmp_path, db_name):
+    provider = SQLitePersistenceProvider(tmp_path / db_name)
+    run(provider.initialize())
+    media_coll = document_router.LocalPersistenceCollection(provider, "media")
+    document_router.configure_document_studio_router(provider, media_coll, None)
+    owner = "owner@example.com"
+    document = run(document_router.create_document({"title": "Export Job", "content_text": "Body"}, owner))
+    return owner, document
+
+
+def test_export_job_ids_are_unique_for_consecutive_jobs(tmp_path):
+    owner, document = _export_job_setup(tmp_path, "export-job-ids.db")
+    request = document_router.ExportJobRequest(document_ids=[document.id], formats=["pdf"])
+
+    first = run(document_router.create_export_job(request, owner))
+    second = run(document_router.create_export_job(request, owner))
+
+    assert first["job_id"] != second["job_id"]
+    assert first["job_id"].startswith("export-")
+    assert second["job_id"].startswith("export-")
+
+
+def test_export_job_id_format_is_stable_and_url_safe(tmp_path):
+    owner, document = _export_job_setup(tmp_path, "export-job-format.db")
+    request = document_router.ExportJobRequest(document_ids=[document.id], formats=["pdf"])
+
+    result = run(document_router.create_export_job(request, owner))
+    job_id = result["job_id"]
+
+    assert job_id.startswith("export-")
+    suffix = job_id[len("export-"):]
+    assert len(suffix) == 32
+    assert all(ch in "0123456789abcdef" for ch in suffix)
+    assert all(ch.isalnum() or ch in "-_" for ch in job_id)
+
+
+def test_export_job_behavior_remains_unchanged(tmp_path):
+    owner, document = _export_job_setup(tmp_path, "export-job-behavior.db")
+    request = document_router.ExportJobRequest(document_ids=[document.id], formats=["pdf", "docx"])
+
+    result = run(document_router.create_export_job(request, owner))
+
+    assert result["ok"] is True
+    assert result["status"] == "completed"
+    assert result["progress"]["percent"] == 100
+    assert result["media_id"]
+    assert len(result["manifest"]) == 2
+    assert {entry["filename"].split(".")[-1] for entry in result["manifest"]} == {"pdf", "docx"}
+    stored = run(document_router.documents_coll.find_one({"id": document.id}, {"_id": 0}))
+    assert stored["metadata"]["export_jobs"][0]["id"] == result["job_id"]
+    assert result["media_id"] in stored["export_media_ids"]
+
+
 def test_import_preview_escapes_active_markup_and_preserves_paragraphs():
     imported_html = document_router._safe_import_html(
         '<img src=x onerror="alert(1)">',
