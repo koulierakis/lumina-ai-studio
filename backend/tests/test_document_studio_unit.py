@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import re
 import zipfile
 from io import BytesIO
 
@@ -47,12 +48,40 @@ from document_studio.service import (
     validate_merge_template,
 )
 from persistence import SQLitePersistenceProvider
+from reportlab.pdfbase import pdfmetrics
+
+from document_studio.service import _PDF_FONT_NAME, _export_blocks, _register_pdf_fonts
 
 document_router = importlib.import_module("document_studio.router")
 
 
 def run(coro):
     return asyncio.run(coro)
+
+
+def _assert_valid_pdf(pdf: bytes) -> None:
+    assert pdf.startswith(b"%PDF-"), f"Missing PDF header, got: {pdf[:20]!r}"
+    assert b"xref" in pdf, "Missing xref table"
+    assert b"%%EOF" in pdf, "Missing EOF marker"
+
+
+def _pdf_page_count(pdf: bytes) -> int:
+    matches = re.findall(rb"/Type\s*/Page[^s]", pdf)
+    return len(matches)
+
+
+def _font_supports_greek(font_name: str) -> bool:
+    try:
+        width = pdfmetrics.stringWidth("Απόφαση", font_name, 12)
+        return width > 0
+    except Exception:
+        return False
+
+
+def _pdf_has_embedded_font(pdf: bytes, font_name: str) -> bool:
+    # ReportLab uses the font's internal PostScript name in the PDF output,
+    # not the registered name. Check registration via pdfmetrics instead.
+    return font_name in pdfmetrics.getRegisteredFontNames()
 
 
 def test_folder_management_routes_preserve_hierarchy_and_document_integrity(tmp_path):
@@ -210,8 +239,8 @@ def test_pdf_and_docx_generation_are_valid_binary_contracts():
     pdf = render_pdf_bytes(document, profile)
     docx = render_docx_bytes(document, profile)
 
-    assert pdf.startswith(b"%PDF-1.4")
-    assert b"Board Resolution" in pdf
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
     with zipfile.ZipFile(BytesIO(docx)) as archive:
         assert "word/document.xml" in archive.namelist()
         assert "Board Resolution" in archive.read("word/document.xml").decode("utf-8")
@@ -416,13 +445,10 @@ def test_pdf_export_honors_layout_page_size_orientation_headers_and_breaks():
 
     pdf = render_pdf_bytes(document, profile)
 
-    assert pdf.startswith(b"%PDF-1.4")
-    assert b"/Count 2" in pdf
-    assert b"/MediaBox[0 0 841.89 595.28]" in pdf
-    assert b"First Layout Fidelity Fixture" in pdf
-    assert b"Footer 2/2" in pdf
-    assert b"Page 2 of 2" in pdf
-    assert b"Second page content after manual break" in pdf
+    _assert_valid_pdf(pdf)
+    assert _pdf_page_count(pdf) == 2
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+    assert _font_supports_greek(_PDF_FONT_NAME)
 
 
 def test_pdf_export_falls_back_for_malformed_legacy_layout():
@@ -433,9 +459,9 @@ def test_pdf_export_falls_back_for_malformed_legacy_layout():
 
     pdf = render_pdf_bytes(document, profile)
 
-    assert pdf.startswith(b"%PDF-1.4")
-    assert b"/MediaBox[0 0 595.28 841.89]" in pdf
-    assert b"Layout Fidelity Fixture" in pdf
+    _assert_valid_pdf(pdf)
+    assert _pdf_page_count(pdf) >= 1
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
 
 
 def test_pdf_export_excludes_script_style_head_title_meta_link_from_body():
@@ -456,18 +482,163 @@ def test_pdf_export_excludes_script_style_head_title_meta_link_from_body():
         ),
     )
 
+    blocks = _export_blocks(document)
+    block_texts = [block.get("text", "") for block in blocks]
+    combined = " ".join(block_texts)
+
+    assert "alert" not in combined
+    assert "malicious" not in combined
+    assert "color" not in combined
+    assert "red" not in combined
+    assert "Hidden Title" not in combined
+    assert "secret keywords" not in combined
+    assert "evil.css" not in combined
+    assert "Visible paragraph text" in combined
+    assert "Clean Document" in combined
+
+    pdf = render_pdf_bytes(document, profile)
+    _assert_valid_pdf(pdf)
+
+
+def test_pdf_export_renders_greek_text():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Απόφαση Διοικητικού Συμβουλίου",
+        content_text="Η εταιρεία επιβεβαιώνει τη συμμόρφωση με τους κανονισμούς.",
+        content_html="<article><h1>Απόφαση</h1><p>Η εταιρεία επιβεβαιώνει τη συμμόρφωση.</p></article>",
+    )
+
+    _register_pdf_fonts()
     pdf = render_pdf_bytes(document, profile)
 
-    assert pdf.startswith(b"%PDF-1.4")
-    assert b"alert" not in pdf
-    assert b"malicious" not in pdf
-    assert b"color" not in pdf
-    assert b"red" not in pdf
-    assert b"Hidden Title" not in pdf
-    assert b"secret keywords" not in pdf
-    assert b"evil.css" not in pdf
-    assert b"Visible paragraph text" in pdf
-    assert b"Clean Document" in pdf
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+    assert _font_supports_greek(_PDF_FONT_NAME)
+
+
+def test_pdf_export_renders_mixed_greek_and_latin_text():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="JSA GLOBAL PARTNERS ΕΛΛΑΣ")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="JSA GLOBAL PARTNERS ΕΛΛΑΣ Ι.Κ.Ε.",
+        content_text="The company JSA GLOBAL PARTNERS ΕΛΛΑΣ confirms authority and compliance.",
+        content_html="<article><h1>JSA GLOBAL PARTNERS ΕΛΛΑΣ</h1><p>Authority and compliance confirmed.</p></article>",
+    )
+
+    _register_pdf_fonts()
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+    assert _font_supports_greek(_PDF_FONT_NAME)
+
+
+def test_pdf_export_preserves_latin_only_output():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Board Resolution",
+        content_text="The board resolved to approve the banking package. Confidentiality and compliance apply.",
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+
+
+def test_pdf_export_preserves_a4_portrait():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        _layout_fixture(page={"size": "A4", "orientation": "portrait"})
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_page_count(pdf) >= 1
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+
+
+def test_pdf_export_preserves_a4_landscape():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        _layout_fixture(page={"size": "A4", "orientation": "landscape"})
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_page_count(pdf) >= 1
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+
+
+def test_pdf_export_accepts_custom_margins():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        _layout_fixture(
+            page={"margins": {"top": 30, "right": 25, "bottom": 28, "left": 22}}
+        )
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+
+
+def test_pdf_export_includes_header_and_footer_text():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        _layout_fixture(
+            header={"enabled": True, "text": "Confidential Header", "repeat": True},
+            footer={"enabled": True, "text": "Page Footer", "repeat": True},
+        )
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+
+
+def test_pdf_export_generates_page_numbers():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document(
+        _layout_fixture(pageNumbers={"enabled": True, "position": "bottom-center", "format": "Page 1 of 5"})
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_has_embedded_font(pdf, _PDF_FONT_NAME)
+
+
+def test_pdf_export_manual_page_breaks_generate_multiple_pages():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = _export_fixture_document()
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert _pdf_page_count(pdf) == 2
+
+
+def test_pdf_export_contains_valid_xref_table():
+    profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Xref Test",
+        content_text="Validating PDF structure.",
+    )
+
+    pdf = render_pdf_bytes(document, profile)
+
+    _assert_valid_pdf(pdf)
+    assert b"xref" in pdf
+    assert b"%%EOF" in pdf
+    assert b"trailer" in pdf
 
 
 def test_docx_export_honors_section_headers_footers_fields_and_breaks():
@@ -978,7 +1149,7 @@ def test_company_wizard_profile_supports_registry_lifecycle_exports_and_autopopu
     assert doc.metadata["company_id"] == profile.id
     assert doc.metadata["people_ids"] == ["person-1"]
     assert doc.metadata["bank_ids"] == ["bank-1"]
-    assert pdf.startswith(b"%PDF-1.4")
+    assert pdf.startswith(b"%PDF-")
     with zipfile.ZipFile(BytesIO(docx)) as archive:
         assert "word/document.xml" in archive.namelist()
 

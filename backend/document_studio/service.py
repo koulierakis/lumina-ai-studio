@@ -8,6 +8,20 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    BaseDocTemplate,
+    Frame,
+    PageBreak,
+    PageTemplate,
+    Paragraph,
+    Spacer,
+)
+
 from models import now_iso
 
 from .models import (
@@ -1917,108 +1931,187 @@ def _paginate_blocks(blocks: list[dict], layout: dict) -> list[list[dict]]:
     return pages or [[{"type": "p", "text": ""}]]
 
 
-def _pdf_escape(text: str) -> str:
-    return str(text).replace("\\", "\\\\").replace("(", "[").replace(")", "]")
+_PDF_FONT_REGISTERED = False
+_PDF_FONT_NAME = "LuminaUnicode"
+_PDF_FONT_BOLD_NAME = "LuminaUnicodeBold"
+
+
+def _register_pdf_fonts() -> None:
+    global _PDF_FONT_REGISTERED
+    if _PDF_FONT_REGISTERED:
+        return
+    regular_candidates = [
+        Path(r"C:\Windows\Fonts\DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/dejavu/DejaVuSans.ttf"),
+        Path.home() / "Library/Fonts/DejaVuSans.ttf",
+    ]
+    bold_candidates = [
+        Path(r"C:\Windows\Fonts\DejaVuSans-Bold.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+        Path("/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf"),
+        Path.home() / "Library/Fonts/DejaVuSans-Bold.ttf",
+    ]
+    regular_path = next((p for p in regular_candidates if p.exists()), None)
+    bold_path = next((p for p in bold_candidates if p.exists()), None)
+    if regular_path:
+        pdfmetrics.registerFont(TTFont(_PDF_FONT_NAME, str(regular_path)))
+    if bold_path:
+        pdfmetrics.registerFont(TTFont(_PDF_FONT_BOLD_NAME, str(bold_path)))
+    _PDF_FONT_REGISTERED = True
+
+
+def _rl_page_size(layout: dict):
+    size_key = layout["page"]["size"]
+    base = A4 if size_key == "A4" else letter
+    if layout["page"]["orientation"] == "landscape":
+        from reportlab.lib.pagesizes import landscape as rl_landscape
+
+        return rl_landscape(base)
+    return base
+
+
+def _rl_margins(layout: dict) -> tuple[float, float, float, float]:
+    m = layout["page"]["margins"]
+    return m["left"] * mm, m["right"] * mm, m["top"] * mm, m["bottom"] * mm
+
+
+def _rl_align(align: str) -> str:
+    if align == "left":
+        return "LEFT"
+    if align == "right":
+        return "RIGHT"
+    return "CENTER"
+
+
+def _make_pdf_page_callback(document: CorporateDocument, layout: dict):
+    def _on_page(canvas, doc):
+        canvas.saveState()
+        page_num = canvas.getPageNumber()
+        total = getattr(doc, "_total_pages", page_num)
+        page_size = _rl_page_size(layout)
+        page_w, page_h = page_size
+        left_m, right_m, top_m, bottom_m = _rl_margins(layout)
+
+        if layout["page"].get("printBackground"):
+            canvas.setFillColorRGB(0.98, 0.98, 0.96)
+            canvas.rect(0, 0, page_w, page_h, fill=1, stroke=0)
+            canvas.setFillColorRGB(0, 0, 0)
+
+        canvas.setFont(_PDF_FONT_NAME, 10)
+
+        header_text = _region_text(layout["header"], document, page_num, total)
+        footer_text = _region_text(layout["footer"], document, page_num, total)
+        header_dist = layout["header"]["distanceMm"] * mm
+        footer_dist = layout["footer"]["distanceMm"] * mm
+
+        if header_text:
+            canvas.setFont(_PDF_FONT_NAME, 10)
+            canvas.drawString(left_m, page_h - header_dist, header_text)
+        if footer_text:
+            canvas.setFont(_PDF_FONT_NAME, 10)
+            canvas.drawString(left_m, footer_dist + 4, footer_text)
+
+        number_text = _format_export_page_number(layout["pageNumbers"], page_num, total)
+        if number_text:
+            canvas.setFont(_PDF_FONT_NAME, 9)
+            pos = layout["pageNumbers"]["position"]
+            if pos.endswith("left"):
+                nx = left_m
+            elif pos.endswith("right"):
+                nx = page_w - right_m - 54
+            else:
+                nx = page_w / 2 - 24
+            ny = page_h - 18 if pos.startswith("top") else bottom_m - 18
+            canvas.drawString(nx, ny, number_text)
+
+        canvas.restoreState()
+
+    return _on_page
 
 
 def render_pdf_bytes(document: CorporateDocument, profile: CompanyProfile) -> bytes:
+    _register_pdf_fonts()
     layout = _normalize_export_layout(document)
-    width, height = _page_size_points(layout)
-    pages = _paginate_blocks(_export_blocks(document), layout)
-    objects: list[bytes] = []
-    page_ids: list[int] = []
-    font_id = 3
-    for index, page_blocks in enumerate(pages, 1):
-        stream = _render_pdf_page_stream(
-            document, profile, layout, page_blocks, index, len(pages), width, height
-        )
-        stream_b = stream.encode("latin-1", errors="ignore")
-        content_id = 4 + (index - 1) * 2
-        page_id = content_id + 1
-        page_ids.append(page_id)
-        objects.append(
-            f"{content_id} 0 obj <</Length {len(stream_b)}>> stream\n".encode()
-            + stream_b
-            + b"\nendstream endobj\n"
-        )
-        objects.append(
-            f"{page_id} 0 obj <</Type/Page/Parent 2 0 R/MediaBox[0 0 {width:.2f} {height:.2f}]/Resources<</Font<</F1 {font_id} 0 R>>>>/Contents {content_id} 0 R>> endobj\n".encode()
-        )
-    header = b"%PDF-1.4\n"
-    base = [
-        b"1 0 obj <</Type/Catalog/Pages 2 0 R>> endobj\n",
-        f"2 0 obj <</Type/Pages/Count {len(page_ids)}/Kids[{' '.join(f'{pid} 0 R' for pid in page_ids)}]>> endobj\n".encode(),
-        b"3 0 obj <</Type/Font/Subtype/Type1/BaseFont/Times-Roman>> endobj\n",
-    ]
-    return header + b"".join(base + objects) + b"trailer <</Root 1 0 R>>\n%%EOF"
+    blocks = _export_blocks(document)
+    page_size = _rl_page_size(layout)
+    left_m, right_m, top_m, bottom_m = _rl_margins(layout)
+    page_w, page_h = page_size
 
+    title_style = ParagraphStyle(
+        name="DocTitle",
+        fontName=_PDF_FONT_BOLD_NAME if _PDF_FONT_BOLD_NAME in pdfmetrics.getRegisteredFontNames() else _PDF_FONT_NAME,
+        fontSize=16,
+        leading=22,
+        spaceAfter=16,
+    )
+    heading_style = ParagraphStyle(
+        name="Heading",
+        fontName=_PDF_FONT_BOLD_NAME if _PDF_FONT_BOLD_NAME in pdfmetrics.getRegisteredFontNames() else _PDF_FONT_NAME,
+        fontSize=14,
+        leading=18,
+        spaceBefore=10,
+        spaceAfter=6,
+    )
+    body_style = ParagraphStyle(
+        name="Body",
+        fontName=_PDF_FONT_NAME,
+        fontSize=11,
+        leading=15,
+        spaceAfter=6,
+    )
+    list_style = ParagraphStyle(
+        name="ListItem",
+        fontName=_PDF_FONT_NAME,
+        fontSize=11,
+        leading=15,
+        leftIndent=18,
+        bulletIndent=6,
+        spaceAfter=4,
+    )
 
-def _render_pdf_page_stream(
-    document: CorporateDocument,
-    profile: CompanyProfile,
-    layout: dict,
-    blocks: list[dict],
-    page: int,
-    total: int,
-    width: float,
-    height: float,
-) -> str:
-    margins = layout["page"]["margins"]
-    left = margins["left"] * 72 / 25.4
-    top = height - margins["top"] * 72 / 25.4
-    bottom = margins["bottom"] * 72 / 25.4
-    commands = []
-    if layout["page"].get("printBackground"):
-        commands.append(f"0.98 0.98 0.96 rg 0 0 {width:.2f} {height:.2f} re f 0 0 0 rg")
-    if page == 1:
-        commands.append(_pdf_text(document.title, left, top, 14))
-        top -= 22
-    header_text = _region_text(layout["header"], document, page, total)
-    footer_text = _region_text(layout["footer"], document, page, total)
-    if header_text:
-        commands.append(
-            _pdf_text(header_text, left, height - layout["header"]["distanceMm"] * 72 / 25.4, 10)
-        )
-    if footer_text:
-        commands.append(
-            _pdf_text(footer_text, left, layout["footer"]["distanceMm"] * 72 / 25.4 + 12, 10)
-        )
-    number_text = _format_export_page_number(layout["pageNumbers"], page, total)
-    if number_text:
-        x = _page_number_x(
-            layout["pageNumbers"]["position"], left, width - margins["right"] * 72 / 25.4, width
-        )
-        y = height - 18 if layout["pageNumbers"]["position"].startswith("top") else bottom - 18
-        commands.append(_pdf_text(number_text, x, y, 9))
-    y = top - 36
+    flowables: list = [Paragraph(html.escape(document.title), title_style), Spacer(1, 6)]
     for block in blocks:
-        font_size = 14 if block["type"] == "heading" else 11
-        for line in _wrap_text(block["text"], 92 if font_size == 11 else 70):
-            if y < bottom + 24:
-                break
-            commands.append(_pdf_text(line, left, y, font_size))
-            y -= font_size + 4
-        y -= 4
-    return "\n".join(commands)
-
-
-def _pdf_text(text: str, x: float, y: float, size: int) -> str:
-    return f"BT /F1 {size} Tf {x:.2f} {y:.2f} Td ({_pdf_escape(text)}) Tj ET"
-
-
-def _wrap_text(text: str, width: int) -> list[str]:
-    words = str(text).split()
-    lines: list[str] = []
-    current = ""
-    for word in words:
-        if len(current) + len(word) + 1 > width:
-            lines.append(current)
-            current = word
+        if block["type"] == "page_break":
+            flowables.append(PageBreak())
+        elif block["type"] == "heading":
+            flowables.append(Paragraph(html.escape(block["text"]), heading_style))
+        elif block["type"] == "list":
+            text = block["text"]
+            if text.startswith("•"):
+                text = text[1:].strip()
+            flowables.append(Paragraph(f"• {html.escape(text)}", list_style))
+        elif block["type"] == "table":
+            flowables.append(Paragraph(html.escape(block["text"]), body_style))
         else:
-            current = f"{current} {word}".strip()
-    if current:
-        lines.append(current)
-    return lines or [""]
+            flowables.append(Paragraph(html.escape(block["text"]), body_style))
+
+    buffer = io.BytesIO()
+    frame = Frame(
+        left_m,
+        bottom_m,
+        page_w - left_m - right_m,
+        page_h - top_m - bottom_m,
+        id="content",
+        showBoundary=0,
+    )
+    page_callback = _make_pdf_page_callback(document, layout)
+    template = PageTemplate(id="main", frames=[frame], onPage=page_callback, pagesize=page_size)
+    doc = BaseDocTemplate(
+        buffer,
+        pagesize=page_size,
+        leftMargin=left_m,
+        rightMargin=right_m,
+        topMargin=top_m,
+        bottomMargin=bottom_m,
+        title=document.title,
+        author=profile.company_name,
+    )
+    doc.addPageTemplates([template])
+    doc.build(flowables)
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    return pdf_bytes
 
 
 def _region_text(region: dict, document: CorporateDocument, page: int, total: int) -> str:
