@@ -991,7 +991,7 @@ async def export_company(
     return Response(
         content=data,
         media_type=mime,
-        headers={"Content-Disposition": f'attachment; filename="{profile.company_name}.{ext}"'},
+        headers={"Content-Disposition": _download_content_disposition(profile.company_name, ext)},
     )
 
 

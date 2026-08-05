@@ -240,6 +240,49 @@ def test_export_headers_support_unicode_titles_and_batch_manifest_is_json():
     assert json.loads(json.dumps(manifest, ensure_ascii=False)) == manifest
 
 
+def test_company_export_filename_ascii_name_produces_valid_attachment():
+    disposition = document_router._download_content_disposition("Acme Global LLP", "json")
+
+    assert disposition.startswith('attachment; filename="Acme_Global_LLP.json"')
+    assert "filename*=UTF-8''Acme%20Global%20LLP.json" in disposition
+    assert disposition.isascii()
+
+
+def test_company_export_filename_greek_name_produces_ascii_fallback_and_utf8_encoding():
+    disposition = document_router._download_content_disposition("Εταιρεία Α.Ε.", "pdf")
+
+    assert disposition.startswith('attachment; filename="')
+    assert ".pdf" in disposition
+    assert "filename*=UTF-8''" in disposition
+    assert "%CE%95" in disposition
+    assert "Εταιρεία" not in disposition.split('filename="')[1].split('"')[0]
+    assert disposition.isascii()
+
+
+def test_company_export_filename_quotes_and_special_characters_cannot_break_header():
+    disposition = document_router._download_content_disposition(
+        'O"Brien & Sons; "injection"', "zip"
+    )
+
+    assert disposition.startswith('attachment; filename="')
+    assert '"' not in disposition.split('filename="')[1].split('";')[0]
+    assert ";" not in disposition.split('filename="')[1].split('"')[0]
+    assert "filename*=UTF-8''" in disposition
+    assert disposition.isascii()
+
+
+def test_company_export_filename_preserves_existing_document_export_behavior():
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Board Resolution",
+        content_text="Approved by the board.",
+    )
+    doc_disposition = document_router._download_content_disposition(document.title, "pdf")
+
+    assert doc_disposition.startswith('attachment; filename="Board_Resolution.pdf"')
+    assert "filename*=UTF-8''Board%20Resolution.pdf" in doc_disposition
+
+
 def test_import_preview_escapes_active_markup_and_preserves_paragraphs():
     imported_html = document_router._safe_import_html(
         '<img src=x onerror="alert(1)">',
