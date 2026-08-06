@@ -1156,6 +1156,133 @@ def chart_html(chart: dict) -> str:
     return f"<section class='chart chart-{chart_type}'><h2>{title}</h2>{bars}<p class='meta'>Generated inside LUMINA · {chart_type} visualization</p></section>"
 
 
+DESIGN_PRESETS: dict[str, dict] = {
+    "luxury-legal": {
+        "id": "luxury-legal",
+        "name": "Luxury Legal",
+        "heading_font": "Georgia",
+        "body_font": "Georgia",
+        "heading_sizes": {"h1": 28, "h2": 20, "h3": 16},
+        "body_size": 11,
+        "line_spacing": 1.6,
+        "paragraph_spacing": 10,
+        "page_margins": {"top": 28, "right": 24, "bottom": 28, "left": 24},
+        "primary_color": "#B9985A",
+        "secondary_color": "#1a1a1a",
+        "table_header_style": "gold-bar",
+        "header_text_style": "Confidential — Legal Privilege",
+        "footer_text_style": "{{DOCUMENT_TITLE}} · Page {{PAGE_NUMBER}} of {{TOTAL_PAGES}}",
+        "page_number_position": "bottom-center",
+        "confidentiality_label": "CONFIDENTIAL — SUBJECT TO LEGAL PRIVILEGE",
+    },
+    "executive-corporate": {
+        "id": "executive-corporate",
+        "name": "Executive Corporate",
+        "heading_font": "Arial",
+        "body_font": "Arial",
+        "heading_sizes": {"h1": 24, "h2": 18, "h3": 14},
+        "body_size": 11,
+        "line_spacing": 1.5,
+        "paragraph_spacing": 8,
+        "page_margins": {"top": 24, "right": 20, "bottom": 24, "left": 20},
+        "primary_color": "#1B3A5C",
+        "secondary_color": "#111827",
+        "table_header_style": "navy-bar",
+        "header_text_style": "{{DOCUMENT_TITLE}} · {{CURRENT_DATE}}",
+        "footer_text_style": "Page {{PAGE_NUMBER}} of {{TOTAL_PAGES}}",
+        "page_number_position": "bottom-right",
+        "confidentiality_label": "CONFIDENTIAL — CORPORATE USE ONLY",
+    },
+    "banking-professional": {
+        "id": "banking-professional",
+        "name": "Banking Professional",
+        "heading_font": "Calibri",
+        "body_font": "Calibri",
+        "heading_sizes": {"h1": 22, "h2": 16, "h3": 13},
+        "body_size": 10.5,
+        "line_spacing": 1.45,
+        "paragraph_spacing": 7,
+        "page_margins": {"top": 22, "right": 20, "bottom": 22, "left": 20},
+        "primary_color": "#003366",
+        "secondary_color": "#333333",
+        "table_header_style": "blue-bar",
+        "header_text_style": "{{DOCUMENT_TITLE}} · {{CURRENT_DATE}}",
+        "footer_text_style": "{{DOCUMENT_TITLE}} · Page {{PAGE_NUMBER}} of {{TOTAL_PAGES}}",
+        "page_number_position": "bottom-center",
+        "confidentiality_label": "CONFIDENTIAL — BANKING & COMPLIANCE",
+    },
+}
+
+
+def get_design_presets() -> list[dict]:
+    """Return all available design presets."""
+    return list(DESIGN_PRESETS.values())
+
+
+def apply_design_preset(document: CorporateDocument, preset_id: str) -> tuple[str, str, dict]:
+    """Apply a design preset to a document's design metadata.
+
+    Preserves content_html and content_text exactly — only design metadata changes.
+    Returns (content_html, content_text, design_dict).
+
+    Raises ValueError if preset_id is not found.
+    """
+    preset = DESIGN_PRESETS.get(preset_id)
+    if not preset:
+        raise ValueError(f"Unknown design preset: {preset_id}")
+
+    export_layout = {
+        "page": {
+            "size": "A4",
+            "orientation": "portrait",
+            "margins": preset["page_margins"],
+            "background": "#ffffff",
+            "printBackground": True,
+        },
+        "header": {
+            "enabled": True,
+            "text": preset["header_text_style"],
+            "firstPageText": preset["header_text_style"],
+            "align": "center",
+            "distanceMm": 8,
+            "repeat": True,
+            "differentFirstPage": False,
+        },
+        "footer": {
+            "enabled": True,
+            "text": preset["footer_text_style"],
+            "firstPageText": preset["footer_text_style"],
+            "align": "center",
+            "distanceMm": 8,
+            "repeat": True,
+            "differentFirstPage": False,
+        },
+        "pageNumbers": {
+            "enabled": True,
+            "position": preset["page_number_position"],
+            "format": "Page 1 of 5",
+        },
+    }
+
+    design = {
+        "preset_id": preset_id,
+        "preset_name": preset["name"],
+        "heading_font": preset["heading_font"],
+        "body_font": preset["body_font"],
+        "heading_sizes": preset["heading_sizes"],
+        "body_size": preset["body_size"],
+        "line_spacing": preset["line_spacing"],
+        "paragraph_spacing": preset["paragraph_spacing"],
+        "primary_color": preset["primary_color"],
+        "secondary_color": preset["secondary_color"],
+        "table_header_style": preset["table_header_style"],
+        "confidentiality_label": preset["confidentiality_label"],
+        "exportLayout": export_layout,
+    }
+
+    return document.content_html, document.content_text, design
+
+
 def apply_design_system(
     document: CorporateDocument,
     profile: CompanyProfile,

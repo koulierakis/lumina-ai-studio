@@ -57,6 +57,7 @@ from .service import (
     SMART_TABLE_TYPES,
     TEMPLATES,
     analyze_document,
+    apply_design_preset,
     apply_design_system,
     apply_document_operation,
     apply_review_action,
@@ -68,8 +69,10 @@ from .service import (
     create_track_change,
     extract_smart_fields,
     extract_text_from_upload,
+    get_design_presets,
     get_template,
     legal_review_document,
+    normalize_text,
     quality_score,
     render_classified_document,
     render_document_html,
@@ -2227,12 +2230,60 @@ async def design_document(
     return updated
 
 
+@router.get("/design-presets")
+async def list_design_presets(_: str = Depends(require_owner)) -> dict:
+    return {"presets": get_design_presets()}
+
+
 @router.post("/{document_id}/redesign", response_model=CorporateDocument)
 async def redesign_document(
-    document_id: str, owner: str = Depends(require_owner)
+    document_id: str, body: dict | None = None, owner: str = Depends(require_owner)
 ) -> CorporateDocument:
     document = await _document(document_id, owner)
     profile = await _profile(owner, document.company_profile_id)
+    body = body or {}
+    preset_id = str(body.get("preset_id") or "").strip()
+
+    if preset_id:
+        try:
+            content_html, content_text, design = apply_design_preset(document, preset_id)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+        # Text protection: compare normalized visible text before and after
+        before_text = normalize_text(document.content_html or document.content_text or "")
+        after_text = normalize_text(content_html or content_text or "")
+        if before_text != after_text:
+            raise HTTPException(
+                422,
+                "Text protection: redesign would alter document text. Operation aborted.",
+            )
+
+        data = document.model_dump()
+        data.update(
+            {
+                "content_html": content_html,
+                "content_text": content_text,
+                "searchable_text": content_text,
+                "design": design,
+                "version_number": document.version_number + 1,
+                "updated_at": now_iso(),
+                "metadata": {
+                    **document.metadata,
+                    "last_ai_operation": "redesign",
+                    "applied_preset": preset_id,
+                },
+            }
+        )
+        data["quality_score"] = quality_score(CorporateDocument(**data))
+        updated = CorporateDocument(**data)
+        await documents_coll.replace_one(
+            {"id": document_id, "owner_email": owner}, updated.model_dump()
+        )
+        await _save_version(updated, owner, f"Applied design preset: {preset_id}")
+        return updated
+
+    # Legacy redesign without preset — keep existing behavior
     components = [
         {"type": "company_information"},
         {

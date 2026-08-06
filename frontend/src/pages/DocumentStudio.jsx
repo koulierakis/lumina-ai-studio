@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Download, FileText, Heart, History, ShieldCheck, Sparkles, Upload, Wand2 } from 'lucide-react';
+import { Download, FileText, Heart, History, PanelRightClose, PanelRightOpen, ShieldCheck, Sparkles, Upload, Wand2, X } from 'lucide-react';
+import { PanelGroup, Panel as ResizablePanel, PanelResizeHandle } from 'react-resizable-panels';
 import { DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, EXPORT_FORMATS, PROFESSIONAL_TEMPLATE_CATALOG, buildMergeFieldChip, buildProfessionalTemplateDraft, buildTrackChangePreview, documentApi, documentStats, exportDocumentUrl, filterProfessionalTemplates, groupReviewThreads, makeDocumentDownloadHeaders, normalizeReviewAction, summarizeDocument, summarizeVersionHistory, validateMergeFields } from '../documents/model';
 
 import DocumentRichEditor from "../components/documentstudio/DocumentRichEditor";
 import PaginatedDocumentWorkspace from "../components/documentstudio/PaginatedDocumentWorkspace";
 import DocumentStudioSidebar from "../components/documentstudio/DocumentStudioSidebar";
+import DocumentOfficeChrome from "../components/documentstudio/DocumentOfficeChrome";
+import DocumentNavigator from "../components/documentstudio/DocumentNavigator";
+import DocumentContextInspector from "../components/documentstudio/DocumentContextInspector";
 import { DEFAULT_PAGE_LAYOUT, PAGE_NUMBER_FORMATS, PAGE_NUMBER_POSITIONS, applyFindReplace, buildAdvancedTableHtml, buildExportLayoutPayload, buildImageFigureHtml, documentAccessibilityAudit, documentPerformanceAudit, extractDocumentImages, extractDocumentOutline, findReplacePreview, normalizeImageAsset, normalizePageLayout, pageDimensions, sanitizeEditorHtml, spellCheckFoundation, summarizeTables } from "../components/documentstudio/editorModel";
 import {
   DOCUMENT_PROFILE_IDS,
@@ -86,6 +90,10 @@ export default function DocumentStudio() {
   const [newDocumentTitle, setNewDocumentTitle] = useState('Executive Letterhead Document');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [designPresets, setDesignPresets] = useState([]);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [presetLoading, setPresetLoading] = useState(false);
+  const [presetMessage, setPresetMessage] = useState('');
   const [statusText, setStatusText] = useState('Ready');
   const [intelligencePreview, setIntelligencePreview] = useState(null);
   const [outlineMode, setOutlineMode] = useState('page');
@@ -118,6 +126,14 @@ export default function DocumentStudio() {
   const lastSavedHtmlRef = useRef('');
   const [lexicalEditor, setLexicalEditor] = useState(null);
   const [pageFlow, setPageFlow] = useState({ pageCount: 1, mode: 'paginated', warning: '' });
+  const [ribbonTab, setRibbonTab] = useState('Home');
+  const [navigatorTab, setNavigatorTab] = useState('Pages');
+  const [navigatorCollapsed, setNavigatorCollapsed] = useState(false);
+  const [rightPanelCollapsed, setRightPanelCollapsed] = useState(false);
+  const [rightPanelMode, setRightPanelMode] = useState('preview');
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [toolCenterOpen, setToolCenterOpen] = useState(false);
+  const [selectionContext, setSelectionContext] = useState('document');
 
   const categories = useMemo(() => [...new Set(templates.map((item) => item.category))], [templates]);
   const professionalTemplateMatches = useMemo(() => filterProfessionalTemplates(PROFESSIONAL_TEMPLATE_CATALOG, templateFilters), [templateFilters]);
@@ -261,6 +277,14 @@ export default function DocumentStudio() {
   useEffect(() => {
     loadAll().catch((error) => toast.error(error.message || 'Document Studio could not load.'));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    documentApi.designPresets().then((payload) => {
+      setDesignPresets(payload?.presets || []);
+    }).catch(() => {
+      setDesignPresets([]);
+    });
   }, []);
 
   useEffect(() => {
@@ -483,6 +507,7 @@ export default function DocumentStudio() {
     else if (command === 'fontName') editor.setInlineStyle({ 'font-family': value });
     else if (command === 'fontSize') editor.setInlineStyle({ 'font-size': `${Number(value || 3) * 4}px` });
     else if (command === 'foreColor') editor.setInlineStyle({ color: value });
+    else if (command === 'lineHeight') editor.setInlineStyle({ 'line-height': value });
   }
 
   function insertHtml(markup) {
@@ -636,9 +661,9 @@ export default function DocumentStudio() {
     }
   }
 
-  async function renameSelectedDocument() {
+  async function renameSelectedDocument(nextTitle) {
     if (!selected) return;
-    const title = window.prompt('New document name', selected.title);
+    const title = typeof nextTitle === 'string' ? nextTitle : window.prompt('New document name', selected.title);
     if (!title?.trim()) return;
     const updated = await documentApi.update(selected.id, { title: title.trim(), change_note: 'Renamed document' });
     setSelected(updated);
@@ -832,10 +857,21 @@ export default function DocumentStudio() {
     }
   }
 
-  async function redesign() {
+  async function redesign(presetId = selectedPresetId) {
     if (!selected) return;
-    const updated = await documentApi.redesign(selected.id);
-    setSelected(updated); setEditorHtml(updated.content_html || ''); setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout)); setLayoutDirty(false); setQuality(updated.quality_score); await refreshDocuments(); await loadVersions(updated); toast.success('Document redesigned without changing meaning.');
+    setPresetLoading(true);
+    setPresetMessage('');
+    try {
+      const updated = await documentApi.redesign(selected.id, presetId || undefined);
+      setSelected(updated); setEditorHtml(updated.content_html || ''); setPageLayout(normalizePageLayout(updated.design?.pageLayout || updated.metadata?.page_layout)); setLayoutDirty(false); setQuality(updated.quality_score); await refreshDocuments(); await loadVersions(updated);
+      setPresetMessage(presetId ? `Design preset applied: ${designPresets.find((p) => p.id === presetId)?.name || presetId}` : 'Document redesigned without changing meaning.');
+      toast.success(presetId ? 'Design preset applied — text preserved.' : 'Document redesigned without changing meaning.');
+    } catch (error) {
+      setPresetMessage(error.message || 'Redesign failed.');
+      toast.error(error.message || 'Redesign failed.');
+    } finally {
+      setPresetLoading(false);
+    }
   }
 
   async function scoreDocument() {
@@ -1085,9 +1121,86 @@ export default function DocumentStudio() {
     finally { setBusy(false); setStatusText('Ready'); }
   }
 
+  function showInspector(context = 'document') {
+    setSelectionContext(context);
+    setRightPanelMode('inspector');
+    setRightPanelCollapsed(false);
+  }
+
+  function handleOfficeAction(action) {
+    const directActions = {
+      new: createBlankDocument,
+      save: () => saveEditor(false),
+      undo: undoEditor,
+      redo: redoEditor,
+      share: () => selected && navigator.clipboard?.writeText(documentApi.previewUrl(selected.id)).then(() => toast.success('Share link copied.')),
+      print: () => window.print(),
+      rename: renameSelectedDocument,
+      bold: () => format('bold'),
+      italic: () => format('italic'),
+      underline: () => format('underline'),
+      bullets: () => format('insertUnorderedList'),
+      numbering: () => format('insertOrderedList'),
+      left: () => format('justifyLeft'),
+      center: () => format('justifyCenter'),
+      right: () => format('justifyRight'),
+      indent: () => format('indent'),
+      outdent: () => format('outdent'),
+      table: insertAdvancedTable,
+      image: () => imageInputRef.current?.click(),
+      seal: () => insertBrandAsset('seal'),
+      comment: addComment,
+      track: () => addTrackedChange('replacement'),
+      accept: () => trackChangeAction('accept'),
+      reject: () => trackChangeAction('reject'),
+      legalReview: runLegalReview,
+      quality: scoreDocument,
+      generate: generateDocument,
+      continue: () => operate('continue'),
+      rewrite: () => operate('rewrite'),
+      translate: () => operate('translate'),
+      summarize: () => operate('summarize'),
+      improve: () => operate('improve'),
+      preview: () => setPrintPreview((value) => !value),
+      pageWidth: () => setPage((current) => ({ ...current, zoom: normalizedPageLayout.orientation === 'landscape' ? 80 : 100 })),
+      orientation: () => updatePageLayout((current) => ({ ...current, orientation: current.orientation === 'portrait' ? 'landscape' : 'portrait' })),
+      size: () => updatePageLayout((current) => ({ ...current, size: current.size === 'A4' ? 'Letter' : 'A4' })),
+      open: () => setLibraryOpen(true),
+      toolCenter: () => setToolCenterOpen(true),
+      split: () => setRightPanelCollapsed(false),
+    };
+    if (['docx', 'pdf', 'html', 'markdown'].includes(action)) return download(action);
+    if (['pages', 'headings', 'bookmarks', 'outline'].includes(action)) return setNavigatorTab(action[0].toUpperCase() + action.slice(1));
+    if (['title', 'paragraph', 'pageBreak', 'header', 'footer', 'pageNumber', 'signature', 'watermark'].includes(action)) return insertPremiumBlock(action);
+    if (['shape', 'textBox', 'columns', 'toc'].includes(action)) return insertPremiumBlock(action === 'textBox' ? 'paragraph' : 'list');
+    if (action === 'margins' || action === 'spacing') return showInspector('document');
+    if (action === 'reviewPane') return showInspector('document');
+    if (action === 'find' || action === 'replace') return setNavigatorTab('Outline');
+    return directActions[action]?.();
+  }
+
   return (
-    <div className="min-h-screen bg-ink-950 text-white p-4 sm:p-6 lg:p-8 space-y-6">
-      <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-white/[0.08] to-gold/10 p-8 shadow-2xl">
+    <div className="document-office-shell min-h-screen bg-[#171717] pb-7 text-white">
+      <DocumentOfficeChrome
+        activeTab={ribbonTab}
+        onTabChange={setRibbonTab}
+        onAction={handleOfficeAction}
+        document={selected}
+        onRenameDocument={renameSelectedDocument}
+        status={loading ? 'Loading Document Studio…' : statusText}
+        busy={busy || loading}
+        companyName={profile?.company_name}
+        zoom={page.zoom}
+        onZoomChange={(zoom) => setPage((current) => ({ ...current, zoom }))}
+        pageCount={pageFlow.pageCount}
+        wordCount={performance.words}
+        characterCount={(selected?.content_text || '').length}
+        language={selected?.language}
+      />
+      <div className="document-office-body">
+      <details className="document-file-management" open={libraryOpen} onToggle={(event) => setLibraryOpen(event.currentTarget.open)}>
+        <summary className="cursor-pointer text-xs font-medium text-white/50 hover:text-gold">File, library and batch management</summary>
+      <section className="mt-3 rounded-xl border border-white/10 bg-black/20 p-4">
         <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-6">
           <div>
             <div className="text-xs uppercase tracking-[0.32em] text-gold">Document Intelligence & Corporate Studio</div>
@@ -1126,36 +1239,21 @@ export default function DocumentStudio() {
           {collections.slice(0, 8).map((collection) => <button key={collection.id} className="rounded-full border border-gold/20 bg-gold/10 px-3 py-1 text-gold" onClick={() => { const next = { ...filters, collection_id: collection.id }; setFilters(next); refreshDocuments(next); }}>{collection.name} · {collection.document_ids?.length || 0}</button>)}
         </div>
       </section>
+      <DocumentStudioSidebar
+        filters={filters} setFilters={setFilters} categories={categories} folders={folders} documents={documents} loading={loading}
+        selectedDocument={selected} onSearch={() => refreshDocuments()} onCreateFolder={createFolder} renameFolder={renameFolder}
+        deleteFolder={deleteFolder} moveFolder={moveFolder} selectedIds={selectedIds} onToggleSelected={toggleSelected}
+        onSelectDocument={(document) => { setSelected(document); setEditorHtml(document.content_html || ''); setPageLayout(normalizePageLayout(document.design?.pageLayout || document.metadata?.page_layout)); setLayoutDirty(false); setAnalysis(null); setQuality(document.quality_score || null); setCompareResult(null); loadVersions(document); setLibraryOpen(false); }}
+      />
+      </details>
 
-      <div className="grid grid-cols-1 2xl:grid-cols-[360px_1fr_420px] gap-6">
-        <DocumentStudioSidebar
-          filters={filters}
-          setFilters={setFilters}
-          categories={categories}
-          folders={folders}
-          documents={documents}
-          loading={loading}
-          selectedDocument={selected}
-          onSearch={() => refreshDocuments()}
-          onCreateFolder={createFolder}
-          renameFolder={renameFolder}
-          deleteFolder={deleteFolder}
-          moveFolder={moveFolder}
-          onSelectDocument={(document) => {
-            setSelected(document);
-            setEditorHtml(document.content_html || "");
-            setPageLayout(normalizePageLayout(document.design?.pageLayout || document.metadata?.page_layout));
-            setLayoutDirty(false);
-            setAnalysis(null);
-            setQuality(document.quality_score || null);
-            setCompareResult(null);
-            loadVersions(document);
-          }}
-          selectedIds={selectedIds}
-          onToggleSelected={toggleSelected}
-        />
+      <div className={`document-office-workspace ${navigatorCollapsed ? 'navigator-is-collapsed' : ''}`}>
+        <DocumentNavigator activeTab={navigatorTab} onTabChange={setNavigatorTab} outline={documentOutline} pageCount={pageFlow.pageCount} collapsed={navigatorCollapsed} onToggle={() => setNavigatorCollapsed(value => !value)} onOpenLibrary={() => setLibraryOpen(true)} />
 
-        <main className="space-y-4">
+        <PanelGroup direction="horizontal" className="document-editor-preview-group min-h-[900px] !overflow-visible">
+        <ResizablePanel defaultSize={rightPanelCollapsed ? 100 : 60} minSize={45} className="!overflow-visible bg-[#252525]">
+
+        <main className="document-editor-column flex flex-col gap-4 p-4">
           <Panel title="Corporate Generator" icon={Sparkles}>
             <div className="rounded-2xl border border-gold/30 bg-gold/10 p-4 text-xs text-white/75 space-y-2">
               <div className="flex items-center justify-between gap-2"><b>Ενεργό Μητρώο Εταιρείας</b><button className="btn secondary" onClick={createEnterpriseCompany}>Προσθήκη εταιρείας</button></div>
@@ -1268,8 +1366,8 @@ export default function DocumentStudio() {
             </div>
           </Panel>
 
-          <Panel title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>
-            <div className="premium-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur" role="toolbar" aria-label="Document editing toolbar">
+          <Panel className="order-first document-primary-editor" title={selected ? `Editor · ${selected.title}` : 'Professional Editor'} icon={FileText}>
+            <div className="premium-toolbar document-legacy-toolbar sticky top-0 z-10 -mx-2 rounded-2xl border border-white/10 bg-ink-950/95 p-3 shadow-2xl backdrop-blur" role="toolbar" aria-label="Document editing toolbar">
               <div className="flex flex-wrap items-center gap-2">
                 <select className="field max-w-[130px] py-2" aria-label="Review mode" value={reviewMode} onChange={(e) => setReviewMode(e.target.value)}>{['editing', 'reviewing', 'viewing'].map((mode) => <option key={mode}>{mode}</option>)}</select>
                 <select className="field max-w-[110px] py-2" value={normalizedPageLayout.size} onChange={(e) => updatePageLayout((current) => ({ ...current, size: e.target.value }))}>{['A4', 'Letter'].map((x) => <option key={x}>{x}</option>)}</select>
@@ -1361,9 +1459,8 @@ export default function DocumentStudio() {
               <div className="md:col-span-4 text-white/50">Tables in document: {documentTables.length} · Advanced: {documentTables.filter((table) => table.advanced).length} · Largest grid: {Math.max(0, ...documentTables.map((table) => table.rows))} rows × {Math.max(0, ...documentTables.map((table) => table.columns))} columns.</div>
             </div>
             {(layoutWarning || pageFlow.warning) && <div className="rounded-2xl border border-amber-400/30 bg-amber-500/10 p-3 text-xs text-amber-100">{layoutWarning || pageFlow.warning}</div>}
-            <div className="premium-doc-shell overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
-              {printPreview ? <PaginatedDocumentWorkspace document={selected} html={editorHtml} layout={normalizedPageLayout} zoom={page.zoom} preview /> : (
-                <PaginatedDocumentWorkspace
+            <div className="premium-doc-shell document-editor-canvas overflow-x-auto rounded-3xl border border-white/10 bg-neutral-900/70 p-6" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop}>
+              <PaginatedDocumentWorkspace
                   document={selected}
                   html={editorHtml}
                   layout={normalizedPageLayout}
@@ -1395,13 +1492,13 @@ export default function DocumentStudio() {
                       onHtmlChange={onEditorChange}
                       disabled={busy || !selected || reviewMode === 'viewing'}
                       onEditorReady={setLexicalEditor}
+                      onSelectionContextChange={(context) => { setSelectionContext(context); if (context !== 'document') { setRightPanelMode('inspector'); setRightPanelCollapsed(false); } }}
                     />
                   </div>
                 </PaginatedDocumentWorkspace>
-              )}
             </div>
             {comments.length > 0 && <div className="rounded-2xl border border-white/10 bg-black/20 p-4 text-xs text-white/70"><div className="mb-2 font-medium text-white">Σχόλια και Προτάσεις</div>{comments.map((comment) => <div key={comment.id} className="mb-2 rounded-xl border border-white/10 p-3"><div>{comment.text}</div><button className="mt-2 text-gold" onClick={() => setComments((items) => items.map((x) => x.id === comment.id ? { ...x, resolved: !x.resolved } : x))}>{comment.resolved ? 'Επαναφορά' : 'Επίλυση'}</button></div>)}</div>}
-            <div className="flex flex-wrap gap-2">
+            <div className="document-editor-actions flex flex-wrap gap-2">
               <button className="btn gold disabled:opacity-50" disabled={!selected || busy} onClick={() => saveEditor(false)}>Αποθήκευση έκδοσης</button>
               <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => saveEditor(true)}>Αυτόματη αποθήκευση</button>
               <button className="btn secondary disabled:opacity-50" disabled={!selected || busy} onClick={() => lifecycle('submit-review')}>Υποβολή για έλεγχο</button>
@@ -1413,8 +1510,24 @@ export default function DocumentStudio() {
             </div>
           </Panel>
         </main>
+        {rightPanelCollapsed && <button className="right-panel-restore" onClick={() => setRightPanelCollapsed(false)} aria-label="Restore preview panel"><PanelRightOpen size={16} /> Restore preview</button>}
+        </ResizablePanel>
+        {!rightPanelCollapsed && <PanelResizeHandle className="document-workspace-divider" aria-label="Resize editor and preview"><span /></PanelResizeHandle>}
+        {!rightPanelCollapsed && <ResizablePanel defaultSize={40} minSize={30} className="!overflow-visible bg-[#1b1b1b]">
 
-        <aside className="space-y-4">
+        <aside className="document-right-panel">
+          <div className="right-panel-header"><div role="tablist"><button role="tab" aria-selected={rightPanelMode === 'preview'} className={rightPanelMode === 'preview' ? 'is-active' : ''} onClick={() => setRightPanelMode('preview')}>Preview</button><button role="tab" aria-selected={rightPanelMode === 'inspector'} className={rightPanelMode === 'inspector' ? 'is-active' : ''} onClick={() => setRightPanelMode('inspector')}>Inspector</button></div><button onClick={() => setRightPanelCollapsed(true)} aria-label="Collapse preview panel" title="Collapse panel"><PanelRightClose size={16} /></button></div>
+          {rightPanelMode === 'preview' ? <Panel className="document-live-preview" title="Live Preview" icon={FileText}>
+            <div className="mb-3 flex items-center justify-between text-[10px] uppercase tracking-[.18em] text-white/40"><span>Rendered document</span><span>{pageFlow.pageCount} pages · {page.zoom}%</span></div>
+            <div className="document-preview-scroll rounded-xl border border-black/60 bg-[#303030] p-3">
+              <PaginatedDocumentWorkspace document={selected} html={editorHtml} layout={normalizedPageLayout} zoom={Math.min(page.zoom, 72)} preview />
+            </div>
+            <div className="document-preview-actions" aria-label="Preview actions">
+              <button className="preview-action-primary" disabled={!selected || busy} onClick={applyDesigner}>Luxury Design</button>
+              <button disabled={!selected || busy} onClick={redesign}>Auto Redesign</button>
+              <a className={!selected ? 'is-disabled' : ''} href={selected ? documentApi.previewUrl(selected.id) : undefined} target="_blank" rel="noreferrer" aria-disabled={!selected}>Presentation Preview</a>
+            </div>
+          </Panel> : <DocumentContextInspector context={selectionContext} format={format} pageLayout={normalizedPageLayout} updatePageLayout={updatePageLayout} imageDraft={imageDraft} setImageDraft={setImageDraft} tableDraft={tableDraft} setTableDraft={setTableDraft} onInsertImage={() => insertImageAsset()} onUploadImage={() => imageInputRef.current?.click()} onInsertTable={insertAdvancedTable} onInsertBrandAsset={insertBrandAsset} />}
           <Panel title="Company Identity" icon={ShieldCheck}>
             <div className="text-xs text-white/50">Company database profile automatically populates documents, people, authority, banks, jurisdiction, signatures and compliance metadata.</div>
             <input className="field" value={profile?.company_name || ''} onChange={(e) => setProfile({ ...profile, company_name: e.target.value })} />
@@ -1584,6 +1697,38 @@ export default function DocumentStudio() {
               </div>
             </div>
 
+            <div className="rounded-2xl border border-gold/20 bg-black/20 p-3 text-xs text-white/65 space-y-2">
+              <b className="text-gold">Design Presets (text-preserving)</b>
+              <div className="text-white/45">Apply a curated design preset that changes only the visual style — your document text is protected and never altered.</div>
+              <select
+                className="field"
+                value={selectedPresetId}
+                onChange={(e) => setSelectedPresetId(e.target.value)}
+              >
+                <option value="">— Select a preset —</option>
+                {designPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>{preset.name}</option>
+                ))}
+              </select>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="btn gold disabled:opacity-50"
+                  disabled={!selected || busy || presetLoading || !selectedPresetId}
+                  onClick={() => redesign(selectedPresetId)}
+                >
+                  {presetLoading ? 'Εφαρμογή…' : 'Εφαρμογή Preset'}
+                </button>
+                <button
+                  className="btn secondary disabled:opacity-50"
+                  disabled={!selected || busy || presetLoading}
+                  onClick={() => redesign('')}
+                >
+                  {presetLoading ? 'Εφαρμογή…' : 'Auto Redesign (legacy)'}
+                </button>
+              </div>
+              {presetMessage && <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2 text-white/70">{presetMessage}</div>}
+            </div>
+
             <button
               className="btn gold disabled:opacity-50"
               disabled={!selected || busy}
@@ -1595,7 +1740,7 @@ export default function DocumentStudio() {
             <button
               className="btn gold disabled:opacity-50"
               disabled={!selected || busy}
-              onClick={redesign}
+              onClick={() => redesign('')}
             >
               Αυτόματος επανασχεδιασμός
             </button>
@@ -1715,6 +1860,10 @@ export default function DocumentStudio() {
             </div>
           </Panel>
         </aside>
+        </ResizablePanel>}
+        </PanelGroup>
+      </div>
+      {toolCenterOpen && <div className="document-tool-drawer" role="dialog" aria-modal="true" aria-label="Document tools"><div className="tool-drawer-header"><div><strong>Document tools</strong><span>Choose a focused property panel.</span></div><button onClick={() => setToolCenterOpen(false)} aria-label="Close document tools"><X size={18} /></button></div><div className="tool-drawer-content"><p>Advanced settings are available without interrupting the document canvas.</p><div className="tool-drawer-grid">{[['Page setup', 'document'], ['Text formatting', 'text'], ['Images & brand assets', 'image'], ['Tables', 'table'], ['Header & footer', 'header-footer']].map(([label, context]) => <button key={context} onClick={() => { setToolCenterOpen(false); showInspector(context); }}>{label}</button>)}</div></div></div>}
       </div>
     </div>
   );
@@ -1724,8 +1873,8 @@ function Metric({ label, value }) {
   return <div className="rounded-2xl border border-white/10 bg-black/20 px-6 py-4"><div className="text-2xl text-gold font-display">{value}</div><div className="text-[10px] uppercase tracking-[0.22em] text-white/45">{label}</div></div>;
 }
 
-function Panel({ title, icon: Icon, children }) {
-  return <section className="rounded-3xl border border-white/10 bg-white/[0.045] p-5 shadow-xl backdrop-blur-sm"><div className="mb-4 flex items-center gap-3"><Icon className="h-5 w-5 shrink-0 text-gold" /><h2 className="font-display text-xl leading-tight">{title}</h2></div><div className="space-y-3">{children}</div></section>;
+function Panel({ title, icon: Icon, children, className = '' }) {
+  return <section className={`rounded-xl border border-white/10 bg-[#202020] p-4 shadow-xl ${className}`}><div className="mb-3 flex items-center gap-2 border-b border-white/10 pb-2"><Icon className="h-4 w-4 shrink-0 text-gold" /><h2 className="text-sm font-medium leading-tight text-white/85">{title}</h2></div><div className="panel-body space-y-3">{children}</div></section>;
 }
 
 function EmptyState({ title, text }) {

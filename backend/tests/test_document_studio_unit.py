@@ -246,6 +246,165 @@ def test_pdf_and_docx_generation_are_valid_binary_contracts():
         assert "Board Resolution" in archive.read("word/document.xml").decode("utf-8")
 
 
+# ---------------------------------------------------------------------------
+# Design Presets tests
+# ---------------------------------------------------------------------------
+
+def test_design_presets_registry_contains_expected_presets():
+    """DESIGN_PRESETS should include luxury-legal, executive-corporate, banking-professional."""
+    from document_studio.service import DESIGN_PRESETS, get_design_presets
+
+    preset_ids = set(DESIGN_PRESETS.keys())
+    assert {"luxury-legal", "executive-corporate", "banking-professional"}.issubset(preset_ids)
+
+    presets = get_design_presets()
+    assert len(presets) == len(DESIGN_PRESETS)
+    for preset in presets:
+        assert "id" in preset
+        assert "name" in preset
+        assert "heading_font" in preset
+        assert "body_font" in preset
+        assert "page_margins" in preset
+        assert "primary_color" in preset
+
+
+def test_apply_design_preset_preserves_content_text():
+    """apply_design_preset should return the same content_html and content_text."""
+    from document_studio.service import apply_design_preset
+
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Test Document",
+        content_html="<article><h1>Important Legal Text</h1><p>This must not change.</p></article>",
+        content_text="Important Legal Text This must not change.",
+    )
+
+    content_html, content_text, design = apply_design_preset(document, "luxury-legal")
+
+    assert content_html == document.content_html
+    assert content_text == document.content_text
+    assert design["preset_id"] == "luxury-legal"
+    assert design["preset_name"] == "Luxury Legal"
+    assert "exportLayout" in design
+    assert design["exportLayout"]["page"]["size"] == "A4"
+
+
+def test_apply_design_preset_unknown_preset_raises_value_error():
+    """apply_design_preset should raise ValueError for unknown preset_id."""
+    from document_studio.service import apply_design_preset
+
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Test Document",
+        content_html="<p>Test</p>",
+        content_text="Test",
+    )
+
+    with pytest.raises(ValueError, match="Unknown design preset"):
+        apply_design_preset(document, "nonexistent-preset")
+
+
+def test_apply_design_preset_generates_export_layout_with_header_footer():
+    """apply_design_preset should generate exportLayout with header, footer, pageNumbers."""
+    from document_studio.service import apply_design_preset
+
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Test Document",
+        content_html="<p>Test</p>",
+        content_text="Test",
+    )
+
+    _, _, design = apply_design_preset(document, "executive-corporate")
+
+    export_layout = design["exportLayout"]
+    assert export_layout["header"]["enabled"] is True
+    assert export_layout["footer"]["enabled"] is True
+    assert export_layout["pageNumbers"]["enabled"] is True
+    assert export_layout["pageNumbers"]["position"] == "bottom-right"
+
+
+def test_redesign_with_preset_preserves_text_and_updates_design(tmp_path):
+    """POST /redesign with preset_id should preserve text and update design metadata."""
+    provider = SQLitePersistenceProvider(tmp_path / "redesign-preset.db")
+    document_router.configure_document_studio_router(
+        provider,
+        type("FakeMediaColl", (), {
+            "insert_one": lambda self, doc: asyncio.sleep(0),
+            "find_one": lambda self, *a, **k: asyncio.sleep(0),
+        })(),
+        type("FakeNotifColl", (), {"insert_one": lambda self, doc: asyncio.sleep(0)})(),
+    )
+
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Legal Agreement",
+        content_html="<article><h1>Confidential Agreement</h1><p>The parties agree to the following terms.</p></article>",
+        content_text="Confidential Agreement The parties agree to the following terms.",
+    )
+    asyncio.run(document_router.documents_coll.insert_one(document.model_dump()))
+
+    result = asyncio.run(
+        document_router.redesign_document(
+            document.id,
+            {"preset_id": "luxury-legal"},
+            owner="owner@example.com",
+        )
+    )
+
+    # Text must be preserved exactly
+    assert result.content_text == document.content_text
+    assert result.content_html == document.content_html
+    # Design should be updated with preset metadata
+    assert result.design["preset_id"] == "luxury-legal"
+    assert result.metadata["applied_preset"] == "luxury-legal"
+    assert result.version_number == document.version_number + 1
+
+
+def test_redesign_without_preset_keeps_legacy_behavior(tmp_path):
+    """POST /redesign without preset_id should use legacy apply_design_system."""
+    provider = SQLitePersistenceProvider(tmp_path / "redesign-legacy.db")
+    document_router.configure_document_studio_router(
+        provider,
+        type("FakeMediaColl", (), {
+            "insert_one": lambda self, doc: asyncio.sleep(0),
+            "find_one": lambda self, *a, **k: asyncio.sleep(0),
+        })(),
+        type("FakeNotifColl", (), {"insert_one": lambda self, doc: asyncio.sleep(0)})(),
+    )
+
+    document = CorporateDocument(
+        owner_email="owner@example.com",
+        title="Legal Agreement",
+        content_html="<article><h1>Agreement</h1><p>Terms here.</p></article>",
+        content_text="Agreement Terms here.",
+    )
+    asyncio.run(document_router.documents_coll.insert_one(document.model_dump()))
+
+    result = asyncio.run(
+        document_router.redesign_document(
+            document.id,
+            None,
+            owner="owner@example.com",
+        )
+    )
+
+    # Legacy redesign wraps content in new HTML shell
+    assert "Agreement" in result.content_html
+    assert result.version_number == document.version_number + 1
+    assert "applied_preset" not in (result.metadata or {})
+
+
+def test_design_presets_endpoint_returns_list():
+    """GET /design-presets should return a dict with presets list."""
+    from document_studio.service import get_design_presets
+
+    presets = get_design_presets()
+    assert isinstance(presets, list)
+    assert len(presets) >= 3
+    assert all("id" in p and "name" in p for p in presets)
+
+
 def test_export_headers_support_unicode_titles_and_batch_manifest_is_json():
     disposition = document_router._download_content_disposition(
         "Απόφαση Διοικητικού Συμβουλίου", "pdf"
