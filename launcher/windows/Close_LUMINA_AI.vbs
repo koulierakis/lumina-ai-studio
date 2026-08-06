@@ -23,7 +23,7 @@ rc = shell.Run(cmd, 0, True)
 
 If rc <> 0 Then
     MsgBox "Close LUMINA reported an issue (exit code " & rc & ")." & vbCrLf & _
-           "Check the launcher log:" & vbCrLf & logDir & "\launcher.log", vbExclamation, "LUMINA AI"
+           "Check the runtime log:" & vbCrLf & logDir & "\runtime.log", vbExclamation, "LUMINA AI"
     WScript.Quit rc
 End If
 

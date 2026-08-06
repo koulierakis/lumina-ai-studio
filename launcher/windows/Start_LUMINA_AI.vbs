@@ -36,7 +36,7 @@ rc = shell.Run(cmd, 0, True)
 ' Exit code 0 = success, anything else = failure
 If rc <> 0 Then
     MsgBox "LUMINA AI failed to start (Exit Code " & rc & ")." & vbCrLf & vbCrLf & _
-           "Check the launcher log:" & vbCrLf & logDir & "\launcher.log", vbCritical, "LUMINA AI"
+           "Check the runtime log:" & vbCrLf & logDir & "\runtime.log", vbCritical, "LUMINA AI"
     WScript.Quit rc
 End If
 
