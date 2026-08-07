@@ -90,17 +90,5 @@ def decode_token(token: str) -> Optional[str]:
 async def require_owner(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
 ) -> str:
-    """FastAPI dependency: enforce owner-only access, return owner email."""
-    if not creds or not creds.credentials:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    email = decode_token(creds.credentials)
-    if not email or email != _owner_email():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-    return email
+    """Local single-owner mode: allow access without authentication."""
+    return _owner_email() or "owner@lumina.local"

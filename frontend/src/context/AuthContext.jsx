@@ -1,48 +1,33 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { apiGet, apiPost } from '../lib/api';
+import { createContext, useContext } from 'react';
 
 const AuthCtx = createContext(null);
 
+const LOCAL_OWNER = {
+  email: 'owner@lumina.local',
+};
+
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [ready, setReady] = useState(false);
+  const refresh = async () => LOCAL_OWNER;
 
-  const refresh = useCallback(async () => {
-    const token = localStorage.getItem('lumina_token');
-    if (!token) {
-      setUser(null);
-      setReady(true);
-      return;
-    }
-    try {
-      const data = await apiGet('/auth/me');
-      setUser(data);
-    } catch {
-      setUser(null);
-    } finally {
-      setReady(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  const login = async (email, password) => {
-    const data = await apiPost('/auth/login', { email, password });
-    localStorage.setItem('lumina_token', data.access_token);
-    setUser({ email: data.email });
-    return data;
-  };
+  const login = async () => ({
+    access_token: 'local-owner-mode',
+    email: LOCAL_OWNER.email,
+  });
 
   const logout = () => {
-    localStorage.removeItem('lumina_token');
-    setUser(null);
-    window.location.href = '/login';
+    window.location.href = '/studio/dashboard';
   };
 
   return (
-    <AuthCtx.Provider value={{ user, ready, login, logout, refresh }}>
+    <AuthCtx.Provider
+      value={{
+        user: LOCAL_OWNER,
+        ready: true,
+        login,
+        logout,
+        refresh,
+      }}
+    >
       {children}
     </AuthCtx.Provider>
   );

@@ -8,7 +8,7 @@ export default function Sidebar() {
   const location = useLocation();
 
   return (
-    <aside className="h-full w-full flex flex-col bg-ink-950 border-r border-white/[0.06]">
+    <aside className="min-h-screen w-full flex flex-col bg-ink-950 border-r border-white/[0.06]">
       <div className="px-6 pt-8 pb-10">
         <div className="flex items-baseline gap-2">
           <h1 className="font-display text-3xl tracking-tight text-white" data-testid="brand-name">

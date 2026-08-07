@@ -18,6 +18,7 @@ import WorkspaceCenter from './pages/WorkspaceCenter';
 import ProjectDetail from './pages/ProjectDetail';
 import PlatformHub from './pages/PlatformHub';
 import CodeCreator from './pages/CodeCreator';
+import DocumentStudio from './pages/DocumentStudio';
 
 export default function App() {
   return (
@@ -37,7 +38,7 @@ export default function App() {
           />
           <Routes>
             <Route path="/" element={<Navigate to="/studio/dashboard" replace />} />
-            <Route path="/login" element={<Login />} />
+            <Route path="/login" element={<Navigate to="/studio/dashboard" replace />} />
             <Route
               path="/studio"
               element={
@@ -62,7 +63,7 @@ export default function App() {
               <Route path="voice-studio" element={<VoiceStudio />} />
               <Route path="projects" element={<WorkspaceCenter mode="projects" />} />
               <Route path="projects/:projectId" element={<ProjectDetail />} />
-              <Route path="documents" element={<ComingSoon title="Documents" />} />
+              <Route path="documents" element={<DocumentStudio />} />
               <Route path="finance" element={<ComingSoon title="JSA Finance" />} />
               <Route path="research" element={<ComingSoon title="Internet Research" />} />
               <Route path="automations" element={<ComingSoon title="Automations" />} />

@@ -137,7 +137,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
   }} />;
 }
 
-const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtmlChange, disabled, className = '', onEditorReady }, ref) {
+const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtmlChange, disabled, className = '', onEditorReady, onSelectionContextChange }, ref) {
   const editorApiRef = useRef(null);
   const initialConfig = useMemo(() => ({
     namespace: 'LuminaDocumentStudioEditor',
@@ -158,7 +158,7 @@ const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtml
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div className="relative">
+      <div className="relative" onMouseUp={() => reportSelectionContext(onSelectionContextChange)} onKeyUp={() => reportSelectionContext(onSelectionContextChange)}>
         <RichTextPlugin
           contentEditable={<ContentEditable className={`prose prose-neutral max-w-none outline-none ${className}`} />}
           placeholder={<Placeholder />}
@@ -174,3 +174,13 @@ const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtml
 });
 
 export default DocumentRichEditor;
+
+function reportSelectionContext(callback) {
+  if (!callback || typeof window === 'undefined') return;
+  const node = window.getSelection?.()?.anchorNode;
+  const element = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  if (element?.closest?.('img, figure')) return callback('image');
+  if (element?.closest?.('table, th, td')) return callback('table');
+  if (element?.closest?.('header, footer, [data-document-region]')) return callback('header-footer');
+  callback(window.getSelection?.()?.toString() ? 'text' : 'document');
+}

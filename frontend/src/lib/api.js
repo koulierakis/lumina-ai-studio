@@ -75,13 +75,7 @@ function normalizeError(error) {
       ? responseData.message
       : null;
 
-  if (status === 401) {
-    localStorage.removeItem('lumina_token');
-    if (!window.location.pathname.startsWith('/login')) {
-      window.location.href = '/login';
-    }
-  }
-
+  
   return {
     isAxiosError: true,
     status,
