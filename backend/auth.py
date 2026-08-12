@@ -42,6 +42,11 @@ def _owner_password_hash() -> str:
     return (os.environ.get("OWNER_PASSWORD_HASH") or "").strip()
 
 
+def _local_passwordless_enabled() -> bool:
+    value = os.environ.get("LUMINA_LOCAL_PASSWORDLESS", "1")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def verify_credentials(email: str, password: str) -> bool:
     if not email or not password:
         return False
@@ -98,12 +103,16 @@ def _is_loopback_request(request: Request) -> bool:
 
 
 async def require_owner(request: Request) -> str:
-    """Authenticate the owner, with passwordless access only on loopback.
+    """Authenticate the owner, optionally allowing passwordless loopback access.
 
-    Local desktop requests may omit the Authorization header. If a token is
-    supplied, however, it is always validated so malformed, forged, or expired
-    credentials can never be converted into passwordless access by the local
-    fallback. Non-loopback requests always require a valid owner JWT.
+    Desktop installations default to passwordless access for requests originating
+    from the same computer. Set ``LUMINA_LOCAL_PASSWORDLESS=0`` to require a
+    valid JWT even on loopback, which is also how the security integration suite
+    verifies the protected-route contract.
+
+    If an Authorization header is supplied it is always validated. A malformed,
+    forged, expired, or wrong-owner token is never converted into passwordless
+    access by the local fallback.
     """
     owner_email = _owner_email() or "owner@lumina.local"
     authorization = (request.headers.get("authorization") or "").strip()
@@ -117,7 +126,7 @@ async def require_owner(request: Request) -> str:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
         return owner_email
 
-    if _is_loopback_request(request):
+    if _local_passwordless_enabled() and _is_loopback_request(request):
         return owner_email
 
     raise HTTPException(status_code=401, detail="Authentication required")
