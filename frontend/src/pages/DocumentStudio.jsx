@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Bold, Download, FileText, Italic, List, ListOrdered,
-  Redo2, Save, Underline, Undo2, Upload, Wand2,
+  Redo2, Save, Sparkles, Underline, Undo2, Upload, Wand2,
 } from 'lucide-react';
 import {
   DOCUMENT_CREATION_MODES, DOCUMENT_TYPES, documentApi,
   exportDocumentUrl, makeDocumentDownloadHeaders,
 } from '../documents/model';
 import DocumentRichEditor from '../components/documentstudio/DocumentRichEditor';
+import DocumentAIAssistantPanel from '../components/documentstudio/DocumentAIAssistantPanel';
 import PaginatedDocumentWorkspace from '../components/documentstudio/PaginatedDocumentWorkspace';
 import {
   DEFAULT_PAGE_LAYOUT, buildExportLayoutPayload, normalizePageLayout,
@@ -21,6 +22,14 @@ const PRESET_BUTTONS = [
   { id: 'executive-corporate', label: 'Executive Corporate' },
   { id: 'banking-professional', label: 'Banking Professional' },
 ];
+
+function plainTextPreviewHtml(value = '') {
+  const escaped = String(value).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[character]));
+  const paragraphs = escaped.split(/\n\s*\n/).filter(Boolean).map((part) => `<p>${part}</p>`).join('');
+  return `<article>${paragraphs || '<p></p>'}</article>`;
+}
 
 export default function DocumentStudio() {
   const [documents, setDocuments] = useState([]);
@@ -40,6 +49,7 @@ export default function DocumentStudio() {
   const [layoutWarning, setLayoutWarning] = useState('');
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [presetLoading, setPresetLoading] = useState(false);
+  const [aiPanelOpen, setAIPanelOpen] = useState(false);
 
   const editorApiRef = useRef(null);
   const editorElementRef = useRef(null);
@@ -277,6 +287,20 @@ export default function DocumentStudio() {
     setLibraryOpen(false);
   }
 
+  function applyAIPreview(preview) {
+    const previewDocument = preview?.document || {};
+    const nextHtml = previewDocument.content_html
+      ? sanitizeEditorHtml(previewDocument.content_html)
+      : sanitizeEditorHtml(plainTextPreviewHtml(previewDocument.content || previewDocument.content_text || ''));
+    if (!nextHtml || nextHtml === '<article><p></p></article>') {
+      toast.error('This preview does not contain editable document content.');
+      return;
+    }
+    setEditorHtml(nextHtml);
+    setStatusText('AI preview applied locally — save to persist');
+    toast.success('Preview applied to the editor. Save when you are ready.');
+  }
+
   // ─── Render ──────────────────────────────────────────────────
   return (
     <div className="doc-studio-shell">
@@ -419,6 +443,14 @@ export default function DocumentStudio() {
           >
             Library
           </button>
+          <button
+            className={`doc-tool-btn ${aiPanelOpen ? 'is-active' : ''}`}
+            onClick={() => setAIPanelOpen((value) => !value)}
+            title="AI assistance"
+          >
+            <Sparkles size={16} />
+            AI Assist
+          </button>
         </div>
       </div>
 
@@ -437,6 +469,14 @@ export default function DocumentStudio() {
           </button>
         ))}
       </div>
+
+      {aiPanelOpen && (
+        <DocumentAIAssistantPanel
+          profileId={profile?.id}
+          onApplyPreview={applyAIPreview}
+          onClose={() => setAIPanelOpen(false)}
+        />
+      )}
 
       {/* ─── Document Library (collapsible) ─── */}
       {libraryOpen && (
