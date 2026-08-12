@@ -439,7 +439,7 @@ async def automation_run_now(task_id: str, owner: str = Depends(require_owner)) 
     return await _execute_automation(task)
 
 
-@router.delete("/api/automations/tasks/{task_id}", status_code=204)
+@router.delete("/api/automations/tasks/{task_id}", status_code=204, response_model=None)
 async def automation_delete(task_id: str, owner: str = Depends(require_owner)) -> None:
     records, _ = _repos()
     result = await records.delete_one({"id": task_id, "owner_email": owner, "kind": "automation_task"})
