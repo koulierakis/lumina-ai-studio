@@ -52,17 +52,32 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         [sys.executable, "-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8000"],
         cwd=str(backend_dir),
         env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
     deadline = time.time() + 30
     while time.time() < deadline:
         if _port_open():
             return
         if _SERVER_PROCESS.poll() is not None:
-            break
+            output = _SERVER_PROCESS.stdout.read() if _SERVER_PROCESS.stdout else ""
+            raise RuntimeError(
+                "Backend test server exited before opening 127.0.0.1:8000.\n"
+                f"Server output:\n{output[-12000:]}"
+            )
         time.sleep(0.2)
-    raise RuntimeError("Backend test server did not start on 127.0.0.1:8000")
+    _SERVER_PROCESS.terminate()
+    try:
+        _SERVER_PROCESS.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _SERVER_PROCESS.kill()
+        _SERVER_PROCESS.wait(timeout=5)
+    output = _SERVER_PROCESS.stdout.read() if _SERVER_PROCESS.stdout else ""
+    raise RuntimeError(
+        "Backend test server did not start on 127.0.0.1:8000 within 30 seconds.\n"
+        f"Server output:\n{output[-12000:]}"
+    )
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
