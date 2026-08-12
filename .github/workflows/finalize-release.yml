@@ -49,6 +49,9 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt ruff pytest
 
+      - name: Apply safe Python quality fixes
+        run: ruff check --fix backend launcher
+
       - name: Backend lint
         run: ruff check --output-format=github backend launcher
 
@@ -77,6 +80,7 @@ jobs:
           if [[ -n "$(git status --porcelain)" ]]; then
             git config user.name "Lumina Release Bot"
             git config user.email "actions@users.noreply.github.com"
+            git add -u backend launcher
             git add backend/server.py frontend/src/App.js frontend/src/platform/moduleRegistry.js frontend/src/pages/ProductivityCenter.jsx IMPLEMENTATION_STATUS.md
             git commit -m "Finalize Lumina core modules [skip ci]"
             git push origin HEAD:release/lumina-complete
