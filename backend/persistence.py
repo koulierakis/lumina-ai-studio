@@ -344,8 +344,13 @@ class SQLitePersistenceProvider(PersistenceProvider):
         return len(rows)
 
     async def replace_one(self, table: str, query: dict[str, Any], document: dict[str, Any]) -> None:
-        if await self.find_one(table, query):
-            await self.insert_one(table, document)
+        existing = await self.find_one(table, query)
+        if not existing:
+            return
+        replacement = dict(document)
+        if not replacement.get("id") and existing.get("id"):
+            replacement["id"] = existing["id"]
+        await self.insert_one(table, replacement)
 
     def _delete_sync(self, table: str, query: dict[str, Any]) -> int:
         rows = self._find_sync(table, {})
@@ -428,7 +433,10 @@ class LocalPersistenceCollection:
         return type("UpdateResult", (), {"modified_count": modified})()
 
     async def replace_one(self, query: dict[str, Any], document: dict[str, Any], upsert: bool = False) -> None:
-        if upsert or await self.provider.find_one(self.table, query):
+        existing = await self.provider.find_one(self.table, query)
+        if existing:
+            await self.provider.replace_one(self.table, query, document)
+        elif upsert:
             await self.provider.insert_one(self.table, document)
 
     async def delete_one(self, query: dict[str, Any]) -> Any:
