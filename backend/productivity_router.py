@@ -131,7 +131,7 @@ async def finance_update(entry_id: str, body: FinanceEntryPatch, owner: str = De
     return current
 
 
-@router.delete("/api/finance/entries/{entry_id}", status_code=204)
+@router.delete("/api/finance/entries/{entry_id}", status_code=204, response_model=None)
 async def finance_delete(entry_id: str, owner: str = Depends(require_owner)) -> None:
     records, _ = _repos()
     result = await records.delete_one({"id": entry_id, "owner_email": owner, "kind": "finance_entry"})
@@ -295,7 +295,7 @@ async def research_update(item_id: str, body: ResearchPatch, owner: str = Depend
     return current
 
 
-@router.delete("/api/research/items/{item_id}", status_code=204)
+@router.delete("/api/research/items/{item_id}", status_code=204, response_model=None)
 async def research_delete(item_id: str, owner: str = Depends(require_owner)) -> None:
     records, _ = _repos()
     result = await records.delete_one({"id": item_id, "owner_email": owner, "kind": "research_item"})
