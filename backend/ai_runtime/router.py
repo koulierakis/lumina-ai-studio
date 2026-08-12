@@ -31,10 +31,24 @@ async def runtime_job(job_id: str, owner: str = Depends(require_owner)) -> dict:
 @router.post("/jobs")
 async def submit_runtime_job(body: dict, owner: str = Depends(require_owner)) -> dict:
     task_type = str(body.get("task_type") or "llm")
-    job = RuntimeJob(studio=str(body.get("studio") or "runtime"), task_type=task_type, payload=body.get("payload") or {}, owner_email=owner, provider=body.get("provider"), model=body.get("model"))
+    job = RuntimeJob(
+        studio=str(body.get("studio") or "runtime"),
+        task_type=task_type,
+        payload=body.get("payload") or {},
+        owner_email=owner,
+        provider=body.get("provider"),
+        model=body.get("model"),
+    )
+
     async def default_executor(runtime_job, progress):
-        await progress(runtime_job, RuntimeJobStatus.RUNNING, 75, "Generic runtime validation completed")
+        await progress(
+            runtime_job,
+            RuntimeJobStatus.RUNNING,
+            75,
+            "Generic runtime validation completed",
+        )
         return {"ok": True, "payload": runtime_job.payload}
+
     await runtime_manager.submit(job, default_executor, run_background=False)
     return job.as_dict()
 
@@ -99,17 +113,31 @@ async def unload_runtime_model(model_id: str, _: str = Depends(require_owner)) -
 
 
 @router.post("/models/{model_id}/enable")
-async def enable_runtime_model(model_id: str, body: dict, _: str = Depends(require_owner)) -> dict:
+async def enable_runtime_model(
+    model_id: str,
+    body: dict,
+    _: str = Depends(require_owner),
+) -> dict:
     try:
-        return runtime_manager.models.set_enabled(model_id, bool(body.get("enabled", True))).as_dict()
+        return runtime_manager.models.set_enabled(
+            model_id,
+            bool(body.get("enabled", True)),
+        ).as_dict()
     except KeyError as exc:
         raise HTTPException(404, "Model not found") from exc
 
 
 @router.post("/models/{model_id}/default")
-async def default_runtime_model(model_id: str, body: dict, _: str = Depends(require_owner)) -> dict:
+async def default_runtime_model(
+    model_id: str,
+    body: dict,
+    _: str = Depends(require_owner),
+) -> dict:
     try:
-        return runtime_manager.models.select_default(model_id, str(body.get("studio") or "global")).as_dict()
+        return runtime_manager.models.select_default(
+            model_id,
+            str(body.get("studio") or "global"),
+        ).as_dict()
     except KeyError as exc:
         raise HTTPException(404, "Model not found") from exc
 
@@ -120,11 +148,18 @@ async def download_runtime_model(model_id: str, _: str = Depends(require_owner))
 
 
 @router.post("/models/queue/{queue_id}/{action}")
-async def runtime_model_queue_action(queue_id: str, action: str, _: str = Depends(require_owner)) -> dict:
+async def runtime_model_queue_action(
+    queue_id: str,
+    action: str,
+    _: str = Depends(require_owner),
+) -> dict:
     try:
-        if action == "pause": return runtime_manager.models.pause(queue_id)
-        if action == "resume": return runtime_manager.models.resume(queue_id)
-        if action == "cancel": return runtime_manager.models.cancel(queue_id)
+        if action == "pause":
+            return runtime_manager.models.pause(queue_id)
+        if action == "resume":
+            return runtime_manager.models.resume(queue_id)
+        if action == "cancel":
+            return runtime_manager.models.cancel(queue_id)
     except KeyError as exc:
         raise HTTPException(404, "Queue item not found") from exc
     raise HTTPException(400, "Unsupported queue action")
@@ -156,13 +191,19 @@ async def delete_runtime_model(model_id: str, _: str = Depends(require_owner)) -
 
 @router.post("/models/storage")
 async def move_runtime_storage(body: dict, _: str = Depends(require_owner)) -> dict:
-    return runtime_manager.models.move_storage(str(body.get("path") or runtime_manager.models.models_dir))
+    path = str(body.get("path") or runtime_manager.models.models_dir)
+    return runtime_manager.models.move_storage(path)
 
 
 @router.post("/models/import")
 async def import_runtime_model(body: dict, _: str = Depends(require_owner)) -> dict:
     try:
-        return runtime_manager.models.import_model(name=str(body.get("name") or "Imported Model"), path=str(body.get("path") or ""), type=str(body.get("type") or "llm"), provider=str(body.get("provider") or "local")).as_dict()
+        return runtime_manager.models.import_model(
+            name=str(body.get("name") or "Imported Model"),
+            path=str(body.get("path") or ""),
+            type=str(body.get("type") or "llm"),
+            provider=str(body.get("provider") or "local"),
+        ).as_dict()
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
