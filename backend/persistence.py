@@ -216,9 +216,11 @@ class SQLitePersistenceProvider(PersistenceProvider):
 
     def _normalize(self, table: str, document: dict[str, Any]) -> dict[str, Any]:
         data = dict(document)
+        document_id = str(data.get("id") or data.get("install_job_id") or _now_iso())
+        data["id"] = document_id
         metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
         return {
-            "id": str(data.get("id") or data.get("install_job_id") or _now_iso()),
+            "id": document_id,
             "owner_email": data.get("owner_email"),
             "provider": data.get("provider"),
             "status": data.get("status"),
