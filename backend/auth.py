@@ -6,6 +6,7 @@ Issues signed JWT tokens for session persistence.
 from __future__ import annotations
 
 import hmac
+import ipaddress
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,7 @@ from pathlib import Path
 import bcrypt
 import jwt
 from dotenv import load_dotenv
+from fastapi import HTTPException, Request
 
 # Authentication is also imported by local maintenance commands and tests.
 # Load the backend-owned configuration here so credential verification never
@@ -78,11 +80,44 @@ def issue_token(email: str, hours: int = 24 * 30) -> str:
 def decode_token(token: str) -> str | None:
     try:
         payload = jwt.decode(token, _secret(), algorithms=["HS256"])
-        return payload.get("sub")
+        subject = payload.get("sub")
+        return str(subject).strip().lower() if subject else None
     except jwt.PyJWTError:
         return None
 
 
-async def require_owner() -> str:
-    """Local single-owner mode: allow access without authentication."""
-    return _owner_email() or "owner@lumina.local"
+def _is_loopback_request(request: Request) -> bool:
+    client = request.client
+    host = (client.host if client else "").strip()
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
+async def require_owner(request: Request) -> str:
+    """Authenticate the owner, with passwordless access only on loopback.
+
+    Local desktop requests may omit the Authorization header. If a token is
+    supplied, however, it is always validated so malformed, forged, or expired
+    credentials can never be converted into passwordless access by the local
+    fallback. Non-loopback requests always require a valid owner JWT.
+    """
+    owner_email = _owner_email() or "owner@lumina.local"
+    authorization = (request.headers.get("authorization") or "").strip()
+
+    if authorization:
+        scheme, separator, token = authorization.partition(" ")
+        if not separator or scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
+        subject = decode_token(token.strip())
+        if not subject or not hmac.compare_digest(subject, owner_email):
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return owner_email
+
+    if _is_loopback_request(request):
+        return owner_email
+
+    raise HTTPException(status_code=401, detail="Authentication required")
