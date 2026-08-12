@@ -157,7 +157,11 @@ def test_approved_generated_change_plan_executes_with_backup_and_diff(
         event_callback=lambda event: events.append(event.stage.value),
     )
 
-    assert result.status is TaskStatus.SUCCEEDED, result.model_dump()
+    assert result.status is TaskStatus.SUCCEEDED, (
+        f"error_type={result.error_type}; error_message={result.error_message}; "
+        f"rollback_attempted={result.rollback_attempted}; "
+        f"rollback_succeeded={result.rollback_succeeded}"
+    )
     assert (tmp_path / test_path).read_text(encoding="utf-8") == new_content
     assert result.backup is not None
     assert result.patch_validation is not None
@@ -205,7 +209,11 @@ def test_execution_rolls_back_when_validation_fails(
 
     result = _service(tmp_path, _plan_for(test_path)).execute_internal(request)
 
-    assert result.status is TaskStatus.ROLLED_BACK, result.model_dump()
+    assert result.status is TaskStatus.ROLLED_BACK, (
+        f"error_type={result.error_type}; error_message={result.error_message}; "
+        f"rollback_attempted={result.rollback_attempted}; "
+        f"rollback_succeeded={result.rollback_succeeded}"
+    )
     assert result.rollback_attempted is True
     assert result.rollback_succeeded is True
     assert result.rollback_result is not None
