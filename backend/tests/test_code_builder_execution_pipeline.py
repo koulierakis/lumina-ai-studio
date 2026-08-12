@@ -115,6 +115,38 @@ def _service(repository_root: Path, plan: GeneratedChangePlan) -> TaskService:
     )
 
 
+def test_nested_pytest_build_preserves_repository_and_backup(tmp_path: Path) -> None:
+    test_path = "tests/test_nested_pass.py"
+    (tmp_path / "tests").mkdir()
+    (tmp_path / test_path).write_text("def test_pass():\n    assert True\n", encoding="utf-8")
+    backup_service = BackupService(tmp_path)
+    backup = backup_service.create_backup((test_path,), reason="nested pytest diagnostic")
+    manifest = Path(backup.manifest_path)
+    assert manifest.exists()
+
+    build = BuildService(
+        BuildServiceConfiguration(
+            repository_root=tmp_path,
+            custom_command_policy={"executable_paths": frozenset({sys.executable})},
+        )
+    ).execute_sequence(
+        (
+            BuildCommandSpec(
+                command_id="nested-pytest-diagnostic",
+                kind=BuildCommandKind.PYTEST,
+                arguments=(test_path,),
+                timeout_seconds=60,
+            ),
+        )
+    )
+    command = build.commands[0]
+    assert command.status is BuildStatus.SUCCEEDED, (
+        f"stdout={command.stdout!r}; stderr={command.stderr!r}; "
+        f"cwd={command.working_directory!r}; args={command.arguments!r}"
+    )
+    assert manifest.exists(), f"nested pytest removed backup manifest: {manifest}"
+
+
 def test_approved_generated_change_plan_executes_with_backup_and_diff(
     tmp_path: Path,
 ) -> None:
