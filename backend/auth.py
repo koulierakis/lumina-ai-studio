@@ -4,19 +4,15 @@ Uses simple email + bcrypt password verified against env vars.
 Issues signed JWT tokens for session persistence.
 """
 from __future__ import annotations
-import os
+
 import hmac
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-_bearer = HTTPBearer(auto_error=False)
 
 # Authentication is also imported by local maintenance commands and tests.
 # Load the backend-owned configuration here so credential verification never
@@ -26,10 +22,10 @@ load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
 
 def _secret() -> str:
-    s = os.environ.get("JWT_SECRET")
-    if not s:
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
         raise RuntimeError("JWT_SECRET not configured")
-    return s
+    return secret
 
 
 def _owner_email() -> str:
@@ -73,13 +69,13 @@ def hash_password(plain: str) -> str:
 def issue_token(email: str, hours: int = 24 * 30) -> str:
     payload = {
         "sub": email.strip().lower(),
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(hours=hours),
     }
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
 
-def decode_token(token: str) -> Optional[str]:
+def decode_token(token: str) -> str | None:
     try:
         payload = jwt.decode(token, _secret(), algorithms=["HS256"])
         return payload.get("sub")
@@ -87,8 +83,6 @@ def decode_token(token: str) -> Optional[str]:
         return None
 
 
-async def require_owner(
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
-) -> str:
+async def require_owner() -> str:
     """Local single-owner mode: allow access without authentication."""
     return _owner_email() or "owner@lumina.local"
