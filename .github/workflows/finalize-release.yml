@@ -50,7 +50,7 @@ jobs:
         run: pip install -r backend/requirements.txt ruff pytest
 
       - name: Apply safe Python quality fixes
-        run: ruff check --fix backend launcher
+        run: ruff check --fix --exit-zero backend launcher
 
       - name: Backend lint
         run: ruff check --output-format=github backend launcher
