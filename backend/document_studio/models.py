@@ -61,6 +61,14 @@ class CompanyProfile(BaseModel):
     contact_information: dict = Field(default_factory=dict)
     legal_information: dict = Field(default_factory=dict)
     branding_system: dict = Field(default_factory=dict)
+    fact_provenance: dict[str, list[dict]] = Field(default_factory=dict)
+    business_activities: str = ""
+    business_model: str = ""
+    source_of_funds: str = ""
+    source_of_wealth: str = ""
+    expected_account_activity: str = ""
+    organizational_structure: str = ""
+    aml_controls: str = ""
     created_at: str = Field(default_factory=now_iso)
     updated_at: str = Field(default_factory=now_iso)
 
@@ -256,6 +264,27 @@ class CorporateDocument(BaseModel):
     autosaved_at: str | None = None
 
 
+class SourceCorporateFact(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    field_name: str
+    value: object
+    source_document_id: str
+    source_document_name: str
+    source_page_or_location: str
+    extraction_method: str = "deterministic_label_pattern"
+    confidence: float
+    verification_status: str = "CANDIDATE"
+    created_at: str = Field(default_factory=now_iso)
+
+
+class SourceFactConflict(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    field_name: str
+    conflicting_values: list[dict] = Field(default_factory=list)
+    current_company_profile_value: object | None = None
+
+
 class DocumentGenerationRequest(BaseModel):
     template_id: str = "premium-agreement"
     title: str
@@ -270,6 +299,22 @@ class DocumentGenerationRequest(BaseModel):
     country: str = "GR"
     language: str = "el"
     company_profile_id: str | None = None
+
+
+class NaturalDocumentCreationRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    request: str
+    company_profile_id: str | None = None
+    country: str = "GR"
+    language: str = "en"
+    tone: str = "automatic"
+    style: str = "automatic"
+    requested_type: str | None = None
+    structured_fields: dict = Field(default_factory=dict)
+    provider: str | None = None
+    model: str | None = None
+    allow_fallback: bool = True
+    pipeline_mode: str = "standard"
 
 
 class DocumentAnalysisRequest(BaseModel):
@@ -364,3 +409,38 @@ class DocumentAnalysisResult(BaseModel):
     classification: dict = Field(default_factory=dict)
     compared_with: str | None = None
     created_at: str = Field(default_factory=now_iso)
+
+
+class DocumentRecommendation(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    document_type: str
+    title: str
+    reason: str
+    priority: str = "required"
+    missing_data: list[str] = Field(default_factory=list)
+
+
+class PackAdvisorRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    objective: str
+    company_profile_id: str | None = None
+
+
+class PackAdvisorResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    objective: str
+    objective_category: str
+    recommendations: list[DocumentRecommendation] = Field(default_factory=list)
+    profile_validation: dict = Field(default_factory=dict)
+    total_required: int = 0
+    total_optional: int = 0
+    can_generate_all: bool = True
+
+
+class PackGenerationRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    objective: str
+    company_profile_id: str | None = None
+    selected_document_types: list[str] = Field(default_factory=list)
+    generate_all: bool = False
+    title: str = "Document Pack"
