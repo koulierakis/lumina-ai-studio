@@ -15,7 +15,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt ruff
       - name: Apply safe Python quality fixes in the validation workspace
-        run: ruff check --fix backend launcher
+        run: ruff check --fix --exit-zero backend launcher
       - run: ruff check --output-format=github backend launcher
       - run: python -m pytest backend/tests launcher/tests -q
   frontend:
