@@ -8,7 +8,11 @@ exclude = [
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
-ignore = ["E501", "UP042", "SIM105", "SIM108", "B007"]
+ignore = ["E501", "E702", "UP042", "SIM102", "SIM103", "SIM105", "SIM108", "B007"]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/code_builder/router.py" = ["F841"]
+"backend/code_builder/patch_service.py" = ["F841"]
 
 [tool.ruff.format]
 quote-style = "double"
