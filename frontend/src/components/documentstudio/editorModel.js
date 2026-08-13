@@ -238,7 +238,11 @@ export function applyFindReplace(html = '', query = '', replacement = '') {
   const needle = String(query || '').trim();
   if (!needle) return String(html || '');
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return String(html || '').replace(new RegExp(escaped, 'gi'), String(replacement ?? ''));
+  const matcher = new RegExp(escaped, 'gi');
+  return String(html || '')
+    .split(/(<[^>]+>)/g)
+    .map((part) => part.startsWith('<') ? part : part.replace(matcher, String(replacement ?? '')))
+    .join('');
 }
 
 const COMMON_WORDS = new Set('a about above after again all also an and any are as at be because been before being below between both but by can company contract corporate date document each effective for from further has have if in into is it its law legal may must no not of on or other our page party per professional report shall should signature such than that the their then there these this to under up use version was will with within without you your'.split(' '));
