@@ -43,7 +43,7 @@ jobs:
           )
 
           anchor = '''def _phase_from_result(\n    result: Any,\n) -> CodeBuilderTaskPhase:\n'''
-          helpers = '''def _build_preparation_request(stored_task: StoredTask) -> TaskRequest:\n    metadata = dict(stored_task.request.metadata)\n    metadata["code_builder_preparation"] = True\n    return stored_task.request.model_copy(\n        update={\n            "dry_run": True,\n            "backup_policy": BackupPolicy.DISABLED,\n            "build_policy": BuildPolicy.DISABLED,\n            "rollback_policy": RollbackPolicy.NEVER,\n            "metadata": metadata,\n        }\n    )\n\n\ndef _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:\n    prepared = _serialize_value(stored_task.preparation_result)\n    if not isinstance(prepared, Mapping):\n        raise CodeBuilderApprovalError(\n            "Task does not have a completed preparation result."\n        )\n\n    raw_patch = prepared.get("patch")\n    if not isinstance(raw_patch, Mapping):\n        raise CodeBuilderApprovalError(\n            "Task preparation did not produce an approvable patch."\n        )\n\n    raw_operations = raw_patch.get("operations")\n    if not isinstance(raw_operations, Sequence) or isinstance(\n        raw_operations, (str, bytes, bytearray)\n    ) or not raw_operations:\n        raise CodeBuilderApprovalError(\n            "Task preparation did not produce patch operations."\n        )\n\n    metadata = dict(stored_task.request.metadata)\n    metadata["approved_patch_operations"] = list(raw_operations)\n    metadata["approved_preparation_task_id"] = stored_task.request.task_id\n    return stored_task.request.model_copy(update={"metadata": metadata})\n\n\n'''
+          helpers = '''def _build_preparation_request(stored_task: StoredTask) -> TaskRequest:\n    metadata = dict(stored_task.request.metadata)\n    metadata["code_builder_preparation"] = True\n    return stored_task.request.model_copy(\n        update={\n            "dry_run": True,\n            "backup_policy": BackupPolicy.DISABLED,\n            "build_policy": BuildPolicy.DISABLED,\n            "rollback_policy": RollbackPolicy.NEVER,\n            "metadata": metadata,\n        }\n    )\n\n\ndef _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:\n    prepared = _serialize_value(stored_task.preparation_result)\n    if not isinstance(prepared, Mapping):\n        raise CodeBuilderApprovalError(\n            "Task does not have a completed preparation result."\n        )\n\n    raw_patch = prepared.get("patch")\n    if not isinstance(raw_patch, Mapping):\n        raise CodeBuilderApprovalError(\n            "Task preparation did not produce an approvable patch."\n        )\n\n    raw_operations = raw_patch.get("operations")\n    if not isinstance(raw_operations, Sequence) or isinstance(\n        raw_operations, (str, bytes, bytearray)\n    ) or not raw_operations:\n        raise CodeBuilderApprovalError(\n            "Task preparation did not produce patch operations."\n        )\n\n    metadata = dict(stored_task.request.metadata)\n    metadata.pop("patch_operations", None)\n    metadata.pop("execution_patch_operations", None)\n    metadata["approved_patch_operations"] = list(raw_operations)\n    metadata["approved_preparation_task_id"] = stored_task.request.task_id\n    return stored_task.request.model_copy(update={"metadata": metadata})\n\n\n'''
           replace_once(anchor, helpers + anchor)
 
           replace_once(
@@ -105,7 +105,7 @@ jobs:
               _run_stored_task_sync,
               _task_request_from_api,
           )
-          from code_builder.task_service import TaskService, TaskServiceConfiguration
+          from code_builder.task_service import BuildPolicy, TaskService, TaskServiceConfiguration
 
 
           class StaticRepositoryService:
@@ -168,6 +168,7 @@ jobs:
                   instruction="Create the prepared boundary module.",
                   require_approval=True,
                   auto_start_after_approval=False,
+                  build_policy=BuildPolicy.DISABLED,
                   metadata={
                       "patch_operations": [
                           {"operation": "create", "path": relative, "content": "BOUNDARY = 'approved'\n"}
@@ -204,7 +205,7 @@ jobs:
               stored.cancellation_token = service.create_cancellation_token("boundary-test")
               _run_stored_task_sync(task_service=service, task_store=store, stored_task=stored)
 
-              assert stored.phase is CodeBuilderTaskPhase.COMPLETED
+              assert stored.phase is CodeBuilderTaskPhase.COMPLETED, stored.result
               assert (tmp_path / relative).read_text(encoding="utf-8") == "BOUNDARY = 'approved'\n"
           PY
       - name: Targeted verification
