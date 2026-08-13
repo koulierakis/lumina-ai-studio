@@ -90,7 +90,7 @@ export default function ExecutiveAdvisor() {
   const [session, setSession] = useState(null);
   const [message, setMessage] = useState('');
   const [role, setRole] = useState('auto');
-  const [provider, setProvider] = useState('local');
+  const [provider, setProvider] = useState('auto');
   const [webResearch, setWebResearch] = useState(false);
   const [deep, setDeep] = useState(true);
   const [rememberMessage, setRememberMessage] = useState(false);
@@ -326,6 +326,7 @@ export default function ExecutiveAdvisor() {
                 ))}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => { setProvider('auto'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'auto' && !webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Sparkles className="h-3.5 w-3.5" />Auto</button>
                 <button onClick={() => { setProvider('local'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'local' && !webResearch ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200' : 'border-white/10 text-white/35'}`}><HardDrive className="h-3.5 w-3.5" />Local</button>
                 <button onClick={() => { setProvider('openai'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'openai' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Cloud reasoning</button>
                 <button onClick={() => { setProvider('openai'); setWebResearch(true); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Globe2 className="h-3.5 w-3.5" />Web research</button>
@@ -337,7 +338,7 @@ export default function ExecutiveAdvisor() {
                 <div className="mx-auto mt-20 max-w-2xl text-center">
                   <MessageSquareText className="mx-auto h-10 w-10 text-gold/70" />
                   <h2 className="mt-5 font-display text-3xl text-white">What decision are we making?</h2>
-                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for routing, Board for a unified multi-discipline recommendation, Local for privacy, Web Research for current evidence, or attach Document Studio files for grounded analysis.</p>
+                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for local-first reasoning with cloud fallback when configured, Board for a unified multi-discipline recommendation, Web Research for current evidence, or attach Document Studio files for grounded analysis.</p>
                 </div>
               ) : messages.map((item) => <Message key={item.id} item={item} />)}
               {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{webResearch ? 'Researching and analyzing…' : deep ? 'Deep analysis in progress…' : 'Preparing response…'}</div>}
