@@ -1,6 +1,5 @@
+import asyncio
 from pathlib import Path
-
-import pytest
 
 from ai_runtime.advisor import AdvisorRequest, ExecutiveAdvisorService
 
@@ -43,28 +42,31 @@ def test_role_routing_and_persistent_memory(tmp_path: Path) -> None:
     assert reloaded.profile("owner@example.com")["company"] == "JSA"
 
 
-@pytest.mark.asyncio
-async def test_board_mode_uses_one_persistent_session_and_deep_reasoning(tmp_path: Path) -> None:
+def test_board_mode_uses_one_persistent_session_and_deep_reasoning(tmp_path: Path) -> None:
     fake = FakeOllama()
     service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=fake)
     service.model_name = lambda: "test-model"
 
-    first = await service.ask(
-        "owner@example.com",
-        AdvisorRequest(
-            message="Should we expand into a new market?",
-            role="board",
-            deep_reasoning=True,
-        ),
+    first = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(
+                message="Should we expand into a new market?",
+                role="board",
+                deep_reasoning=True,
+            ),
+        )
     )
-    second = await service.ask(
-        "owner@example.com",
-        AdvisorRequest(
-            message="What is the biggest downside?",
-            session_id=first["session_id"],
-            role="board",
-            deep_reasoning=True,
-        ),
+    second = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(
+                message="What is the biggest downside?",
+                session_id=first["session_id"],
+                role="board",
+                deep_reasoning=True,
+            ),
+        )
     )
 
     assert first["role"] == "board"
@@ -77,13 +79,14 @@ async def test_board_mode_uses_one_persistent_session_and_deep_reasoning(tmp_pat
     assert "one unified recommendation" in system_prompt
 
 
-@pytest.mark.asyncio
-async def test_auto_role_is_recorded_with_response(tmp_path: Path) -> None:
+def test_auto_role_is_recorded_with_response(tmp_path: Path) -> None:
     service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
     service.model_name = lambda: "test-model"
-    result = await service.ask(
-        "owner@example.com",
-        AdvisorRequest(message="How should we improve cash flow and budget control?", role="auto"),
+    result = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(message="How should we improve cash flow and budget control?", role="auto"),
+        )
     )
     assert result["role"] == "cfo"
     assert result["provider_status"] == "ok"
