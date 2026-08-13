@@ -37,6 +37,17 @@ OpenAI API usage is billed separately from any ChatGPT subscription.
 
 Web Research uses the OpenAI Responses API web-search tool and therefore requires `OPENAI_API_KEY`. Source URLs returned by the provider are persisted with the assistant message and displayed in the Advisor UI.
 
+## Document grounding
+
+The Advisor reuses the existing Document Studio library instead of creating an independent upload or extraction system.
+
+- Existing Document Studio documents can be attached directly to an advisory session.
+- New PDF, DOCX, TXT, Markdown, HTML, PNG, JPEG, or WebP reference files are imported through the existing `documentApi.importFile` / `/api/documents/import` path.
+- Document Studio remains the source of truth for the uploaded document and extracted text.
+- Up to three documents can be grounded into a request at once.
+- The current implementation sends a bounded text excerpt from each selected document as structured model context.
+- Selected document IDs are stored locally per Advisor session so reopening the session can restore the same working references.
+
 ## Persistent context
 
 Advisor state is owner-scoped and stored locally under:
@@ -66,12 +77,14 @@ The advisor extends the already-mounted `/api/runtime` router:
 - `GET /api/runtime/advisor/profile`
 - `PUT /api/runtime/advisor/profile`
 
+Document ingestion continues to use the existing Document Studio API rather than adding Advisor-specific upload endpoints.
+
 ## Safety and factual integrity
 
 The system prompt requires the advisor to distinguish evidence from inference and not invent figures, legal status, source documents, or completed actions. High-stakes financial, legal, tax, compliance, medical, and investment conclusions must surface material uncertainty and professional-verification needs.
 
-## v1 boundary
+## Current capability boundary
 
-The current v1 provides persistent advisory conversations, memory/profile context, role routing, Board Mode, local deep reasoning, optional OpenAI reasoning, and optional web research with sources.
+The current implementation provides persistent advisory conversations, memory/profile context, role routing, Board Mode, local deep reasoning, optional OpenAI reasoning, optional web research with sources, and grounded analysis of Document Studio files.
 
-It does not yet provide direct Gmail/Calendar actions, scheduled automations, arbitrary local code execution, or full document-library retrieval. Those capabilities should be added as tool integrations to this same advisor layer rather than as separate advisor agents.
+It does not yet provide direct Gmail/Calendar actions, scheduled automations, arbitrary local code execution, or autonomous changes to external services. Those capabilities should be added as explicit tool integrations to this same advisor layer rather than as separate advisor agents.
