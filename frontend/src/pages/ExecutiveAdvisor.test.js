@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 describe('Executive Advisor workspace', () => {
-  test('exposes persistent advisory controls and multi-provider modes', () => {
+  test('exposes persistent advisory controls, providers and document grounding', () => {
     const page = fs.readFileSync(path.join(__dirname, 'ExecutiveAdvisor.jsx'), 'utf8');
     const app = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8');
     const registry = fs.readFileSync(path.join(__dirname, '..', 'platform', 'moduleRegistry.js'), 'utf8');
@@ -15,6 +15,11 @@ describe('Executive Advisor workspace', () => {
     expect(page).toContain('Cloud reasoning');
     expect(page).toContain('Web research');
     expect(page).toContain('openai_configured');
+    expect(page).toContain("import { documentApi } from '../documents/model'");
+    expect(page).toContain('documentApi.importFile');
+    expect(page).toContain('Attach from library');
+    expect(page).toContain('MAX_ATTACHED_DOCUMENTS = 3');
+    expect(page).toContain('context: documentContext.length ? { documents: documentContext } : {}');
     expect(page).toContain('/runtime/advisor/ask');
     expect(page).toContain('/runtime/advisor/memory');
     expect(page).toContain('/runtime/advisor/profile');

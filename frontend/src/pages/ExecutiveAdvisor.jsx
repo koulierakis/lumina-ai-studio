@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BrainCircuit,
   BriefcaseBusiness,
@@ -7,6 +7,7 @@ import {
   CircleAlert,
   CircleDollarSign,
   Cloud,
+  FileText,
   Globe2,
   HardDrive,
   Loader2,
@@ -17,10 +18,13 @@ import {
   Sparkles,
   Target,
   Trash2,
+  Upload,
   UserRound,
   UsersRound,
+  X,
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, apiPut } from '../lib/api';
+import { documentApi } from '../documents/model';
 
 const ROLE_OPTIONS = [
   ['auto', 'Auto', Sparkles],
@@ -34,6 +38,24 @@ const ROLE_OPTIONS = [
   ['risk', 'Risk', ShieldCheck],
   ['mentor', 'Mentor', UserRound],
 ];
+
+const MAX_ATTACHED_DOCUMENTS = 3;
+const MAX_DOCUMENT_CONTEXT_CHARS = 20000;
+const ATTACHMENT_STORAGE_PREFIX = 'lumina_advisor_documents_';
+
+function attachmentStorageKey(sessionId) {
+  return `${ATTACHMENT_STORAGE_PREFIX}${sessionId}`;
+}
+
+function storedAttachmentIds(sessionId) {
+  if (!sessionId) return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(attachmentStorageKey(sessionId)) || '[]');
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
 
 function Message({ item }) {
   const assistant = item.role === 'assistant';
@@ -77,31 +99,53 @@ export default function ExecutiveAdvisor() {
   const [memories, setMemories] = useState([]);
   const [memoryText, setMemoryText] = useState('');
   const [profileText, setProfileText] = useState('{}');
+  const [documentLibrary, setDocumentLibrary] = useState([]);
+  const [attachedDocuments, setAttachedDocuments] = useState([]);
+  const [importingDocument, setImportingDocument] = useState(false);
+  const documentInputRef = useRef(null);
 
   const loadSidebar = useCallback(async () => {
     try {
-      const [statusData, sessionData, memoryData, profileData] = await Promise.all([
+      const [statusData, sessionData, memoryData, profileData, documents] = await Promise.all([
         apiGet('/runtime/advisor/status', { retry: false }),
         apiGet('/runtime/advisor/sessions'),
         apiGet('/runtime/advisor/memory'),
         apiGet('/runtime/advisor/profile'),
+        documentApi.list(),
       ]);
       setStatus(statusData);
       setSessions(sessionData.sessions || []);
       setMemories(memoryData.memories || []);
       setProfileText(JSON.stringify(profileData.profile || {}, null, 2));
+      setDocumentLibrary(documents || []);
+      return documents || [];
     } catch (err) {
       setError(err?.message || 'Could not load Executive Advisor.');
+      return [];
     }
   }, []);
 
   useEffect(() => { loadSidebar(); }, [loadSidebar]);
+
+  const restoreAttachments = useCallback((sessionId, documents = documentLibrary) => {
+    const ids = new Set(storedAttachmentIds(sessionId));
+    setAttachedDocuments((documents || []).filter((document) => ids.has(String(document.id))).slice(0, MAX_ATTACHED_DOCUMENTS));
+  }, [documentLibrary]);
+
+  const persistAttachments = useCallback((sessionId, documents = attachedDocuments) => {
+    if (!sessionId) return;
+    localStorage.setItem(
+      attachmentStorageKey(sessionId),
+      JSON.stringify((documents || []).map((document) => String(document.id))),
+    );
+  }, [attachedDocuments]);
 
   const openSession = async (id) => {
     setError('');
     try {
       const data = await apiGet(`/runtime/advisor/sessions/${id}`);
       setSession(data);
+      restoreAttachments(id);
     } catch (err) {
       setError(err?.message || 'Could not open session.');
     }
@@ -109,8 +153,54 @@ export default function ExecutiveAdvisor() {
 
   const newSession = () => {
     setSession(null);
+    setAttachedDocuments([]);
     setMessage('');
     setError('');
+  };
+
+  const attachDocument = (document) => {
+    if (!document?.id) return;
+    setAttachedDocuments((current) => {
+      if (current.some((item) => item.id === document.id)) return current;
+      if (current.length >= MAX_ATTACHED_DOCUMENTS) {
+        setError(`Attach up to ${MAX_ATTACHED_DOCUMENTS} documents at a time.`);
+        return current;
+      }
+      const next = [...current, document];
+      persistAttachments(session?.id, next);
+      setError('');
+      return next;
+    });
+  };
+
+  const detachDocument = (documentId) => {
+    setAttachedDocuments((current) => {
+      const next = current.filter((item) => item.id !== documentId);
+      persistAttachments(session?.id, next);
+      return next;
+    });
+  };
+
+  const importDocument = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setImportingDocument(true);
+    setError('');
+    try {
+      const imported = await documentApi.importFile(file, {
+        title: file.name.replace(/\.[^.]+$/, ''),
+        category: 'Advisor Reference',
+        tags: 'advisor,reference',
+      });
+      const documents = await loadSidebar();
+      const hydrated = documents.find((item) => item.id === imported.id) || imported;
+      attachDocument(hydrated);
+    } catch (err) {
+      setError(err?.message || 'Document import failed.');
+    } finally {
+      setImportingDocument(false);
+      event.target.value = '';
+    }
   };
 
   const send = async () => {
@@ -123,6 +213,12 @@ export default function ExecutiveAdvisor() {
     setBusy(true);
     setError('');
     try {
+      const documentContext = attachedDocuments.map((document) => ({
+        id: document.id,
+        title: document.title || 'Attached document',
+        category: document.category || '',
+        text: String(document.content_text || document.searchable_text || '').slice(0, MAX_DOCUMENT_CONTEXT_CHARS),
+      }));
       const response = await apiPost('/runtime/advisor/ask', {
         message: value,
         session_id: session?.id || null,
@@ -131,10 +227,11 @@ export default function ExecutiveAdvisor() {
         remember_message: rememberMessage,
         provider: webResearch ? 'openai' : provider,
         web_research: webResearch,
-        context: {},
+        context: documentContext.length ? { documents: documentContext } : {},
       }, { timeout: 320000 });
       setMessage('');
       setRememberMessage(false);
+      persistAttachments(response.session_id, attachedDocuments);
       const detail = await apiGet(`/runtime/advisor/sessions/${response.session_id}`, { retry: false });
       setSession(detail);
       await loadSidebar();
@@ -147,7 +244,11 @@ export default function ExecutiveAdvisor() {
 
   const deleteSession = async (id) => {
     await apiDelete(`/runtime/advisor/sessions/${id}`);
-    if (session?.id === id) setSession(null);
+    localStorage.removeItem(attachmentStorageKey(id));
+    if (session?.id === id) {
+      setSession(null);
+      setAttachedDocuments([]);
+    }
     await loadSidebar();
   };
 
@@ -236,13 +337,24 @@ export default function ExecutiveAdvisor() {
                 <div className="mx-auto mt-20 max-w-2xl text-center">
                   <MessageSquareText className="mx-auto h-10 w-10 text-gold/70" />
                   <h2 className="mt-5 font-display text-3xl text-white">What decision are we making?</h2>
-                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for routing, Board for a unified multi-discipline recommendation, Local for privacy, or Web Research when current external evidence matters.</p>
+                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for routing, Board for a unified multi-discipline recommendation, Local for privacy, Web Research for current evidence, or attach Document Studio files for grounded analysis.</p>
                 </div>
               ) : messages.map((item) => <Message key={item.id} item={item} />)}
               {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{webResearch ? 'Researching and analyzing…' : deep ? 'Deep analysis in progress…' : 'Preparing response…'}</div>}
             </div>
 
             <div className="border-t border-white/[0.07] p-4">
+              {attachedDocuments.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {attachedDocuments.map((document) => (
+                    <span key={document.id} className="inline-flex max-w-[280px] items-center gap-2 rounded-full border border-gold/20 bg-gold/[0.06] px-3 py-1 text-[11px] text-gold/80">
+                      <FileText className="h-3.5 w-3.5 shrink-0" />
+                      <span className="truncate">{document.title}</span>
+                      <button onClick={() => detachDocument(document.id)} title="Detach document"><X className="h-3.5 w-3.5" /></button>
+                    </span>
+                  ))}
+                </div>
+              )}
               <textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} rows={4} placeholder={`Ask ${selectedRole?.[1] || 'Executive Advisor'}…`} className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/25 focus:border-gold/35" />
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-4 text-xs text-white/40">
@@ -255,6 +367,33 @@ export default function ExecutiveAdvisor() {
           </section>
 
           <aside className="space-y-5">
+            <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4" data-testid="advisor-documents-panel">
+              <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Documents</h2></div>
+              <p className="mt-2 text-[11px] leading-5 text-white/35">Ground answers in up to three Document Studio files. Uploads use the existing Document Studio importer.</p>
+              <select
+                value=""
+                onChange={(event) => {
+                  const selected = documentLibrary.find((item) => String(item.id) === event.target.value);
+                  if (selected) attachDocument(selected);
+                }}
+                className="mt-3 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/60 outline-none"
+              >
+                <option value="">Attach from library…</option>
+                {documentLibrary.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}
+              </select>
+              <input
+                ref={documentInputRef}
+                type="file"
+                accept=".pdf,.docx,.txt,.md,.html,image/png,image/jpeg,image/webp"
+                onChange={importDocument}
+                className="hidden"
+              />
+              <button onClick={() => documentInputRef.current?.click()} disabled={importingDocument} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/55 disabled:opacity-40">
+                {importingDocument ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                Import reference file
+              </button>
+            </section>
+
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
               <div className="flex items-center gap-2"><BrainCircuit className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Memory</h2></div>
               <div className="mt-3 flex gap-2"><input value={memoryText} onChange={(e) => setMemoryText(e.target.value)} placeholder="Remember a fact, goal or preference…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none" /><button onClick={saveMemory} className="rounded-lg border border-gold/20 p-2 text-gold"><Save className="h-4 w-4" /></button></div>

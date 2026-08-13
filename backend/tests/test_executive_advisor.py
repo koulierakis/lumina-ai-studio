@@ -92,3 +92,33 @@ def test_auto_role_is_recorded_with_response(tmp_path: Path) -> None:
     assert result["provider_status"] == "ok"
     session = service.get_session("owner@example.com", result["session_id"])
     assert session["messages"][-1]["role_mode"] == "cfo"
+
+
+def test_document_context_is_grounded_into_model_request(tmp_path: Path) -> None:
+    fake = FakeOllama()
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=fake)
+    service.model_name = lambda: "test-model"
+
+    asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(
+                message="Assess the attached agreement.",
+                role="risk",
+                context={
+                    "documents": [
+                        {
+                            "id": "doc-1",
+                            "title": "Commission Agreement",
+                            "text": "Commission is payable within 24 hours after verified settlement.",
+                        }
+                    ]
+                },
+            ),
+        )
+    )
+
+    user_message = fake.calls[0]["messages"][-1]["content"]
+    assert "Additional structured context" in user_message
+    assert "Commission Agreement" in user_message
+    assert "payable within 24 hours" in user_message
