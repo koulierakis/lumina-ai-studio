@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
 from code_builder.ollama_service import OllamaService, OllamaServiceError
@@ -45,6 +46,8 @@ class AdvisorRequest(BaseModel):
     role: str = "auto"
     deep_reasoning: bool = True
     remember_message: bool = False
+    provider: str = "auto"
+    web_research: bool = False
     context: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -99,6 +102,12 @@ class ExecutiveAdvisorService:
         except Exception:
             pass
         return "qwen2.5:7b"
+
+    def openai_model_name(self) -> str:
+        return os.environ.get("LUMINA_OPENAI_MODEL", "gpt-5").strip() or "gpt-5"
+
+    def openai_configured(self) -> bool:
+        return bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
     def route_role(self, message: str, requested: str) -> str:
         normalized = requested.strip().casefold()
@@ -205,6 +214,76 @@ Persistent memories (user-provided context):
 
 Response format: lead with the decision/recommendation, then reasoning, risks, and concrete next actions when useful. Avoid filler."""
 
+    @staticmethod
+    def _extract_openai_output(payload: dict[str, Any]) -> tuple[str, list[dict[str, str]]]:
+        texts: list[str] = []
+        sources: list[dict[str, str]] = []
+        seen_urls: set[str] = set()
+        for item in payload.get("output", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "message":
+                for content in item.get("content", []):
+                    if not isinstance(content, dict) or content.get("type") != "output_text":
+                        continue
+                    text = content.get("text")
+                    if isinstance(text, str):
+                        texts.append(text)
+                    for annotation in content.get("annotations", []):
+                        if not isinstance(annotation, dict):
+                            continue
+                        url = annotation.get("url")
+                        title = annotation.get("title")
+                        if isinstance(url, str) and url and url not in seen_urls:
+                            seen_urls.add(url)
+                            sources.append({"url": url, "title": str(title or url)})
+            if item.get("type") == "web_search_call":
+                action = item.get("action")
+                if isinstance(action, dict):
+                    for source in action.get("sources", []):
+                        if not isinstance(source, dict):
+                            continue
+                        url = source.get("url")
+                        if isinstance(url, str) and url and url not in seen_urls:
+                            seen_urls.add(url)
+                            sources.append({"url": url, "title": url})
+        return "\n".join(texts).strip(), sources
+
+    async def _ask_openai(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        deep_reasoning: bool,
+        web_research: bool,
+    ) -> tuple[str, list[dict[str, str]], str]:
+        api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not configured")
+        model = self.openai_model_name()
+        input_messages = [
+            {"role": message["role"], "content": message["content"]}
+            for message in messages
+        ]
+        payload: dict[str, Any] = {"model": model, "input": input_messages}
+        if deep_reasoning:
+            payload["reasoning"] = {"effort": "high"}
+        if web_research:
+            payload["tools"] = [{"type": "web_search"}]
+        timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/responses",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError(f"OpenAI Responses API returned HTTP {response.status_code}: {response.text[:500]}")
+        data = response.json()
+        answer, sources = self._extract_openai_output(data)
+        if not answer:
+            raise RuntimeError("OpenAI Responses API returned no output text")
+        return answer, sources, model
+
     async def ask(self, owner: str, request: AdvisorRequest) -> dict[str, Any]:
         requested_role = request.role.strip().casefold()
         role = "board" if requested_role == "board" else self.route_role(request.message, requested_role)
@@ -223,27 +302,52 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             context_text = "\n\nAdditional structured context:\n" + json.dumps(request.context, ensure_ascii=False, indent=2)
         messages.append({"role": "user", "content": request.message + context_text})
 
-        model = self.model_name()
+        requested_provider = request.provider.strip().casefold()
+        if requested_provider not in {"auto", "local", "openai"}:
+            requested_provider = "auto"
+        use_openai = requested_provider == "openai" or request.web_research
+        if requested_provider == "auto" and not request.web_research:
+            use_openai = False
+
         started = time.monotonic()
-        try:
-            result = await self.ollama.chat(
-                model=model,
-                messages=messages,
-                think="high" if request.deep_reasoning else False,
-                timeout_seconds=300,
-                verify_model=False,
-            )
-            answer = result.content.strip()
-            provider_status = "ok"
-            error = None
-        except OllamaServiceError as exc:
-            answer = "The local advisor model is currently unavailable. Check Ollama and the configured advisor model, then retry."
-            provider_status = "unavailable"
-            error = str(exc)
+        sources: list[dict[str, str]] = []
+        error = None
+        if use_openai:
+            try:
+                answer, sources, model = await self._ask_openai(
+                    messages=messages,
+                    deep_reasoning=request.deep_reasoning,
+                    web_research=request.web_research,
+                )
+                provider = "openai"
+                provider_status = "ok"
+            except Exception as exc:
+                answer = "OpenAI cloud mode is currently unavailable. Check OPENAI_API_KEY, billing, network access, and the configured model, then retry or switch to Local mode."
+                model = self.openai_model_name()
+                provider = "openai"
+                provider_status = "unavailable"
+                error = str(exc)
+        else:
+            model = self.model_name()
+            provider = "local"
+            try:
+                result = await self.ollama.chat(
+                    model=model,
+                    messages=messages,
+                    think="high" if request.deep_reasoning else False,
+                    timeout_seconds=300,
+                    verify_model=False,
+                )
+                answer = result.content.strip()
+                provider_status = "ok"
+            except OllamaServiceError as exc:
+                answer = "The local advisor model is currently unavailable. Check Ollama and the configured advisor model, then retry."
+                provider_status = "unavailable"
+                error = str(exc)
 
         now = time.time()
         session["messages"].append({"id": uuid4().hex, "role": "user", "content": request.message, "created_at": now, "role_mode": role})
-        session["messages"].append({"id": uuid4().hex, "role": "assistant", "content": answer, "created_at": time.time(), "role_mode": role, "model": model})
+        session["messages"].append({"id": uuid4().hex, "role": "assistant", "content": answer, "created_at": time.time(), "role_mode": role, "model": model, "provider": provider, "sources": sources})
         session["messages"] = session["messages"][-100:]
         if len(session["messages"]) == 2:
             session["title"] = re.sub(r"\s+", " ", request.message).strip()[:72] or "Executive Advisory Session"
@@ -255,11 +359,14 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             "answer": answer,
             "role": role,
             "role_name": ADVISOR_ROLES.get(role),
+            "provider": provider,
             "model": model,
             "provider_status": provider_status,
+            "sources": sources,
             "error": error,
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "deep_reasoning": request.deep_reasoning,
+            "web_research": request.web_research,
         }
 
     async def status(self) -> dict[str, Any]:
@@ -267,12 +374,15 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
         model = self.model_name()
         installed = [item.name for item in health.installed_models]
         return {
-            "available": health.available,
+            "available": health.available or self.openai_configured(),
+            "local_available": health.available,
+            "openai_configured": self.openai_configured(),
             "model": model,
+            "openai_model": self.openai_model_name(),
             "model_installed": any(name.casefold() == model.casefold() or name.casefold().startswith(model.casefold() + ":") for name in installed),
             "ollama": health.to_dict(),
             "roles": ADVISOR_ROLES,
-            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first"],
+            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first", "optional_openai", "optional_web_research"],
         }
 
 
