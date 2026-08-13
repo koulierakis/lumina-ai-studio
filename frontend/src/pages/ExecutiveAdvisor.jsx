@@ -6,6 +6,9 @@ import {
   ChartNoAxesCombined,
   CircleAlert,
   CircleDollarSign,
+  Cloud,
+  Globe2,
+  HardDrive,
   Loader2,
   MessageSquareText,
   Save,
@@ -34,14 +37,26 @@ const ROLE_OPTIONS = [
 
 function Message({ item }) {
   const assistant = item.role === 'assistant';
+  const sources = Array.isArray(item.sources) ? item.sources : [];
   return (
     <div className={`flex ${assistant ? 'justify-start' : 'justify-end'}`}>
       <div className={`max-w-[88%] rounded-2xl border px-4 py-3 ${assistant ? 'border-white/[0.08] bg-white/[0.025]' : 'border-gold/20 bg-gold/[0.08]'}`}>
-        <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-white/35">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-white/35">
           {assistant ? 'Executive Advisor' : 'You'}
           {item.role_mode && <span className="rounded-full border border-white/10 px-2 py-0.5">{item.role_mode}</span>}
+          {item.provider && <span className="rounded-full border border-white/10 px-2 py-0.5">{item.provider}</span>}
         </div>
         <div className="whitespace-pre-wrap text-sm leading-7 text-white/80">{item.content}</div>
+        {sources.length > 0 && (
+          <div className="mt-4 border-t border-white/[0.07] pt-3">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-white/30">Sources</p>
+            <div className="mt-2 space-y-1">
+              {sources.map((source) => (
+                <a key={source.url} href={source.url} target="_blank" rel="noreferrer" className="block truncate text-xs text-gold/70 hover:text-gold">{source.title || source.url}</a>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -53,6 +68,8 @@ export default function ExecutiveAdvisor() {
   const [session, setSession] = useState(null);
   const [message, setMessage] = useState('');
   const [role, setRole] = useState('auto');
+  const [provider, setProvider] = useState('local');
+  const [webResearch, setWebResearch] = useState(false);
   const [deep, setDeep] = useState(true);
   const [rememberMessage, setRememberMessage] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -99,6 +116,10 @@ export default function ExecutiveAdvisor() {
   const send = async () => {
     const value = message.trim();
     if (!value || busy) return;
+    if ((provider === 'openai' || webResearch) && !status?.openai_configured) {
+      setError('Cloud/Web Research requires OPENAI_API_KEY in the backend environment.');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -108,6 +129,8 @@ export default function ExecutiveAdvisor() {
         role,
         deep_reasoning: deep,
         remember_message: rememberMessage,
+        provider: webResearch ? 'openai' : provider,
+        web_research: webResearch,
         context: {},
       }, { timeout: 320000 });
       setMessage('');
@@ -162,11 +185,11 @@ export default function ExecutiveAdvisor() {
           <div>
             <p className="text-[11px] uppercase tracking-[0.28em] text-gold">LUMINA Executive Intelligence</p>
             <h1 className="mt-2 font-display text-4xl text-white sm:text-5xl">Executive Advisor</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/45">One persistent advisor for finance, marketing, strategy, investments, operations, risk and personal decision support.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/45">Persistent finance, marketing, strategy, investment, operations, risk and personal decision intelligence — local-first, cloud-capable.</p>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5 text-xs text-white/50">
-            <span className={`h-2 w-2 rounded-full ${status?.available ? 'bg-emerald-400' : 'bg-amber-300'}`} />
-            {status?.available ? `${status.model} ready` : 'Local model unavailable'}
+          <div className="flex flex-wrap items-center gap-2 text-xs text-white/45">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.local_available ? 'bg-emerald-400' : 'bg-amber-300'}`} />Local</span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.openai_configured ? 'bg-emerald-400' : 'bg-white/20'}`} />Cloud</span>
           </div>
         </header>
 
@@ -201,6 +224,11 @@ export default function ExecutiveAdvisor() {
                   </button>
                 ))}
               </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => { setProvider('local'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'local' && !webResearch ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200' : 'border-white/10 text-white/35'}`}><HardDrive className="h-3.5 w-3.5" />Local</button>
+                <button onClick={() => { setProvider('openai'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'openai' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Cloud reasoning</button>
+                <button onClick={() => { setProvider('openai'); setWebResearch(true); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Globe2 className="h-3.5 w-3.5" />Web research</button>
+              </div>
             </div>
 
             <div className="flex-1 space-y-5 overflow-y-auto p-5">
@@ -208,10 +236,10 @@ export default function ExecutiveAdvisor() {
                 <div className="mx-auto mt-20 max-w-2xl text-center">
                   <MessageSquareText className="mx-auto h-10 w-10 text-gold/70" />
                   <h2 className="mt-5 font-display text-3xl text-white">What decision are we making?</h2>
-                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for normal advisory routing or Board when you want a unified multi-discipline recommendation.</p>
+                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for routing, Board for a unified multi-discipline recommendation, Local for privacy, or Web Research when current external evidence matters.</p>
                 </div>
               ) : messages.map((item) => <Message key={item.id} item={item} />)}
-              {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{deep ? 'Deep analysis in progress…' : 'Preparing response…'}</div>}
+              {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{webResearch ? 'Researching and analyzing…' : deep ? 'Deep analysis in progress…' : 'Preparing response…'}</div>}
             </div>
 
             <div className="border-t border-white/[0.07] p-4">
