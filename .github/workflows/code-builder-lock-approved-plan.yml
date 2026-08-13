@@ -1,0 +1,70 @@
+name: code-builder-lock-approved-plan
+on:
+  push:
+    branches:
+      - work/code-builder-complete
+    paths:
+      - .github/workflows/code-builder-lock-approved-plan.yml
+permissions:
+  contents: write
+jobs:
+  lock-approved-plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/code-builder-complete
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Bind and reuse the approved prepared plan
+        shell: python
+        run: |
+          from pathlib import Path
+
+          router = Path("backend/code_builder/router.py")
+          router_text = router.read_text(encoding="utf-8")
+          old_router = '''    metadata.pop("patch_operations", None)\n    metadata.pop("execution_patch_operations", None)\n    metadata["approved_patch_operations"] = list(raw_operations)\n    metadata["approved_preparation_task_id"] = stored_task.request.task_id\n    return stored_task.request.model_copy(update={"metadata": metadata})\n'''
+          new_router = '''    metadata.pop("patch_operations", None)\n    metadata.pop("execution_patch_operations", None)\n    metadata["approved_patch_operations"] = list(raw_operations)\n    metadata["approved_preparation_plan"] = prepared.get("plan")\n    metadata["approved_preparation_task_id"] = stored_task.request.task_id\n    return stored_task.request.model_copy(update={"metadata": metadata})\n'''
+          if router_text.count(old_router) != 1:
+              raise SystemExit("Approved patch binding anchor not found exactly once")
+          router.write_text(router_text.replace(old_router, new_router, 1), encoding="utf-8")
+
+          task_service = Path("backend/code_builder/task_service.py")
+          service_text = task_service.read_text(encoding="utf-8")
+          old_stage = '''        try:\n            context.plan = _create_plan(\n                context,\n                planning_service=self._planning_service,\n            )\n        except (\n            TaskCancellationError,\n            TaskTimeoutError,\n        ):\n            raise\n        except TaskServiceError:\n            raise\n        except Exception as exc:\n            raise TaskPlanningError(\n                f"Implementation planning failed: "\n                f"{_safe_error_message(exc)}"\n            ) from exc\n\n        context.raise_if_interrupted()\n'''
+          new_stage = '''        approved_preparation_plan = _extract_value(\n            context.request.metadata,\n            ("approved_preparation_plan",),\n        )\n\n        if approved_preparation_plan is not None:\n            context.plan = approved_preparation_plan\n            context.raise_if_interrupted()\n            planned_paths = _extract_paths(context.plan)\n            self._record_event(\n                context,\n                recorder,\n                stage=TaskStage.PLANNING,\n                status=TaskStatus.PLANNING,\n                level=TaskEventLevel.INFO,\n                message="Approved prepared implementation plan reused.",\n                details={\n                    "plan_type": type(context.plan).__name__,\n                    "planned_paths": list(planned_paths),\n                    "approved_preparation_reused": True,\n                },\n            )\n            return\n\n        try:\n            context.plan = _create_plan(\n                context,\n                planning_service=self._planning_service,\n            )\n        except (\n            TaskCancellationError,\n            TaskTimeoutError,\n        ):\n            raise\n        except TaskServiceError:\n            raise\n        except Exception as exc:\n            raise TaskPlanningError(\n                f"Implementation planning failed: "\n                f"{_safe_error_message(exc)}"\n            ) from exc\n\n        context.raise_if_interrupted()\n'''
+          if service_text.count(old_stage) != 1:
+              raise SystemExit("Planning stage anchor not found exactly once")
+          task_service.write_text(service_text.replace(old_stage, new_stage, 1), encoding="utf-8")
+
+          tests = Path("backend/tests/test_code_builder_transaction_boundary.py")
+          test_text = tests.read_text(encoding="utf-8")
+          test_text = test_text.replace(
+              '''    def __init__(self, plan: GeneratedChangePlan) -> None:\n        self.plan_result = plan\n\n    def plan(self, **_):\n        return self.plan_result\n''',
+              '''    def __init__(self, plan: GeneratedChangePlan) -> None:\n        self.plan_result = plan\n        self.call_count = 0\n\n    def plan(self, **_):\n        self.call_count += 1\n        return self.plan_result\n''',
+              1,
+          )
+          marker = '''    assert stored.phase is CodeBuilderTaskPhase.AWAITING_APPROVAL\n    assert stored.preparation_result is not None\n'''
+          replacement = '''    assert stored.phase is CodeBuilderTaskPhase.AWAITING_APPROVAL\n    assert stored.preparation_result is not None\n    assert service.planning_service.call_count == 1\n'''
+          if marker not in test_text:
+              raise SystemExit("Preparation assertion anchor missing")
+          test_text = test_text.replace(marker, replacement, 1)
+          marker2 = '''    assert stored.phase is CodeBuilderTaskPhase.COMPLETED, stored.result\n    assert (tmp_path / relative).read_text(encoding="utf-8") == "BOUNDARY = 'approved'\\n"\n'''
+          replacement2 = '''    assert stored.phase is CodeBuilderTaskPhase.COMPLETED, stored.result\n    assert service.planning_service.call_count == 1\n    assert stored.request.metadata["approved_preparation_plan"]["title"] == "Prepared change"\n    assert (tmp_path / relative).read_text(encoding="utf-8") == "BOUNDARY = 'approved'\\n"\n'''
+          if marker2 not in test_text:
+              raise SystemExit("Approved execution assertion anchor missing")
+          tests.write_text(test_text.replace(marker2, replacement2, 1), encoding="utf-8")
+      - name: Targeted verification
+        run: |
+          pip install -r backend/requirements.txt
+          python -m pytest backend/tests/test_code_builder_transaction_boundary.py backend/tests/test_code_builder_execution_pipeline.py -q
+      - name: Commit plan lock
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/code_builder/router.py backend/code_builder/task_service.py backend/tests/test_code_builder_transaction_boundary.py
+          git diff --cached --check
+          git commit -m "code-builder: reuse approved prepared plan during apply"
+          git push origin HEAD:work/code-builder-complete
