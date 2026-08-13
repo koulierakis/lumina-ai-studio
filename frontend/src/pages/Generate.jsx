@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiGet, apiPost } from '../lib/api';
 import AuthImage from '../components/AuthImage';
 import { toast } from 'sonner';
-import { Sparkles, Loader2, Download, ImageIcon } from 'lucide-react';
+import { Sparkles, Loader2, Download, ImageIcon, Wand2 } from 'lucide-react';
 
 const SCENES = [
   'Chania Old Town', 'Venetian Harbor', 'Cretan village', 'Marina',
@@ -44,6 +45,7 @@ function normalizeOutputMediaIds(payload) {
 }
 
 export default function Generate() {
+  const navigate = useNavigate();
   const [packs, setPacks] = useState([]);
   const [packId, setPackId] = useState(localStorage.getItem('lumina_active_pack') || '');
   const [prompt, setPrompt] = useState('Cinematic photograph of the person walking through the location, natural mid-morning light');
@@ -191,7 +193,14 @@ export default function Generate() {
             {outputMediaIds.map((mid, i) => (
               <div key={mid} className="relative group rounded-lg overflow-hidden bg-white/[0.02] border border-white/[0.06]">
                 <AuthImage mediaId={mid} className="w-full h-auto block" alt={`result-${i}`} />
-                <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-end">
+                <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-end gap-2">
+                  <button
+                    onClick={() => navigate(`/studio/editor/${mid}`)}
+                    data-testid={`edit-${mid}`}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-white/10 hover:bg-gold hover:text-black text-white transition-colors"
+                  >
+                    <Wand2 strokeWidth={1.5} className="w-3.5 h-3.5" /> Edit
+                  </button>
                   <button
                     onClick={() => download(mid, `lumina-${job.id}-${i + 1}.png`)}
                     data-testid={`download-${mid}`}
@@ -218,11 +227,22 @@ export default function Generate() {
               className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none"
             >
               <option value="">Automatic fallback</option>
-              {providers.map((item) => (
-                <option key={item.name} value={item.name} disabled={!item.configured}>
-                  {item.name}{item.configured ? (item.healthy ? ' — ready' : ' — unavailable') : ' — no credentials'}
-                </option>
-              ))}
+              {providers.map((item) => {
+                const identityReady = item.capabilities?.identity_references === true;
+                const selectable = item.configured && item.healthy && identityReady;
+                const suffix = !item.configured
+                  ? ' — no credentials'
+                  : !item.healthy
+                    ? ' — unavailable'
+                    : !identityReady
+                      ? ' — no identity references'
+                      : ' — ready';
+                return (
+                  <option key={item.name} value={item.name} disabled={!selectable}>
+                    {item.name}{suffix}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

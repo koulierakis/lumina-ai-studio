@@ -263,13 +263,15 @@ export function AiToolsPanel({
             <Loader2 strokeWidth={1.25} className="w-3.5 h-3.5 animate-spin text-gold" />
             <span data-testid="ai-job-status">{activeAiJob.status}</span>
           </div>
-          <button
-            onClick={cancel}
-            className="mt-2 text-[11px] text-white/50 hover:text-red-400"
-            data-testid="ai-cancel"
-          >
-            Cancel
-          </button>
+          {activeAiJob.status !== 'finalizing' && (
+            <button
+              onClick={cancel}
+              className="mt-2 text-[11px] text-white/50 hover:text-red-400"
+              data-testid="ai-cancel"
+            >
+              Cancel
+            </button>
+          )}
         </div>
       )}
 

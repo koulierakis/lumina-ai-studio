@@ -173,3 +173,12 @@ def test_mock_provider_requires_explicit_test_flag(monkeypatch):
     assert MockImageProvider.is_configured() is False
     monkeypatch.setenv("LUMINA_TEST_PROVIDER", "true")
     assert MockImageProvider.is_configured() is True
+
+
+def test_provider_capabilities_do_not_overpromise_unimplemented_identity_or_comfyui():
+    from providers.comfyui_provider import ComfyUIProvider
+    from providers.openai_provider import OpenAIImageProvider
+
+    assert ComfyUIProvider.capabilities.generation is False
+    assert OpenAIImageProvider.capabilities.identity_references is False
+    assert OpenAIImageProvider.capabilities.maximum_reference_images == 0

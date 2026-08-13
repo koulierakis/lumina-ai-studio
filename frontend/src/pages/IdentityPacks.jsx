@@ -209,7 +209,7 @@ export default function IdentityPacks() {
                 <Upload strokeWidth={1.25} className="w-8 h-8 mx-auto text-gold/70 mb-3" />
                 <p className="text-white text-sm">Drop reference photos here, or click to browse</p>
                 <p className="text-white/40 text-xs mt-1">
-                  JPEG, PNG or WEBP · max 15MB each · up to 5 per pack
+                  JPEG, PNG or WEBP · max 25MB each · up to 5 per pack
                 </p>
               </div>
             </div>
