@@ -1,5 +1,6 @@
 import {
   Bell,
+  BrainCircuit,
   BriefcaseBusiness,
   Code2,
   FileText,
@@ -26,6 +27,16 @@ export const MODULE_REGISTRY = [
     navigationOrder: 1,
   },
   {
+    id: 'advisor',
+    name: 'Executive Advisor',
+    route: '/studio/advisor',
+    icon: BrainCircuit,
+    status: 'ready',
+    completion: 85,
+    visible: true,
+    navigationOrder: 2,
+  },
+  {
     id: 'code-builder',
     name: 'Code Builder',
     route: '/studio/code-builder',
@@ -33,7 +44,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 90,
     visible: true,
-    navigationOrder: 2,
+    navigationOrder: 3,
   },
   {
     id: 'developer',
@@ -54,7 +65,7 @@ export const MODULE_REGISTRY = [
     completion: 85,
     providers: ['image'],
     visible: true,
-    navigationOrder: 3,
+    navigationOrder: 4,
   },
   {
     id: 'editor',
@@ -64,7 +75,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 85,
     visible: true,
-    navigationOrder: 4,
+    navigationOrder: 5,
   },
   {
     id: 'video',
@@ -75,7 +86,7 @@ export const MODULE_REGISTRY = [
     completion: 80,
     providers: ['video'],
     visible: true,
-    navigationOrder: 5,
+    navigationOrder: 6,
   },
   {
     id: 'voice',
@@ -86,7 +97,7 @@ export const MODULE_REGISTRY = [
     completion: 70,
     providers: ['voice'],
     visible: true,
-    navigationOrder: 6,
+    navigationOrder: 7,
   },
   {
     id: 'identity',
@@ -96,7 +107,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 85,
     visible: true,
-    navigationOrder: 7,
+    navigationOrder: 8,
   },
   {
     id: 'documents',
@@ -106,7 +117,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 100,
     visible: true,
-    navigationOrder: 8,
+    navigationOrder: 9,
   },
   {
     id: 'gallery',
@@ -116,7 +127,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 70,
     visible: true,
-    navigationOrder: 9,
+    navigationOrder: 10,
   },
   {
     id: 'jobs',
@@ -126,7 +137,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 65,
     visible: true,
-    navigationOrder: 10,
+    navigationOrder: 11,
   },
   {
     id: 'notifications',
@@ -136,7 +147,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 60,
     visible: true,
-    navigationOrder: 11,
+    navigationOrder: 12,
   },
   {
     id: 'projects',
@@ -146,7 +157,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 55,
     visible: true,
-    navigationOrder: 12,
+    navigationOrder: 13,
   },
   {
     id: 'settings',
@@ -156,7 +167,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 55,
     visible: true,
-    navigationOrder: 13,
+    navigationOrder: 14,
   },
 ];
 

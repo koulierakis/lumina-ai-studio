@@ -3,6 +3,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth import require_owner
+from .advisor import (
+    AdvisorMemoryRequest,
+    AdvisorProfileRequest,
+    AdvisorRequest,
+    executive_advisor,
+)
 from .manager import runtime_manager
 from .schemas import RuntimeJob, RuntimeJobStatus
 
@@ -231,3 +237,65 @@ async def runtime_diagnostics(_: str = Depends(require_owner)) -> dict:
 @router.post("/diagnostics/repair")
 async def runtime_repair(body: dict, _: str = Depends(require_owner)) -> dict:
     return runtime_manager.diagnostics.repair(body or runtime_manager.diagnostic_report())
+
+
+# ---------- Executive Advisor ----------
+@router.get("/advisor/status")
+async def advisor_status(_: str = Depends(require_owner)) -> dict:
+    return await executive_advisor.status()
+
+
+@router.get("/advisor/sessions")
+async def advisor_sessions(owner: str = Depends(require_owner)) -> dict:
+    return {"sessions": executive_advisor.list_sessions(owner)}
+
+
+@router.get("/advisor/sessions/{session_id}")
+async def advisor_session(session_id: str, owner: str = Depends(require_owner)) -> dict:
+    try:
+        return executive_advisor.get_session(owner, session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Advisor session not found") from exc
+
+
+@router.delete("/advisor/sessions/{session_id}")
+async def delete_advisor_session(session_id: str, owner: str = Depends(require_owner)) -> dict:
+    try:
+        executive_advisor.delete_session(owner, session_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Advisor session not found") from exc
+    return {"ok": True, "session_id": session_id}
+
+
+@router.post("/advisor/ask")
+async def advisor_ask(body: AdvisorRequest, owner: str = Depends(require_owner)) -> dict:
+    return await executive_advisor.ask(owner, body)
+
+
+@router.get("/advisor/memory")
+async def advisor_memory(owner: str = Depends(require_owner)) -> dict:
+    return {"memories": executive_advisor.memories(owner)}
+
+
+@router.post("/advisor/memory")
+async def advisor_remember(body: AdvisorMemoryRequest, owner: str = Depends(require_owner)) -> dict:
+    return executive_advisor.remember(owner, body.text, body.category)
+
+
+@router.delete("/advisor/memory/{memory_id}")
+async def advisor_forget(memory_id: str, owner: str = Depends(require_owner)) -> dict:
+    try:
+        executive_advisor.forget(owner, memory_id)
+    except KeyError as exc:
+        raise HTTPException(404, "Advisor memory not found") from exc
+    return {"ok": True, "memory_id": memory_id}
+
+
+@router.get("/advisor/profile")
+async def advisor_profile(owner: str = Depends(require_owner)) -> dict:
+    return {"profile": executive_advisor.profile(owner)}
+
+
+@router.put("/advisor/profile")
+async def update_advisor_profile(body: AdvisorProfileRequest, owner: str = Depends(require_owner)) -> dict:
+    return {"profile": executive_advisor.update_profile(owner, body.profile)}
