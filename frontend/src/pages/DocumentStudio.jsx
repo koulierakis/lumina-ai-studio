@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import {
   Bold, Download, FileText, Italic, List, ListOrdered,
@@ -68,7 +68,8 @@ export default function DocumentStudio() {
     } catch (error) { toast.error(error.message || 'Document Studio could not load.'); }
     finally { setLoading(false); }
   }
-  useEffect(() => { loadAll(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadAll(); }, []);
   useEffect(() => { lastSavedHtmlRef.current = selected?.content_html || ''; }, [selected?.content_html, selected?.id]);
   useEffect(() => {
     window.clearTimeout(autosaveTimerRef.current);
@@ -87,8 +88,8 @@ export default function DocumentStudio() {
   function redoEditor() { editorApiRef.current?.redo(); }
 
   async function importWord(event) {
-    const file = event.target.files?.[0]; if (!file) return; setBusy(true); setStatusText('Importing Word document…');
-    try { const imported = await documentApi.importFile(file, { title: file.name.replace(/\.[^.]+$/, ''), category: 'Imported', tags: 'imported,word' }); selectDocument(imported, false); await refreshDocuments(); toast.success('Word document imported — headings, tables, images and paragraphs preserved.'); }
+    const file = event.target.files?.[0]; if (!file) return; setBusy(true); setStatusText('Importing Word documentβ€¦');
+    try { const imported = await documentApi.importFile(file, { title: file.name.replace(/\.[^.]+$/, ''), category: 'Imported', tags: 'imported,word' }); selectDocument(imported, false); await refreshDocuments(); toast.success('Word document imported β€” headings, tables, images and paragraphs preserved.'); }
     catch (error) { toast.error(error.message || 'Import failed.'); }
     finally { setBusy(false); setStatusText('Ready'); event.target.value = ''; }
   }
@@ -101,7 +102,7 @@ export default function DocumentStudio() {
   }
 
   async function saveEditor(autosave = false) {
-    if (!selected) return; const saveSequence = ++saveSequenceRef.current; const htmlAtSave = editorHtml; const layoutAtSave = normalizedPageLayout; setBusy(true); setStatusText(autosave ? 'Autosaving…' : 'Saving…');
+    if (!selected) return; const saveSequence = ++saveSequenceRef.current; const htmlAtSave = editorHtml; const layoutAtSave = normalizedPageLayout; setBusy(true); setStatusText(autosave ? 'Autosavingβ€¦' : 'Savingβ€¦');
     try {
       if (autosave && htmlAtSave === lastSavedHtmlRef.current && !layoutDirty) { setStatusText('Ready'); return; }
       const contentText = htmlAtSave.replace(/<[^>]+>/g, ' '); const exportLayout = buildExportLayoutPayload(layoutAtSave);
@@ -112,21 +113,21 @@ export default function DocumentStudio() {
   }
 
   async function applyPreset(presetId) {
-    if (!selected) return; setPresetLoading(true); setStatusText(`Applying ${presetId}…`);
-    try { const updated = await documentApi.redesign(selected.id, presetId); selectDocument(updated, false); await refreshDocuments(); toast.success(`${PRESET_BUTTONS.find((p) => p.id === presetId)?.label || presetId} applied — text preserved.`); }
+    if (!selected) return; setPresetLoading(true); setStatusText(`Applying ${presetId}β€¦`);
+    try { const updated = await documentApi.redesign(selected.id, presetId); selectDocument(updated, false); await refreshDocuments(); toast.success(`${PRESET_BUTTONS.find((p) => p.id === presetId)?.label || presetId} applied β€” text preserved.`); }
     catch (error) { toast.error(error.message || 'Preset application failed.'); }
     finally { setPresetLoading(false); setStatusText('Ready'); }
   }
 
   async function exportDocument(formatName) {
-    if (!selected) return; setBusy(true); setStatusText(`Exporting ${formatName.toUpperCase()}…`);
+    if (!selected) return; setBusy(true); setStatusText(`Exporting ${formatName.toUpperCase()}β€¦`);
     try { const response = await fetch(exportDocumentUrl(selected.id, formatName), { headers: makeDocumentDownloadHeaders() }); if (!response.ok) throw new Error(`${formatName.toUpperCase()} export failed with status ${response.status}`); const blob = await response.blob(); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${selected.title}.${formatName}`; link.click(); URL.revokeObjectURL(url); toast.success(`${formatName.toUpperCase()} exported.`); }
     catch (error) { toast.error(error.message || `${formatName.toUpperCase()} export failed.`); }
     finally { setBusy(false); setStatusText('Ready'); }
   }
 
   function selectDocument(document, closeLibrary = true) { setSelected(document); setEditorHtml(document.content_html || ''); lastSavedHtmlRef.current = document.content_html || ''; setPageLayout(normalizePageLayout(document.design?.pageLayout || document.metadata?.page_layout)); setLayoutDirty(false); if (closeLibrary) setLibraryOpen(false); }
-  function applyAIPreview(preview) { const source = preview?.document || {}; const nextHtml = source.content_html ? sanitizeEditorHtml(source.content_html) : sanitizeEditorHtml(plainTextPreviewHtml(source.content || source.content_text || '')); if (!nextHtml || nextHtml === '<article><p></p></article>') { toast.error('This preview does not contain editable document content.'); return; } setEditorHtml(nextHtml); setStatusText('AI preview applied locally — save to persist'); toast.success('Preview applied to the editor. Save when you are ready.'); }
+  function applyAIPreview(preview) { const source = preview?.document || {}; const nextHtml = source.content_html ? sanitizeEditorHtml(source.content_html) : sanitizeEditorHtml(plainTextPreviewHtml(source.content || source.content_text || '')); if (!nextHtml || nextHtml === '<article><p></p></article>') { toast.error('This preview does not contain editable document content.'); return; } setEditorHtml(nextHtml); setStatusText('AI preview applied locally β€” save to persist'); toast.success('Preview applied to the editor. Save when you are ready.'); }
   async function handleAIDocumentSaved(created, pack = null) { await refreshDocuments(); if (created) selectDocument(created, false); toast.success(pack?.length ? `${pack.length} AI documents saved to the library.` : 'AI document saved to the library.'); }
 
   return (
@@ -135,9 +136,10 @@ export default function DocumentStudio() {
       <div className="doc-toolbar"><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={createBlankDocument} disabled={busy}><FileText size={16} /><span>New</span></button><button className="doc-tool-btn" onClick={() => saveEditor(false)} disabled={!selected || busy}><Save size={16} /><span>Save</span></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={undoEditor} disabled={!selected || busy}><Undo2 size={16} /></button><button className="doc-tool-btn" onClick={redoEditor} disabled={!selected || busy}><Redo2 size={16} /></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={() => format('bold')} disabled={!selected || busy}><Bold size={16} /></button><button className="doc-tool-btn" onClick={() => format('italic')} disabled={!selected || busy}><Italic size={16} /></button><button className="doc-tool-btn" onClick={() => format('underline')} disabled={!selected || busy}><Underline size={16} /></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={() => format('insertUnorderedList')} disabled={!selected || busy}><List size={16} /></button><button className="doc-tool-btn" onClick={() => format('insertOrderedList')} disabled={!selected || busy}><ListOrdered size={16} /></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><select className="doc-page-size" value={normalizedPageLayout.size} onChange={(e) => updatePageLayout((c) => ({ ...c, size: e.target.value }))}><option value="A4">A4</option><option value="Letter">Letter</option></select><select className="doc-page-orient" value={normalizedPageLayout.orientation} onChange={(e) => updatePageLayout((c) => ({ ...c, orientation: e.target.value }))}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={() => setPrintPreview((v) => !v)} disabled={!selected}>{printPreview ? 'Edit' : 'Preview'}</button><button className="doc-tool-btn" onClick={() => setLibraryOpen((v) => !v)}>Library</button><button className={`doc-tool-btn ${aiPanelOpen ? 'is-active' : ''}`} onClick={() => setAIPanelOpen((value) => !value)}><Sparkles size={16} />AI Assist</button></div></div>
       <div className="doc-presets-bar"><span className="doc-presets-label">Design:</span>{PRESET_BUTTONS.map((preset) => <button key={preset.id} className="doc-preset-btn" onClick={() => applyPreset(preset.id)} disabled={!selected || busy || presetLoading}><Wand2 size={16} />{preset.label}</button>)}</div>
       {aiPanelOpen && <DocumentAIAssistantPanel profileId={profile?.id} onApplyPreview={applyAIPreview} onDocumentSaved={handleAIDocumentSaved} onClose={() => setAIPanelOpen(false)} />}
-      {libraryOpen && <div className="doc-library-panel"><div className="doc-library-header"><span>Document Library</span><button onClick={() => setLibraryOpen(false)}>×</button></div><div className="doc-library-list">{documents.length === 0 && <div className="doc-library-empty">No documents yet. Import a Word file or create a new document.</div>}{documents.map((doc) => <button key={doc.id} className={`doc-library-item ${selected?.id === doc.id ? 'is-selected' : ''}`} onClick={() => selectDocument(doc)}><FileText size={16} /><span>{doc.title}</span></button>)}</div></div>}
+      {libraryOpen && <div className="doc-library-panel"><div className="doc-library-header"><span>Document Library</span><button onClick={() => setLibraryOpen(false)}>Γ—</button></div><div className="doc-library-list">{documents.length === 0 && <div className="doc-library-empty">No documents yet. Import a Word file or create a new document.</div>}{documents.map((doc) => <button key={doc.id} className={`doc-library-item ${selected?.id === doc.id ? 'is-selected' : ''}`} onClick={() => selectDocument(doc)}><FileText size={16} /><span>{doc.title}</span></button>)}</div></div>}
       <div className="doc-workspace">{printPreview ? <div className="doc-preview-container"><PaginatedDocumentWorkspace document={selected} html={editorHtml} layout={normalizedPageLayout} zoom={Math.min(page.zoom, 80)} preview /></div> : <div className="doc-editor-container"><PaginatedDocumentWorkspace document={selected} html={editorHtml} layout={normalizedPageLayout} zoom={page.zoom} editor={lexicalEditor} editorElementRef={editorElementRef} onPageFlowChange={setPageFlow}><div className="lumina-document lumina-editor-page" style={{ color: '#111827', fontFamily: 'Georgia, serif', fontSize: '14px', lineHeight: 1.7 }}><DocumentRichEditor ref={editorApiRef} html={editorHtml} onHtmlChange={onEditorChange} disabled={busy || !selected} onEditorReady={setLexicalEditor} /></div></PaginatedDocumentWorkspace></div>}</div>
-      <footer className="doc-statusbar"><span>Page 1 of {pageFlow.pageCount}</span><span>{(editorHtml || '').replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length} words</span><span>{normalizedPageLayout.size} · {normalizedPageLayout.orientation}</span><span>{busy ? statusText : 'Ready'}</span><div className="doc-zoom"><button onClick={() => setPage((p) => ({ ...p, zoom: Math.max(60, p.zoom - 10) }))}>−</button><span>{page.zoom}%</span><button onClick={() => setPage((p) => ({ ...p, zoom: Math.min(150, p.zoom + 10) }))}>+</button></div></footer>
+      <footer className="doc-statusbar"><span>Page 1 of {pageFlow.pageCount}</span><span>{(editorHtml || '').replace(/<[^>]+>/g, ' ').trim().split(/\s+/).filter(Boolean).length} words</span><span>{normalizedPageLayout.size} Β· {normalizedPageLayout.orientation}</span><span>{busy ? statusText : 'Ready'}</span><div className="doc-zoom"><button onClick={() => setPage((p) => ({ ...p, zoom: Math.max(60, p.zoom - 10) }))}>β’</button><span>{page.zoom}%</span><button onClick={() => setPage((p) => ({ ...p, zoom: Math.min(150, p.zoom + 10) }))}>+</button></div></footer>
     </div>
   );
 }
+
