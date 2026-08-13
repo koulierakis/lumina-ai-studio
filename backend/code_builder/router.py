@@ -342,6 +342,7 @@ class TaskDetailResponse(TaskSummaryResponse):
     request: dict[str, Any]
     result: dict[str, Any] | None = None
     preparation_result: dict[str, Any] | None = None
+    review_result: dict[str, Any] | None = None
     events: tuple[TaskEventResponse, ...] = Field(default_factory=tuple)
     approval_comment: str | None = None
     approved_at_epoch: float | None = None
@@ -452,6 +453,7 @@ class StoredTask:
     cancellation_token: TaskCancellationToken
     result: Any = None
     preparation_result: Any = None
+    review_result: Any = None
     started_at_epoch: float | None = None
     finished_at_epoch: float | None = None
     approved_at_epoch: float | None = None
@@ -949,6 +951,94 @@ def _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:
     return stored_task.request.model_copy(update={"metadata": metadata})
 
 
+def _review_prepared_change(
+    *,
+    task_service: TaskService,
+    stored_task: StoredTask,
+    preparation_result: Any,
+) -> dict[str, Any]:
+    reviewer = getattr(
+        task_service.ollama_service,
+        "analyze_code_task",
+        None,
+    )
+    model = getattr(
+        task_service.ollama_service,
+        "model",
+        None,
+    )
+
+    if not callable(reviewer):
+        return {
+            "status": "unavailable",
+            "model": str(model) if model else None,
+            "summary": (
+                "AI review is unavailable because the configured Code "
+                "Builder Ollama adapter does not expose a synchronous "
+                "review-compatible analysis method."
+            ),
+            "reviewed_at_epoch": time.time(),
+        }
+
+    serialized_preparation = _serialize_value(preparation_result)
+    review_instruction = (
+        "Act as the independent LUMINA Code Builder reviewer. Review ONLY "
+        "the supplied prepared implementation plan, proposed patch/diff, "
+        "and patch validation. Do not generate replacement code and do not "
+        "modify files. Check scope alignment, correctness risks, unsafe or "
+        "destructive changes, missing tests, plan/patch mismatches, and "
+        "rollback concerns. Give a concise verdict using PASS, WARN, or "
+        "BLOCK, followed by concrete findings with file paths when known."
+    )
+
+    try:
+        content = reviewer(
+            instruction=review_instruction,
+            repository_context=serialized_preparation,
+            user_context={
+                "original_instruction": stored_task.request.instruction,
+                "task_id": stored_task.request.task_id,
+                "purpose": "pre_approval_review",
+            },
+            target_paths=stored_task.request.target_paths,
+            excluded_paths=stored_task.request.excluded_paths,
+            timeout_seconds=min(
+                stored_task.request.task_timeout_seconds,
+                300.0,
+            ),
+            cancellation_token=stored_task.cancellation_token,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Code Builder AI review failed for task %s: %s",
+            stored_task.request.task_id,
+            exc,
+        )
+        return {
+            "status": "unavailable",
+            "model": str(model) if model else None,
+            "summary": f"AI review failed: {exc}",
+            "reviewed_at_epoch": time.time(),
+        }
+
+    normalized = str(content).strip()
+    upper = normalized.upper()
+    verdict = (
+        "block"
+        if "BLOCK" in upper
+        else "warn"
+        if "WARN" in upper
+        else "pass"
+    )
+    return {
+        "status": "completed",
+        "verdict": verdict,
+        "model": str(model) if model else None,
+        "summary": normalized,
+        "reviewed_at_epoch": time.time(),
+    }
+
+
 def _phase_from_result(
     result: Any,
 ) -> CodeBuilderTaskPhase:
@@ -1111,6 +1201,9 @@ def _task_detail_response(
     serialized_preparation = _serialize_value(
         stored_task.preparation_result
     )
+    serialized_review = _serialize_value(
+        stored_task.review_result
+    )
 
     serialized_rollback = _serialize_value(
         stored_task.rollback_result
@@ -1138,6 +1231,11 @@ def _task_detail_response(
         preparation_result=(
             dict(serialized_preparation)
             if isinstance(serialized_preparation, Mapping)
+            else None
+        ),
+        review_result=(
+            dict(serialized_review)
+            if isinstance(serialized_review, Mapping)
             else None
         ),
         events=events,
@@ -1533,6 +1631,11 @@ def _run_stored_task_sync(
                 stored_task.finished_at_epoch = time.time()
             else:
                 stored_task.preparation_result = result
+                stored_task.review_result = _review_prepared_change(
+                    task_service=task_service,
+                    stored_task=stored_task,
+                    preparation_result=result,
+                )
                 stored_task.phase = CodeBuilderTaskPhase.AWAITING_APPROVAL
                 stored_task.metadata["preparation_completed_at_epoch"] = time.time()
                 stored_task.finished_at_epoch = None
