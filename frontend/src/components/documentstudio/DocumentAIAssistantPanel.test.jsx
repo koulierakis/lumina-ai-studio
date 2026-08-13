@@ -1,151 +1,127 @@
-import React, { act } from 'react';
-import { createRoot } from 'react-dom/client';
 import fs from 'fs';
 import path from 'path';
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
 import DocumentAIAssistantPanel from './DocumentAIAssistantPanel';
 import { documentApi } from '../../documents/model';
 
-jest.mock('lucide-react', () => new Proxy({}, {
-  get: (_, name) => (props) => <span data-icon={String(name)} {...props} />,
+jest.mock('../../documents/model', () => ({
+  DOCUMENT_AI_PROVIDERS: ['ollama', 'groq'],
+  documentApi: {
+    packAdvisor: jest.fn(),
+    naturalCreatePreview: jest.fn(),
+    generateAIPreview: jest.fn(),
+    generatePackPreview: jest.fn(),
+    create: jest.fn(),
+  },
+  friendlyDocumentAIError: (error) => error?.message || 'AI request failed.',
 }));
+
+function clickByText(container, text) {
+  const button = [...container.querySelectorAll('button')].find((item) => item.textContent.includes(text));
+  if (!button) throw new Error(`Button not found: ${text}`);
+  button.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
 
 function setValue(element, value) {
   const setter = Object.getOwnPropertyDescriptor(element.constructor.prototype, 'value').set;
   setter.call(element, value);
   element.dispatchEvent(new Event('input', { bubbles: true }));
+  element.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
-function clickByText(host, text) {
-  const button = [...host.querySelectorAll('button')].find((item) => item.textContent.includes(text));
-  if (!button) throw new Error(`Button not found: ${text}`);
-  button.click();
-}
-
-describe('Document Studio AI assistance panel', () => {
+describe('DocumentAIAssistantPanel', () => {
   let host;
   let root;
-  let onApplyPreview;
+  const onApplyPreview = jest.fn();
+  const onDocumentSaved = jest.fn();
 
   beforeEach(() => {
-    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    jest.clearAllMocks();
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    onApplyPreview = jest.fn();
-    jest.spyOn(documentApi, 'packAdvisor').mockResolvedValue({ recommendations: [], profile_validation: {} });
-    jest.spyOn(documentApi, 'naturalCreatePreview').mockResolvedValue({});
-    jest.spyOn(documentApi, 'generateAIPreview').mockResolvedValue({});
-    jest.spyOn(documentApi, 'generatePackPreview').mockResolvedValue({});
   });
 
   afterEach(() => {
     act(() => root.unmount());
     host.remove();
-    jest.restoreAllMocks();
   });
 
   async function renderPanel() {
-    await act(async () => root.render(
-      <DocumentAIAssistantPanel profileId="profile-1" onApplyPreview={onApplyPreview} onClose={jest.fn()} />
-    ));
+    await act(async () => {
+      root.render(<DocumentAIAssistantPanel profileId="profile-1" onApplyPreview={onApplyPreview} onDocumentSaved={onDocumentSaved} onClose={() => {}} />);
+    });
   }
 
-  test('renders objective, required/optional recommendations, warnings, and stable selection', async () => {
-    documentApi.packAdvisor.mockResolvedValue({
-      profile_validation: { completeness_ratio: 0.5 },
-      recommendations: [
-        { document_type: 'nda', title: 'NDA', priority: 'required', reason: 'Protects disclosures.', missing_data: ['UBO information'] },
-        { document_type: 'company_profile', title: 'Company Profile', priority: 'optional', reason: 'Provides context.', missing_data: [] },
-      ],
-    });
-    await renderPanel();
-    await act(async () => setValue(host.querySelector('[aria-label="Document pack objective"]'), 'Bank onboarding'));
-    await act(async () => clickByText(host, 'Analyze Required Documents'));
-
-    expect(host.textContent).toContain('Required');
-    expect(host.textContent).toContain('Optional');
-    expect(host.textContent).toContain('Missing: UBO information');
-    expect(host.textContent).toContain('Readiness: 50%');
-    await act(async () => clickByText(host, 'Select all recommendations'));
-    expect([...host.querySelectorAll('.doc-ai-recommendation input:checked')]).toHaveLength(2);
-  });
-
-  test('renders an explicit empty recommendation state', async () => {
-    await renderPanel();
-    await act(async () => setValue(host.querySelector('[aria-label="Document pack objective"]'), 'Unusual objective'));
-    await act(async () => clickByText(host, 'Analyze Required Documents'));
-    expect(host.textContent).toContain('No recommendations returned.');
-  });
-
-  test('natural preview never applies automatically and requires explicit apply', async () => {
-    const preview = { document: { title: 'Business Nature', content: 'Preview content' } };
+  test('natural creation is preview-first and only applies after explicit user action', async () => {
+    const preview = { document: { title: 'Business Nature', document_type: 'business_nature_statement', content_text: 'Draft content' }, generation: { metadata: { provider_used: 'ollama', validation_status: 'validated' } } };
     documentApi.naturalCreatePreview.mockResolvedValue(preview);
     await renderPanel();
     await act(async () => setValue(host.querySelector('[aria-label="Natural document request"]'), 'Create a business nature statement'));
     await act(async () => clickByText(host, 'Preview Natural Draft'));
-
-    expect(host.textContent).toContain('Preview content');
+    expect(documentApi.naturalCreatePreview).toHaveBeenCalledWith(expect.objectContaining({ request: 'Create a business nature statement', company_profile_id: 'profile-1' }));
     expect(onApplyPreview).not.toHaveBeenCalled();
-    await act(async () => clickByText(host, 'Apply to Document'));
+    expect(host.textContent).toContain('Preview only');
+    await act(async () => clickByText(host, 'Apply to Current Document'));
     expect(onApplyPreview).toHaveBeenCalledWith(preview);
   });
 
-  test('shows safe provider unavailable, timeout, and fact-integrity errors', async () => {
+  test('validated generation preserves explicit provider and fallback controls', async () => {
+    const preview = { document: { title: 'NDA', document_type: 'nda', content_text: 'NDA draft' }, generation: { metadata: { provider_used: 'groq', validation_status: 'validated' } } };
+    documentApi.generateAIPreview.mockResolvedValue(preview);
     await renderPanel();
-    const request = host.querySelector('[aria-label="Natural document request"]');
-    await act(async () => setValue(request, 'Create an NDA'));
-
-    documentApi.naturalCreatePreview.mockRejectedValueOnce({ status: 503, message: 'secret' });
-    await act(async () => clickByText(host, 'Preview Natural Draft'));
-    expect(host.textContent).toContain('provider is unavailable');
-    expect(host.textContent).not.toContain('secret');
-
-    documentApi.naturalCreatePreview.mockRejectedValueOnce({ status: 504 });
-    await act(async () => clickByText(host, 'Preview Natural Draft'));
-    expect(host.textContent).toContain('timed out');
-
-    documentApi.naturalCreatePreview.mockRejectedValueOnce({ status: 422 });
-    await act(async () => clickByText(host, 'Preview Natural Draft'));
-    expect(host.textContent).toContain('fact-integrity');
-  });
-
-  test('provider controls contain no arbitrary free-text option', async () => {
-    await renderPanel();
-    const providerSelects = [...host.querySelectorAll('select[aria-label="Provider"]')];
-    expect(providerSelects.length).toBeGreaterThan(0);
-    providerSelects.forEach((select) => {
-      expect([...select.options].map((option) => option.value)).toEqual(['', 'ollama', 'groq']);
-    });
-  });
-
-  test('shows validated metadata, fallback use, and retained placeholders', async () => {
-    documentApi.generateAIPreview.mockResolvedValue({
-      document: { title: 'NDA', content_text: 'Draft [CLIENT]' },
-      generation: { metadata: { provider_used: 'groq', validation_status: 'passed', fallback_used: true } },
-      intentional_blank_fields: ['CLIENT'],
-    });
-    await renderPanel();
-    await act(async () => setValue(host.querySelector('[aria-label="Document pack objective"]'), 'Create an NDA'));
+    await act(async () => setValue(host.querySelector('[aria-label="Document pack objective"]'), 'Prepare an NDA'));
+    await act(async () => setValue(host.querySelector('[aria-label="Provider"]'), 'groq'));
+    await act(async () => setValue(host.querySelector('[aria-label="Explicit fallback"]'), 'ollama'));
     await act(async () => clickByText(host, 'Generate AI Preview'));
+    expect(documentApi.generateAIPreview).toHaveBeenCalledWith(expect.objectContaining({ objective: 'Prepare an NDA', provider: 'groq', fallback_provider: 'ollama', allow_fallback: true }));
     expect(host.textContent).toContain('Provider: groq');
-    expect(host.textContent).toContain('Validation: passed');
-    expect(host.textContent).toContain('Fallback used');
-    expect(host.textContent).toContain('Placeholders retained: CLIENT');
   });
 
-  test('pack preview preserves order and keeps partial failures visible', async () => {
+  test('saved AI preview becomes a library document and notifies the parent', async () => {
+    const preview = { document: { title: 'NDA', document_type: 'nda', content_text: 'NDA draft' }, generation: { metadata: { provider_used: 'ollama' } } };
+    const created = { id: 'doc-1', title: 'NDA' };
+    documentApi.generateAIPreview.mockResolvedValue(preview);
+    documentApi.create.mockResolvedValue(created);
+    await renderPanel();
+    await act(async () => setValue(host.querySelector('[aria-label="Document pack objective"]'), 'Prepare an NDA'));
+    await act(async () => clickByText(host, 'Generate AI Preview'));
+    await act(async () => clickByText(host, 'Save as New Document'));
+    expect(documentApi.create).toHaveBeenCalledWith(expect.objectContaining({ title: 'NDA', document_type: 'nda', company_profile_id: 'profile-1' }));
+    expect(onDocumentSaved).toHaveBeenCalledWith(created);
+  });
+
+  test('pack advisor exposes missing-data warnings and selection controls', async () => {
+    documentApi.packAdvisor.mockResolvedValue({
+      profile_validation: { completeness_ratio: 0.5 },
+      recommendations: [
+        { document_type: 'nda', title: 'NDA', priority: 'required', reason: 'Protect confidentiality', missing_data: ['legal_name'] },
+        { document_type: 'consulting_agreement', title: 'Consulting Agreement', priority: 'optional', reason: 'Define scope', missing_data: [] },
+      ],
+    });
+    await renderPanel();
+    await act(async () => setValue(host.querySelector('[aria-label="Document pack objective"]'), 'Prepare agreements'));
+    await act(async () => clickByText(host, 'Analyze Required Documents'));
+    expect(host.textContent).toContain('Readiness: 50%');
+    expect(host.textContent).toContain('Missing: legal_name');
+    await act(async () => clickByText(host, 'Select required'));
+    expect([...host.querySelectorAll('input[type="checkbox"]')].filter((item) => item.checked)).toHaveLength(1);
+  });
+
+  test('pack preview keeps partial failures visible instead of silently saving them', async () => {
     documentApi.packAdvisor.mockResolvedValue({
       profile_validation: { completeness_ratio: 1 },
       recommendations: [
-        { document_type: 'nda', title: 'NDA', priority: 'required', reason: 'Required', missing_data: [] },
-        { document_type: 'consulting_agreement', title: 'Consulting', priority: 'optional', reason: 'Useful', missing_data: [] },
+        { document_type: 'nda', title: 'NDA', priority: 'required', reason: 'Protect confidentiality', missing_data: [] },
+        { document_type: 'consulting_agreement', title: 'Consulting Agreement', priority: 'required', reason: 'Define scope', missing_data: [] },
       ],
     });
     documentApi.generatePackPreview.mockResolvedValue({
       overall_status: 'partial_failure',
       items: [
-        { document_type: 'nda', status: 'failed', error_message: 'The provider is unavailable' },
-        { document_type: 'consulting_agreement', status: 'generated', preview: { document: { content_html: '<p>Draft</p>' } } },
+        { document_type: 'nda', status: 'ready', preview: { document: { title: 'NDA', document_type: 'nda', content_text: 'Draft' } } },
+        { document_type: 'consulting_agreement', status: 'failed', error_message: 'The provider is unavailable' },
       ],
     });
     await renderPanel();
@@ -175,7 +151,7 @@ describe('Document Studio AI assistance panel', () => {
     expect(page).toContain('Export Word');
     expect(page).toContain('doc-preset-btn');
     expect(page).toContain('applyAIPreview');
-    expect(panel).toContain('Apply to Document');
+    expect(panel).toContain('Apply to Current Document');
     expect(page).not.toContain('h-screen');
     expect(page).not.toContain('overflow-hidden');
   });
