@@ -18,6 +18,7 @@ import WorkspaceCenter from './pages/WorkspaceCenter';
 import ProjectDetail from './pages/ProjectDetail';
 import PlatformHub from './pages/PlatformHub';
 import CodeCreator from './pages/CodeCreator';
+import CodeBuilder from './pages/CodeBuilder';
 import DocumentStudio from './pages/DocumentStudio';
 
 export default function App() {
@@ -51,6 +52,7 @@ export default function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="developer" element={<DeveloperCenter />} />
               <Route path="code-creator" element={<CodeCreator />} />
+              <Route path="code-builder" element={<CodeBuilder />} />
               <Route path="generate" element={<Generate />} />
               <Route path="identity" element={<IdentityPacks />} />
               <Route path="gallery" element={<Gallery />} />
