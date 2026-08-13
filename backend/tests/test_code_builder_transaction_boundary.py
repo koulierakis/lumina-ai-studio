@@ -28,8 +28,10 @@ class StaticRepositoryService:
 class StaticPlanningService:
     def __init__(self, plan: GeneratedChangePlan) -> None:
         self.plan_result = plan
+        self.call_count = 0
 
     def plan(self, **_):
+        self.call_count += 1
         return self.plan_result
 
 
@@ -103,6 +105,7 @@ def test_preparation_generates_diff_without_writing_then_approval_applies(tmp_pa
 
     assert stored.phase is CodeBuilderTaskPhase.AWAITING_APPROVAL
     assert stored.preparation_result is not None
+    assert service.planning_service.call_count == 1
     assert not (tmp_path / relative).exists()
     prepared = stored.preparation_result
     assert prepared.patch_validation is not None
@@ -115,6 +118,8 @@ def test_preparation_generates_diff_without_writing_then_approval_applies(tmp_pa
     _run_stored_task_sync(task_service=service, task_store=store, stored_task=stored)
 
     assert stored.phase is CodeBuilderTaskPhase.COMPLETED, stored.result
+    assert service.planning_service.call_count == 1
+    assert stored.request.metadata["approved_preparation_plan"]["title"] == "Prepared change"
     assert (tmp_path / relative).read_text(encoding="utf-8") == "BOUNDARY = 'approved'\n"
 
 

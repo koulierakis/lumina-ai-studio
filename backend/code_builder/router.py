@@ -947,6 +947,7 @@ def _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:
     metadata.pop("patch_operations", None)
     metadata.pop("execution_patch_operations", None)
     metadata["approved_patch_operations"] = list(raw_operations)
+    metadata["approved_preparation_plan"] = prepared.get("plan")
     metadata["approved_preparation_task_id"] = stored_task.request.task_id
     return stored_task.request.model_copy(update={"metadata": metadata})
 
