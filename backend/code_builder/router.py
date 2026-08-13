@@ -341,6 +341,7 @@ class TaskSummaryResponse(BaseModel):
 class TaskDetailResponse(TaskSummaryResponse):
     request: dict[str, Any]
     result: dict[str, Any] | None = None
+    preparation_result: dict[str, Any] | None = None
     events: tuple[TaskEventResponse, ...] = Field(default_factory=tuple)
     approval_comment: str | None = None
     approved_at_epoch: float | None = None
@@ -450,6 +451,7 @@ class StoredTask:
     auto_start_after_approval: bool
     cancellation_token: TaskCancellationToken
     result: Any = None
+    preparation_result: Any = None
     started_at_epoch: float | None = None
     finished_at_epoch: float | None = None
     approved_at_epoch: float | None = None
@@ -904,6 +906,49 @@ def _task_request_from_api(
     )
 
 
+def _build_preparation_request(stored_task: StoredTask) -> TaskRequest:
+    metadata = dict(stored_task.request.metadata)
+    metadata["code_builder_preparation"] = True
+    return stored_task.request.model_copy(
+        update={
+            "dry_run": True,
+            "backup_policy": BackupPolicy.DISABLED,
+            "build_policy": BuildPolicy.DISABLED,
+            "rollback_policy": RollbackPolicy.NEVER,
+            "metadata": metadata,
+        }
+    )
+
+
+def _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:
+    prepared = _serialize_value(stored_task.preparation_result)
+    if not isinstance(prepared, Mapping):
+        raise CodeBuilderApprovalError(
+            "Task does not have a completed preparation result."
+        )
+
+    raw_patch = prepared.get("patch")
+    if not isinstance(raw_patch, Mapping):
+        raise CodeBuilderApprovalError(
+            "Task preparation did not produce an approvable patch."
+        )
+
+    raw_operations = raw_patch.get("operations")
+    if not isinstance(raw_operations, Sequence) or isinstance(
+        raw_operations, (str, bytes, bytearray)
+    ) or not raw_operations:
+        raise CodeBuilderApprovalError(
+            "Task preparation did not produce patch operations."
+        )
+
+    metadata = dict(stored_task.request.metadata)
+    metadata.pop("patch_operations", None)
+    metadata.pop("execution_patch_operations", None)
+    metadata["approved_patch_operations"] = list(raw_operations)
+    metadata["approved_preparation_task_id"] = stored_task.request.task_id
+    return stored_task.request.model_copy(update={"metadata": metadata})
+
+
 def _phase_from_result(
     result: Any,
 ) -> CodeBuilderTaskPhase:
@@ -1063,6 +1108,9 @@ def _task_detail_response(
     serialized_result = _serialize_value(
         stored_task.result
     )
+    serialized_preparation = _serialize_value(
+        stored_task.preparation_result
+    )
 
     serialized_rollback = _serialize_value(
         stored_task.rollback_result
@@ -1086,6 +1134,11 @@ def _task_detail_response(
                 if serialized_result is not None
                 else None
             )
+        ),
+        preparation_result=(
+            dict(serialized_preparation)
+            if isinstance(serialized_preparation, Mapping)
+            else None
         ),
         events=events,
         approval_comment=(
@@ -1343,6 +1396,16 @@ def _update_phase_from_event(
         elif normalized_stage == "rollback":
             new_phase = CodeBuilderTaskPhase.ROLLING_BACK
 
+    if (
+        stored_task.require_approval
+        and stored_task.approved_at_epoch is None
+        and new_phase in {
+            CodeBuilderTaskPhase.EXECUTING,
+            CodeBuilderTaskPhase.COMPLETED,
+        }
+    ):
+        new_phase = CodeBuilderTaskPhase.ANALYZING
+
     if new_phase is not None:
         stored_task.phase = new_phase
 
@@ -1415,18 +1478,14 @@ def _run_stored_task_sync(
         }:
             return
 
-        if (
+        preparing = (
             stored_task.require_approval
             and stored_task.approved_at_epoch is None
-        ):
-            stored_task.phase = (
-                CodeBuilderTaskPhase.AWAITING_APPROVAL
-            )
-            stored_task.touch()
-            return
-
+        )
         stored_task.phase = (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.ANALYZING
+            if preparing
+            else CodeBuilderTaskPhase.EXECUTING
         )
         stored_task.started_at_epoch = time.time()
         stored_task.finished_at_epoch = None
@@ -1436,10 +1495,15 @@ def _run_stored_task_sync(
         task_store,
         stored_task,
     )
+    execution_request = (
+        _build_preparation_request(stored_task)
+        if preparing
+        else stored_task.request
+    )
 
     try:
         result = task_service.execute(
-            stored_task.request,
+            execution_request,
             event_callback=callback,
             cancellation_token=(
                 stored_task.cancellation_token
@@ -1463,10 +1527,18 @@ def _run_stored_task_sync(
 
     with stored_task.execution_lock:
         stored_task.result = result
-        stored_task.phase = _phase_from_result(
-            result
-        )
-        stored_task.finished_at_epoch = time.time()
+        if preparing:
+            if _phase_from_result(result) is not CodeBuilderTaskPhase.COMPLETED:
+                stored_task.phase = _phase_from_result(result)
+                stored_task.finished_at_epoch = time.time()
+            else:
+                stored_task.preparation_result = result
+                stored_task.phase = CodeBuilderTaskPhase.AWAITING_APPROVAL
+                stored_task.metadata["preparation_completed_at_epoch"] = time.time()
+                stored_task.finished_at_epoch = None
+        else:
+            stored_task.phase = _phase_from_result(result)
+            stored_task.finished_at_epoch = time.time()
         stored_task.touch()
 
 
@@ -2103,11 +2175,7 @@ async def create_code_builder_task(
 
     now = time.time()
 
-    initial_phase = (
-        CodeBuilderTaskPhase.AWAITING_APPROVAL
-        if payload.require_approval
-        else CodeBuilderTaskPhase.QUEUED
-    )
+    initial_phase = CodeBuilderTaskPhase.QUEUED
 
     stored_task = StoredTask(
         request=task_request,
@@ -2153,10 +2221,7 @@ async def create_code_builder_task(
         created_task is not stored_task
     )
 
-    if (
-        not is_existing_idempotent_task
-        and not payload.require_approval
-    ):
+    if not is_existing_idempotent_task:
         _schedule_task_execution(
             background_tasks=background_tasks,
             task_service=task_service,
@@ -2446,6 +2511,20 @@ async def approve_code_builder_task(
                 approved=False,
                 execution_started=False,
             )
+
+        try:
+            stored_task.request = _bind_prepared_patch_to_request(
+                stored_task
+            )
+        except CodeBuilderApprovalError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "task_not_prepared",
+                    "message": str(exc),
+                    "task_id": normalized_task_id,
+                },
+            ) from exc
 
         stored_task.approved_at_epoch = (
             time.time()
