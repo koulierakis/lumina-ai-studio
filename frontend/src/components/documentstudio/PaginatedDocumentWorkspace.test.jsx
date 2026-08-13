@@ -3,11 +3,12 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import PaginatedDocumentWorkspace, { measurePageFlow } from './PaginatedDocumentWorkspace';
 import { DEFAULT_PAGE_LAYOUT } from './editorModel';
 
-function makeMeasuredElement({ blockHeights = [], scrollHeight = 0 } = {}) {
+function makeMeasuredElement({ blockHeights = [], scrollHeight = 0, contentEditable = 'true', editableHeight = 0 } = {}) {
   const root = document.createElement('div');
   const editable = document.createElement('div');
-  editable.setAttribute('contenteditable', 'true');
+  editable.setAttribute('contenteditable', contentEditable);
   Object.defineProperty(editable, 'scrollHeight', { configurable: true, value: scrollHeight });
+  editable.getBoundingClientRect = () => ({ height: editableHeight });
   blockHeights.forEach((height) => {
     const child = document.createElement('p');
     child.getBoundingClientRect = () => ({ height });
@@ -24,6 +25,30 @@ describe('PaginatedDocumentWorkspace real page flow', () => {
 
     expect(result.pageCount).toBe(2);
     expect(result.contentHeightPx).toBeGreaterThan(900);
+  });
+
+  test('does not repaginate generated editor-layer height as document content', () => {
+    const root = makeMeasuredElement({ blockHeights: [24, 24], scrollHeight: 24000000 });
+
+    expect(measurePageFlow(root, {}).pageCount).toBe(1);
+  });
+
+  test('an empty editor remains one page even when its layer has a large minimum height', () => {
+    const root = makeMeasuredElement({ scrollHeight: 24000000 });
+
+    expect(measurePageFlow(root, {}).pageCount).toBe(1);
+  });
+
+  test('measures disabled editor content instead of its oversized pagination container', () => {
+    const root = makeMeasuredElement({
+      blockHeights: [24, 24],
+      scrollHeight: 24000000,
+      contentEditable: 'false',
+      editableHeight: 24000000,
+    });
+    Object.defineProperty(root, 'scrollHeight', { configurable: true, value: 24000000 });
+
+    expect(measurePageFlow(root, {}).pageCount).toBe(1);
   });
 
   test('manual page break node in measured DOM forces another page', () => {
@@ -71,6 +96,19 @@ describe('PaginatedDocumentWorkspace real page flow', () => {
 
     expect(markup).toContain('data-page-count="1"');
     expect(markup).toContain('Short content');
+  });
+
+  test('keeps editor layer height independent from generated page count', () => {
+    const html = '<p>First</p><div data-lumina-page-break="true"></div><p>Second</p>';
+    const markup = renderToStaticMarkup(
+      <PaginatedDocumentWorkspace document={{ title: 'Two pages' }} html={html} layout={DEFAULT_PAGE_LAYOUT}>
+        <div>Editor content</div>
+      </PaginatedDocumentWorkspace>
+    );
+
+    expect(markup).toContain('data-page-count="2"');
+    expect(markup).toContain('min-height:297mm');
+    expect(markup).not.toContain('min-height:594mm');
   });
 
   test('renders editable header and footer placeholders outside the body HTML', () => {

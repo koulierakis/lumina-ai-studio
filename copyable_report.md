@@ -27,3 +27,18 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 
 ## Σημείωση για το workspace
 Το δέντρο [frontend/src](frontend/src) αποτελεί διπλότυπο αντίγραφο και το κυρίαρχο ενεργό έργο για την ανάπτυξη παραμένει το [lumina-ai-studio-main/frontend/src](lumina-ai-studio-main/frontend/src). Η τελική επιτυχία του build επιβεβαιώνει ότι η εναρμόνιση του wrapper είναι συνεπής στο βασικό project tree.
+
+## Άμεση Δράση: Άνοιγμα Ρυθμίσεων
+Παρακάτω παρέχονται σύντομες οδηγίες για να ανοίξετε τις Ρυθμίσεις του VS Code στο σύστημά σας (Windows):
+
+- **Συντόμευση:** Πατήστε `Ctrl+,` για να ανοίξει άμεσα το UI των Ρυθμίσεων.
+- **Command Palette:** Πατήστε `Ctrl+Shift+P`, πληκτρολογήστε "Preferences: Open Settings" και πατήστε Enter.
+- **Απευθείας αρχείο ρυθμίσεων:** Επεξεργαστείτε το αρχείο ρυθμίσεων workspace στο `.vscode/settings.json` αν υπάρχει.
+
+Αν θέλετε, μπορώ να ανοίξω ή να επεξεργαστώ για εσάς το αρχείο [c:\Users\User\Desktop\LUMINA_NEW\.vscode\settings.json](c:\Users\User\Desktop\LUMINA_NEW\.vscode\settings.json) και να εφαρμόσω συγκεκριμένες αλλαγές — πείτε μου ποιες ρυθμίσεις θέλετε να τροποποιήσω.
+
+## Γρήγορη Δοκιμή
+- Ημερομηνία: 2026-08-13
+- Ενέργεια: Απόκριση δοκιμής 'TEST'
+- Κατάσταση: Επιτυχής — ο πράκτορας απάντησε και πρόσθεσε αυτή την εγγραφή αναφοράς.
+

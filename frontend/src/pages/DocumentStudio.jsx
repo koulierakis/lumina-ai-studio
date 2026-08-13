@@ -176,8 +176,8 @@ export default function DocumentStudio() {
         title,
         category: 'Corporate',
         tags: ['draft'],
-        content_html: `<article><h1>${title}</h1><p>Start writing your document.</p></article>`,
-        content_text: `${title} Start writing your document.`,
+        content_html: '<p></p>',
+        content_text: '',
         design: { pageLayout: normalizedPageLayout },
         metadata: { page_layout: normalizedPageLayout },
       });
@@ -538,7 +538,7 @@ export default function DocumentStudio() {
               >
                 <DocumentRichEditor
                   ref={editorApiRef}
-                  html={editorHtml || '<h1>Start typing your document</h1><p>Use the toolbar to format content.</p>'}
+                  html={editorHtml}
                   onHtmlChange={onEditorChange}
                   disabled={busy || !selected}
                   onEditorReady={setLexicalEditor}
