@@ -8,7 +8,7 @@ on:
 permissions:
   contents: write
 jobs:
-  apply-review-layer:
+  harden-review-verdict:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,74 +17,34 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Patch Code Builder review artifact
+      - name: Harden verdict parser
         shell: python
         run: |
           from pathlib import Path
 
-          path = Path("backend/code_builder/router.py")
-          text = path.read_text(encoding="utf-8")
+          router = Path("backend/code_builder/router.py")
+          text = router.read_text(encoding="utf-8")
+          old = '''    normalized = str(content).strip()\n    upper = normalized.upper()\n    verdict = (\n        "block"\n        if "BLOCK" in upper\n        else "warn"\n        if "WARN" in upper\n        else "pass"\n    )\n'''
+          new = '''    normalized = str(content).strip()\n    first_line = (\n        normalized.splitlines()[0].strip().upper()\n        if normalized\n        else ""\n    )\n    verdict = (\n        "block"\n        if first_line.startswith("BLOCK")\n        else "warn"\n        if first_line.startswith("WARN")\n        else "pass"\n        if first_line.startswith("PASS")\n        else "warn"\n    )\n'''
+          if text.count(old) != 1:
+              raise SystemExit("Reviewer verdict parser anchor not found exactly once")
+          router.write_text(text.replace(old, new, 1), encoding="utf-8")
 
-          def replace_once(old: str, new: str) -> None:
-              global text
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"Expected exactly one match, found {count}: {old[:140]!r}")
-              text = text.replace(old, new, 1)
-
-          replace_once(
-              '''class TaskDetailResponse(TaskSummaryResponse):\n    request: dict[str, Any]\n    result: dict[str, Any] | None = None\n    preparation_result: dict[str, Any] | None = None\n    events: tuple[TaskEventResponse, ...] = Field(default_factory=tuple)\n''',
-              '''class TaskDetailResponse(TaskSummaryResponse):\n    request: dict[str, Any]\n    result: dict[str, Any] | None = None\n    preparation_result: dict[str, Any] | None = None\n    review_result: dict[str, Any] | None = None\n    events: tuple[TaskEventResponse, ...] = Field(default_factory=tuple)\n''',
-          )
-
-          replace_once(
-              '''    result: Any = None\n    preparation_result: Any = None\n    started_at_epoch: float | None = None\n''',
-              '''    result: Any = None\n    preparation_result: Any = None\n    review_result: Any = None\n    started_at_epoch: float | None = None\n''',
-          )
-
-          helper_anchor = '''def _phase_from_result(\n    result: Any,\n) -> CodeBuilderTaskPhase:\n'''
-          helper = '''def _review_prepared_change(\n    *,\n    task_service: TaskService,\n    stored_task: StoredTask,\n    preparation_result: Any,\n) -> dict[str, Any]:\n    reviewer = getattr(\n        task_service.ollama_service,\n        "analyze_code_task",\n        None,\n    )\n    model = getattr(\n        task_service.ollama_service,\n        "model",\n        None,\n    )\n\n    if not callable(reviewer):\n        return {\n            "status": "unavailable",\n            "model": str(model) if model else None,\n            "summary": (\n                "AI review is unavailable because the configured Code "\n                "Builder Ollama adapter does not expose a synchronous "\n                "review-compatible analysis method."\n            ),\n            "reviewed_at_epoch": time.time(),\n        }\n\n    serialized_preparation = _serialize_value(preparation_result)\n    review_instruction = (\n        "Act as the independent LUMINA Code Builder reviewer. Review ONLY "\n        "the supplied prepared implementation plan, proposed patch/diff, "\n        "and patch validation. Do not generate replacement code and do not "\n        "modify files. Check scope alignment, correctness risks, unsafe or "\n        "destructive changes, missing tests, plan/patch mismatches, and "\n        "rollback concerns. Give a concise verdict using PASS, WARN, or "\n        "BLOCK, followed by concrete findings with file paths when known."\n    )\n\n    try:\n        content = reviewer(\n            instruction=review_instruction,\n            repository_context=serialized_preparation,\n            user_context={\n                "original_instruction": stored_task.request.instruction,\n                "task_id": stored_task.request.task_id,\n                "purpose": "pre_approval_review",\n            },\n            target_paths=stored_task.request.target_paths,\n            excluded_paths=stored_task.request.excluded_paths,\n            timeout_seconds=min(\n                stored_task.request.task_timeout_seconds,\n                300.0,\n            ),\n            cancellation_token=stored_task.cancellation_token,\n        )\n    except Exception as exc:\n        logger.warning(\n            "Code Builder AI review failed for task %s: %s",\n            stored_task.request.task_id,\n            exc,\n        )\n        return {\n            "status": "unavailable",\n            "model": str(model) if model else None,\n            "summary": f"AI review failed: {exc}",\n            "reviewed_at_epoch": time.time(),\n        }\n\n    normalized = str(content).strip()\n    upper = normalized.upper()\n    verdict = (\n        "block"\n        if "BLOCK" in upper\n        else "warn"\n        if "WARN" in upper\n        else "pass"\n    )\n    return {\n        "status": "completed",\n        "verdict": verdict,\n        "model": str(model) if model else None,\n        "summary": normalized,\n        "reviewed_at_epoch": time.time(),\n    }\n\n\n'''
-          replace_once(helper_anchor, helper + helper_anchor)
-
-          replace_once(
-              '''    serialized_preparation = _serialize_value(\n        stored_task.preparation_result\n    )\n\n    serialized_rollback = _serialize_value(\n''',
-              '''    serialized_preparation = _serialize_value(\n        stored_task.preparation_result\n    )\n    serialized_review = _serialize_value(\n        stored_task.review_result\n    )\n\n    serialized_rollback = _serialize_value(\n''',
-          )
-
-          replace_once(
-              '''        preparation_result=(\n            dict(serialized_preparation)\n            if isinstance(serialized_preparation, Mapping)\n            else None\n        ),\n        events=events,\n''',
-              '''        preparation_result=(\n            dict(serialized_preparation)\n            if isinstance(serialized_preparation, Mapping)\n            else None\n        ),\n        review_result=(\n            dict(serialized_review)\n            if isinstance(serialized_review, Mapping)\n            else None\n        ),\n        events=events,\n''',
-          )
-
-          replace_once(
-              '''            else:\n                stored_task.preparation_result = result\n                stored_task.phase = CodeBuilderTaskPhase.AWAITING_APPROVAL\n                stored_task.metadata["preparation_completed_at_epoch"] = time.time()\n                stored_task.finished_at_epoch = None\n''',
-              '''            else:\n                stored_task.preparation_result = result\n                stored_task.review_result = _review_prepared_change(\n                    task_service=task_service,\n                    stored_task=stored_task,\n                    preparation_result=result,\n                )\n                stored_task.phase = CodeBuilderTaskPhase.AWAITING_APPROVAL\n                stored_task.metadata["preparation_completed_at_epoch"] = time.time()\n                stored_task.finished_at_epoch = None\n''',
-          )
-
-          path.write_text(text, encoding="utf-8")
-      - name: Extend focused tests
-        shell: python
-        run: |
-          from pathlib import Path
-          path = Path("backend/tests/test_code_builder_transaction_boundary.py")
-          text = path.read_text(encoding="utf-8")
-          text = text.replace(
-              '''    _bind_prepared_patch_to_request,\n    _run_stored_task_sync,\n''',
-              '''    _bind_prepared_patch_to_request,\n    _review_prepared_change,\n    _run_stored_task_sync,\n''',
-              1,
-          )
-          addition = '''\n\nclass ReviewOllamaService:\n    model = "review-test-model"\n\n    def analyze_code_task(self, **kwargs):\n        assert kwargs["user_context"]["purpose"] == "pre_approval_review"\n        return "WARN: Add a targeted regression test for backend/prepared_boundary.py."\n\n\ndef test_prepared_change_ai_review_is_non_writing_and_structured(tmp_path: Path) -> None:\n    relative = "backend/prepared_boundary.py"\n    (tmp_path / "backend").mkdir()\n    payload = TaskCreateRequest(\n        instruction="Review prepared change.",\n        require_approval=True,\n        auto_start_after_approval=False,\n        build_policy=BuildPolicy.DISABLED,\n    )\n    service = make_service(tmp_path, relative)\n    service._ollama_service = ReviewOllamaService()\n    request = _task_request_from_api(payload, task_id="review-test")\n    stored = StoredTask(\n        request=request,\n        api_request=payload,\n        phase=CodeBuilderTaskPhase.AWAITING_APPROVAL,\n        created_at_epoch=1.0,\n        updated_at_epoch=1.0,\n        require_approval=True,\n        auto_start_after_approval=False,\n        cancellation_token=service.create_cancellation_token("review-test"),\n    )\n\n    review = _review_prepared_change(\n        task_service=service,\n        stored_task=stored,\n        preparation_result={"plan": {"title": "test"}, "patch_validation": {"valid": True}},\n    )\n\n    assert review["status"] == "completed"\n    assert review["verdict"] == "warn"\n    assert review["model"] == "review-test-model"\n    assert "targeted regression test" in review["summary"]\n    assert not (tmp_path / relative).exists()\n'''
-          path.write_text(text + addition, encoding="utf-8")
+          tests = Path("backend/tests/test_code_builder_transaction_boundary.py")
+          test_text = tests.read_text(encoding="utf-8")
+          addition = '''\n\ndef test_ai_review_does_not_treat_negated_block_word_as_block(tmp_path: Path) -> None:\n    class PassReviewOllamaService:\n        model = "review-test-model"\n\n        def analyze_code_task(self, **_kwargs):\n            return "PASS: No BLOCK issues were found in the prepared patch."\n\n    relative = "backend/review_verdict.py"\n    (tmp_path / "backend").mkdir()\n    payload = TaskCreateRequest(\n        instruction="Review verdict parsing.",\n        require_approval=True,\n        auto_start_after_approval=False,\n        build_policy=BuildPolicy.DISABLED,\n    )\n    service = make_service(tmp_path, relative)\n    service._ollama_service = PassReviewOllamaService()\n    request = _task_request_from_api(payload, task_id="review-verdict-test")\n    stored = StoredTask(\n        request=request,\n        api_request=payload,\n        phase=CodeBuilderTaskPhase.AWAITING_APPROVAL,\n        created_at_epoch=1.0,\n        updated_at_epoch=1.0,\n        require_approval=True,\n        auto_start_after_approval=False,\n        cancellation_token=service.create_cancellation_token("review-verdict-test"),\n    )\n\n    review = _review_prepared_change(\n        task_service=service,\n        stored_task=stored,\n        preparation_result={"plan": {"title": "test"}},\n    )\n\n    assert review["verdict"] == "pass"\n    assert not (tmp_path / relative).exists()\n'''
+          if "test_ai_review_does_not_treat_negated_block_word_as_block" not in test_text:
+              tests.write_text(test_text + addition, encoding="utf-8")
       - name: Targeted verification
         run: |
           pip install -r backend/requirements.txt
           python -m pytest backend/tests/test_code_builder_transaction_boundary.py backend/tests/test_code_builder_execution_pipeline.py -q
-      - name: Commit review integration
+      - name: Commit hardening
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add backend/code_builder/router.py backend/tests/test_code_builder_transaction_boundary.py
           git diff --cached --check
-          git commit -m "code-builder: add pre-approval AI review artifact"
+          git commit -m "code-builder: harden AI review verdict parsing"
           git push origin HEAD:work/code-builder-complete
