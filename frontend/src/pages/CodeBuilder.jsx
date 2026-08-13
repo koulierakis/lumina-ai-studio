@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, CircleAlert, Code2, FileCode2, Loader2, Play, RefreshCw, RotateCcw, ShieldCheck, XCircle } from 'lucide-react';
+import { CheckCircle2, CircleAlert, Code2, FileCode2, Loader2, Play, RefreshCw, RotateCcw, ShieldCheck, Sparkles, XCircle } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled', 'timed_out', 'rolled_back', 'rollback_failed']);
@@ -34,6 +34,12 @@ function StatusPill({ phase }) {
       {phaseLabel(phase)}
     </span>
   );
+}
+
+function ReviewBadge({ review }) {
+  const verdict = review?.verdict || review?.status || 'pending';
+  const tone = verdict === 'pass' ? 'border-emerald-400/25 text-emerald-200' : verdict === 'block' ? 'border-red-400/25 text-red-200' : verdict === 'warn' ? 'border-amber-300/25 text-amber-100' : 'border-white/10 text-white/45';
+  return <span className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] ${tone}`}>{verdict}</span>;
 }
 
 export default function CodeBuilder() {
@@ -115,10 +121,12 @@ export default function CodeBuilder() {
   };
 
   const preparation = task?.preparation_result;
+  const review = task?.review_result;
   const plan = preparation?.plan;
+  const verification = task?.result?.build_result;
   const planFiles = useMemo(() => collectPlanFiles(plan), [plan]);
   const diffs = useMemo(() => collectDiffs(preparation), [preparation]);
-  const canApprove = task?.phase === 'awaiting_approval' && Boolean(preparation?.patch) && Boolean(preparation?.patch_validation);
+  const canApprove = task?.phase === 'awaiting_approval' && Boolean(preparation?.patch) && Boolean(preparation?.patch_validation) && Boolean(review);
   const canRollback = ['completed', 'failed', 'cancelled', 'timed_out', 'rollback_failed'].includes(task?.phase);
 
   return (
@@ -165,12 +173,26 @@ export default function CodeBuilder() {
                 <div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-gold" /><h3 className="text-sm font-medium text-white">Validation</h3></div>
                 <pre className="mt-4 max-h-72 overflow-auto rounded-lg border border-white/[0.07] bg-black/25 p-4 text-[11px] leading-relaxed text-white/60">{pretty(preparation?.patch_validation) || 'Validation results will appear after preparation.'}</pre>
               </section>
+
+              <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-5" data-testid="code-builder-ai-review">
+                <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-gold" /><h3 className="text-sm font-medium text-white">AI review</h3></div>{review && <ReviewBadge review={review} />}</div>
+                <p className="mt-2 text-xs leading-relaxed text-white/40">Independent read-only review of the prepared plan, diff and validation. The reviewer cannot write files and does not replace your approval decision.</p>
+                <pre className="mt-4 max-h-80 overflow-auto rounded-lg border border-white/[0.07] bg-black/25 p-4 text-[11px] leading-relaxed text-white/65">{review?.summary || 'AI review will appear before approval becomes available.'}</pre>
+                {review?.model && <p className="mt-2 text-[10px] uppercase tracking-[0.16em] text-white/30">Model: {review.model}</p>}
+              </section>
+
+              {(verification || task?.rollback_result) && <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-5" data-testid="code-builder-verification">
+                <div className="flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-gold" /><h3 className="text-sm font-medium text-white">Post-apply verification</h3></div>
+                <p className="mt-2 text-xs leading-relaxed text-white/40">Results produced only after the approved patch is applied. Rollback information is preserved when verification fails.</p>
+                {verification && <><p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-white/35">Build / tests</p><pre className="mt-2 max-h-80 overflow-auto rounded-lg border border-white/[0.07] bg-black/25 p-4 text-[11px] leading-relaxed text-white/65">{pretty(verification)}</pre></>}
+                {task?.rollback_result && <><p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-white/35">Rollback</p><pre className="mt-2 max-h-80 overflow-auto rounded-lg border border-white/[0.07] bg-black/25 p-4 text-[11px] leading-relaxed text-white/65">{pretty(task.rollback_result)}</pre></>}
+              </section>}
             </div>
 
             <aside className="space-y-6">
               <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-5">
                 <h3 className="text-sm font-medium text-white">Approval gate</h3>
-                <p className="mt-2 text-xs leading-relaxed text-white/45">Approve only the prepared and validated patch shown here. Approval starts the protected backup → apply → verification pipeline.</p>
+                <p className="mt-2 text-xs leading-relaxed text-white/45">Approve only the prepared, validated and reviewed patch shown here. Approval starts the protected backup → apply → verification pipeline.</p>
                 <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Optional approval note" className="mt-4 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none placeholder:text-white/25 focus:border-gold/40" />
                 <div className="mt-4 grid grid-cols-2 gap-2"><button data-testid="code-builder-reject" onClick={() => decide('reject')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md border border-red-400/20 px-3 py-2.5 text-xs text-red-100 disabled:opacity-30"><XCircle className="h-4 w-4" />Reject</button><button data-testid="code-builder-approve" onClick={() => decide('approve')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md bg-gold px-3 py-2.5 text-xs font-medium text-black disabled:opacity-30"><CheckCircle2 className="h-4 w-4" />Approve & apply</button></div>
                 {canRollback && <button onClick={rollback} disabled={busy} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/10 px-3 py-2.5 text-xs text-white/65 hover:text-white disabled:opacity-30"><RotateCcw className="h-4 w-4" />Rollback</button>}
