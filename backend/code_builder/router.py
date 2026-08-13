@@ -1022,13 +1022,19 @@ def _review_prepared_change(
         }
 
     normalized = str(content).strip()
-    upper = normalized.upper()
+    first_line = (
+        normalized.splitlines()[0].strip().upper()
+        if normalized
+        else ""
+    )
     verdict = (
         "block"
-        if "BLOCK" in upper
+        if first_line.startswith("BLOCK")
         else "warn"
-        if "WARN" in upper
+        if first_line.startswith("WARN")
         else "pass"
+        if first_line.startswith("PASS")
+        else "warn"
     )
     return {
         "status": "completed",

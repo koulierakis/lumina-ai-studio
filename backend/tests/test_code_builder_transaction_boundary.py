@@ -160,3 +160,42 @@ def test_prepared_change_ai_review_is_non_writing_and_structured(tmp_path: Path)
     assert review["model"] == "review-test-model"
     assert "targeted regression test" in review["summary"]
     assert not (tmp_path / relative).exists()
+
+
+def test_ai_review_does_not_treat_negated_block_word_as_block(tmp_path: Path) -> None:
+    class PassReviewOllamaService:
+        model = "review-test-model"
+
+        def analyze_code_task(self, **_kwargs):
+            return "PASS: No BLOCK issues were found in the prepared patch."
+
+    relative = "backend/review_verdict.py"
+    (tmp_path / "backend").mkdir()
+    payload = TaskCreateRequest(
+        instruction="Review verdict parsing.",
+        require_approval=True,
+        auto_start_after_approval=False,
+        build_policy=BuildPolicy.DISABLED,
+    )
+    service = make_service(tmp_path, relative)
+    service._ollama_service = PassReviewOllamaService()
+    request = _task_request_from_api(payload, task_id="review-verdict-test")
+    stored = StoredTask(
+        request=request,
+        api_request=payload,
+        phase=CodeBuilderTaskPhase.AWAITING_APPROVAL,
+        created_at_epoch=1.0,
+        updated_at_epoch=1.0,
+        require_approval=True,
+        auto_start_after_approval=False,
+        cancellation_token=service.create_cancellation_token("review-verdict-test"),
+    )
+
+    review = _review_prepared_change(
+        task_service=service,
+        stored_task=stored,
+        preparation_result={"plan": {"title": "test"}},
+    )
+
+    assert review["verdict"] == "pass"
+    assert not (tmp_path / relative).exists()
