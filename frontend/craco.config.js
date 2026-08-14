@@ -1,6 +1,7 @@
 // craco.config.js
 const path = require("path");
 require("dotenv").config();
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build
@@ -32,17 +33,37 @@ function makeDevServerV5Compatible(devServerConfig) {
     "Cross-Origin-Resource-Policy": "same-origin",
   };
 
-  if (onBeforeSetupMiddleware || setupMiddlewares) {
-    compatibleConfig.setupMiddlewares = (middlewares, devServer) => {
-      if (onBeforeSetupMiddleware) {
-        onBeforeSetupMiddleware(devServer);
-      }
+  compatibleConfig.setupMiddlewares = (middlewares, devServer) => {
+    if (onBeforeSetupMiddleware) {
+      onBeforeSetupMiddleware(devServer);
+    }
 
-      return setupMiddlewares
-        ? setupMiddlewares(middlewares, devServer)
-        : middlewares;
-    };
-  }
+    let configuredMiddlewares = setupMiddlewares
+      ? setupMiddlewares(middlewares, devServer)
+      : middlewares;
+
+    // The project intentionally runs webpack-dev-server 5 while react-scripts 5
+    // was designed around WDS4 hooks. Register the LUMINA API proxy here, in
+    // the final compatibility layer, so CRACO / visual-edits wrappers cannot
+    // overwrite it. It must be before the SPA history fallback.
+    const hasLuminaApiProxy = configuredMiddlewares.some(
+      (entry) => entry && entry.name === "lumina-api-proxy"
+    );
+
+    if (!hasLuminaApiProxy) {
+      configuredMiddlewares.unshift({
+        name: "lumina-api-proxy",
+        middleware: createProxyMiddleware("/api", {
+          target: "http://127.0.0.1:8000",
+          changeOrigin: false,
+          ws: false,
+          logLevel: "warn",
+        }),
+      });
+    }
+
+    return configuredMiddlewares;
+  };
 
   compatibleConfig.onListening = (devServer) => {
     devServer.close ??= (callback) => devServer.stopCallback(callback);
@@ -86,15 +107,15 @@ let webpackConfig = {
     configure: (webpackConfig) => {
 
       // Add ignored patterns to reduce watched directories
-        webpackConfig.watchOptions = {
-          ...webpackConfig.watchOptions,
-          ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            '**/build/**',
-            '**/dist/**',
-            '**/coverage/**',
-            '**/public/**',
+      webpackConfig.watchOptions = {
+        ...webpackConfig.watchOptions,
+        ignored: [
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/build/**',
+          '**/dist/**',
+          '**/coverage/**',
+          '**/public/**',
         ],
       };
 
