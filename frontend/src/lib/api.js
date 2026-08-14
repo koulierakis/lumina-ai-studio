@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const CONFIGURED_BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || '').replace(/\/+$/, '');
+const BACKEND_URL = process.env.NODE_ENV === 'development' ? '' : CONFIGURED_BACKEND_URL;
 export const API_BASE = `${BACKEND_URL}/api`;
 const DEFAULT_TIMEOUT = 25000;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -75,7 +76,6 @@ function normalizeError(error) {
       ? responseData.message
       : null;
 
-  
   return {
     isAxiosError: true,
     status,
