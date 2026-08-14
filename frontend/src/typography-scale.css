@@ -22,68 +22,85 @@ textarea,
 select,
 option,
 label {
-  font-size: max(1rem, 15px);
+  font-size: 16px !important;
 }
 
 small {
-  font-size: max(0.9rem, 14px);
+  font-size: 15px !important;
 }
 
 /* --------------------------------------------------------------------------
    GLOBAL TOOL TYPOGRAPHY
-   Many Lumina tools use Tailwind's tiny utility sizes directly in JSX.
-   Root scaling alone does not affect arbitrary pixel utilities such as text-[9px].
-   These overrides make those labels readable everywhere without editing each tool.
+   Lumina uses many tiny Tailwind utilities inside tool panels. These are raised
+   aggressively so labels are clearly readable on desktop without browser zoom.
    -------------------------------------------------------------------------- */
 
-[class~="text-[8px]"]  { font-size: 13px !important; line-height: 1.35 !important; }
-[class~="text-[9px]"]  { font-size: 14px !important; line-height: 1.35 !important; }
-[class~="text-[10px]"] { font-size: 14px !important; line-height: 1.4 !important; }
-[class~="text-[11px]"] { font-size: 15px !important; line-height: 1.4 !important; }
-[class~="text-[12px]"] { font-size: 16px !important; line-height: 1.4 !important; }
+[class~="text-[8px]"]  { font-size: 16px !important; line-height: 1.35 !important; }
+[class~="text-[9px]"]  { font-size: 16px !important; line-height: 1.35 !important; }
+[class~="text-[10px]"] { font-size: 16px !important; line-height: 1.4 !important; }
+[class~="text-[11px]"] { font-size: 16px !important; line-height: 1.4 !important; }
+[class~="text-[12px]"] { font-size: 17px !important; line-height: 1.4 !important; }
 [class~="text-[13px]"] { font-size: 17px !important; line-height: 1.4 !important; }
 [class~="text-[14px]"] { font-size: 18px !important; line-height: 1.45 !important; }
 
-/* Standard Tailwind sizes used heavily inside Image, Video, Voice, Identity,
-   Documents, Code Builder, Executive Advisor, Jobs and Settings tools. */
-.text-xs { font-size: 15px !important; line-height: 1.4 !important; }
-.text-sm { font-size: 16px !important; line-height: 1.45 !important; }
+.text-xs { font-size: 16px !important; line-height: 1.4 !important; }
+.text-sm { font-size: 17px !important; line-height: 1.45 !important; }
 .text-base { font-size: 18px !important; line-height: 1.5 !important; }
 
-/* Uppercase micro-labels (AI PROVIDER, IDENTITY PACK, PROMPT, SCENE, etc.). */
+/* Tool section labels: AI PROVIDER, IDENTITY PACK, PROMPT, NEGATIVE, SCENE,
+   OUTFIT, ASPECT, OUTPUTS and equivalent labels in every other module. */
+label,
+legend,
+[class*="uppercase"],
+[class*="tracking-wider"],
+[class*="tracking-widest"],
+[class*="tracking-["],
 [class*="uppercase"][class*="tracking-"] {
-  font-size: max(14px, 0.78rem) !important;
-  line-height: 1.35 !important;
+  font-size: 18px !important;
+  line-height: 1.3 !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.08em !important;
 }
 
-/* Interactive chips/tabs frequently use tiny explicit typography. */
-button[class*="text-["],
-a[class*="text-["],
-[role="button"][class*="text-["],
-[role="tab"][class*="text-["] {
-  min-font-size: 14px;
+/* Chips, tabs and compact actions inside every tool. */
+button[class*="text-"],
+a[class*="text-"],
+[role="button"],
+[role="tab"],
+[role="option"] {
+  font-size: 15px !important;
+  line-height: 1.3 !important;
+}
+
+/* Form values should be as readable as their labels. */
+input,
+textarea,
+select,
+option {
+  font-size: 16px !important;
+  line-height: 1.4 !important;
 }
 
 /* Legacy inline fixed pixel sizes. */
 [style*="font-size: 8px"],
-[style*="font-size:8px"] { font-size: 13px !important; }
+[style*="font-size:8px"],
 [style*="font-size: 9px"],
-[style*="font-size:9px"] { font-size: 14px !important; }
+[style*="font-size:9px"],
 [style*="font-size: 10px"],
-[style*="font-size:10px"] { font-size: 14px !important; }
+[style*="font-size:10px"],
 [style*="font-size: 11px"],
-[style*="font-size:11px"] { font-size: 15px !important; }
+[style*="font-size:11px"] { font-size: 16px !important; }
 [style*="font-size: 12px"],
-[style*="font-size:12px"] { font-size: 16px !important; }
+[style*="font-size:12px"],
 [style*="font-size: 13px"],
 [style*="font-size:13px"] { font-size: 17px !important; }
 [style*="font-size: 14px"],
 [style*="font-size:14px"] { font-size: 18px !important; }
 
 /* Existing CSS classes with fixed pixel typography. */
-.mini-timeline-btn { font-size: 14px !important; }
+.mini-timeline-btn { font-size: 15px !important; }
 .left-tool,
-.inputish { font-size: 1rem !important; }
+.inputish { font-size: 16px !important; }
 
 .doc-ai-panel-header span,
 .doc-ai-section > button,
@@ -91,52 +108,59 @@ a[class*="text-["],
 .doc-ai-selection-actions button,
 .doc-ai-pack-item button,
 .doc-ai-field,
-.doc-ai-readiness { font-size: 15px !important; }
-.doc-ai-section h3 { font-size: 18px !important; }
-.doc-ai-error { font-size: 16px !important; }
+.doc-ai-readiness { font-size: 16px !important; }
+.doc-ai-section h3 { font-size: 19px !important; }
+.doc-ai-error { font-size: 17px !important; }
 .doc-ai-recommendation,
 .doc-ai-pack-item,
-.doc-ai-pack-summary { font-size: 15px !important; }
+.doc-ai-pack-summary { font-size: 16px !important; }
 .doc-ai-recommendation em,
 .doc-ai-missing,
-.doc-ai-metadata { font-size: 14px !important; }
+.doc-ai-metadata { font-size: 15px !important; }
 .doc-ai-recommendation small,
 .doc-ai-pack-item small,
 .doc-ai-preview p,
-.doc-ai-empty { font-size: 14px !important; }
-.doc-ai-status { font-size: 13px !important; }
+.doc-ai-empty { font-size: 15px !important; }
+.doc-ai-status { font-size: 14px !important; }
 
 .document-brand strong { font-size: 18px !important; }
-.document-brand span { font-size: 13px !important; }
+.document-brand span { font-size: 14px !important; }
 .document-title { font-size: 17px !important; }
-.document-save-state { font-size: 14px !important; }
+.document-save-state { font-size: 15px !important; }
 .document-icon-button,
-.document-ai-button { font-size: 15px !important; }
+.document-ai-button { font-size: 16px !important; }
 
-/* Preserve the display hierarchy while improving readability. */
 h1 { line-height: 1.08; }
 h2 { line-height: 1.12; }
 h3 { line-height: 1.18; }
 
-/* Mobile: keep tool labels readable but avoid oversized controls on narrow screens. */
+/* Mobile keeps the same readability target with a modest reduction. */
 @media (max-width: 700px) {
   html { font-size: 17px; }
+
+  label,
+  legend,
+  [class*="uppercase"],
+  [class*="tracking-wider"],
+  [class*="tracking-widest"],
+  [class*="uppercase"][class*="tracking-"] {
+    font-size: 16px !important;
+  }
 
   button,
   input,
   textarea,
   select,
-  option,
-  label { font-size: max(0.95rem, 14px); }
+  option { font-size: 15px !important; }
 
   [class~="text-[8px]"],
   [class~="text-[9px]"],
-  [class~="text-[10px]"] { font-size: 13px !important; }
-  [class~="text-[11px]"] { font-size: 14px !important; }
-  [class~="text-[12px]"] { font-size: 15px !important; }
+  [class~="text-[10px]"],
+  [class~="text-[11px]"] { font-size: 15px !important; }
+  [class~="text-[12px]"],
   [class~="text-[13px]"],
   [class~="text-[14px]"] { font-size: 16px !important; }
 
-  .text-xs { font-size: 14px !important; }
-  .text-sm { font-size: 15px !important; }
+  .text-xs { font-size: 15px !important; }
+  .text-sm { font-size: 16px !important; }
 }
