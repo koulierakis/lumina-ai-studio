@@ -1,7 +1,51 @@
 """Lumina provider registry and provider manager."""
 from __future__ import annotations
 
+import os
 from typing import Dict, Type
+
+
+def _hydrate_windows_user_environment() -> None:
+    """Load selected per-user Windows environment values into this process.
+
+    LUMINA is commonly launched from a long-lived desktop process. Windows user
+    environment variables created after that parent process started are stored
+    in HKCU\Environment but are not necessarily present in ``os.environ`` of
+    the spawned backend. Read only the provider keys we support, never log
+    values, and never overwrite an explicit process-level value.
+    """
+    if os.name != "nt":
+        return
+
+    try:
+        import winreg
+    except ImportError:
+        return
+
+    names = (
+        "GEMINI_API_KEY_ROTATION",
+        "GEMINI_API_KEY",
+        "EMERGENT_LLM_KEY",
+        "OPENAI_API_KEY",
+    )
+
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Environment") as key:
+            for name in names:
+                if os.environ.get(name):
+                    continue
+                try:
+                    value, _ = winreg.QueryValueEx(key, name)
+                except OSError:
+                    continue
+                value = str(value).strip() if value is not None else ""
+                if value:
+                    os.environ[name] = value
+    except OSError:
+        return
+
+
+_hydrate_windows_user_environment()
 
 from .base import (
     ErrorKind,
