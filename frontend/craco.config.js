@@ -1,5 +1,6 @@
 // craco.config.js
 const path = require("path");
+const os = require("os");
 require("dotenv").config();
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
@@ -11,6 +12,19 @@ const isDevServer = process.env.NODE_ENV !== "production";
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
 };
+
+function localDevHosts() {
+  const hosts = new Set(["localhost", "127.0.0.1", os.hostname()]);
+  const interfaces = os.networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (entry && entry.family === "IPv4" && !entry.internal && entry.address) {
+        hosts.add(entry.address);
+      }
+    }
+  }
+  return Array.from(hosts).filter(Boolean);
+}
 
 function makeDevServerV5Compatible(devServerConfig) {
   const {
@@ -32,6 +46,26 @@ function makeDevServerV5Compatible(devServerConfig) {
     ...compatibleConfig.headers,
     "Cross-Origin-Resource-Policy": "same-origin",
   };
+
+  // Some wrappers can inject allowedHosts: [""] when HOST is blank. WDS5
+  // rejects that configuration before the frontend starts. Keep any valid
+  // configured hosts, remove empty values, and explicitly allow this machine's
+  // local/Tailscale IPv4 addresses for private remote access.
+  if (compatibleConfig.allowedHosts !== "all") {
+    const configuredHosts = Array.isArray(compatibleConfig.allowedHosts)
+      ? compatibleConfig.allowedHosts
+      : compatibleConfig.allowedHosts
+        ? [compatibleConfig.allowedHosts]
+        : [];
+    compatibleConfig.allowedHosts = Array.from(
+      new Set([
+        ...configuredHosts.filter(
+          (host) => typeof host === "string" && host.trim().length > 0
+        ),
+        ...localDevHosts(),
+      ])
+    );
+  }
 
   compatibleConfig.setupMiddlewares = (middlewares, devServer) => {
     if (onBeforeSetupMiddleware) {
