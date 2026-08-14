@@ -44,6 +44,16 @@ function normalizeOutputMediaIds(payload) {
     .filter(Boolean);
 }
 
+function progressStage(progress, status) {
+  if (status === 'failed') return 'Generation failed';
+  if (status === 'completed') return 'Generation complete';
+  if (progress < 15) return 'Preparing generation…';
+  if (progress < 35) return 'Loading identity references…';
+  if (progress < 60) return 'Routing image provider…';
+  if (progress < 90) return 'Generating your image…';
+  return 'Finalizing result…';
+}
+
 export default function Generate() {
   const navigate = useNavigate();
   const [packs, setPacks] = useState([]);
@@ -59,6 +69,7 @@ export default function Generate() {
   const [running, setRunning] = useState(false);
   const [providers, setProviders] = useState([]);
   const [provider, setProvider] = useState('');
+  const [progress, setProgress] = useState(0);
 
   useEffect(() => {
     apiGet('/providers').then((data) => {
@@ -76,16 +87,33 @@ export default function Generate() {
     if (packId) localStorage.setItem('lumina_active_pack', packId);
   }, [packId]);
 
+  useEffect(() => {
+    if (!running || !job || job.status === 'completed' || job.status === 'failed') return;
+    const t = setInterval(() => {
+      setProgress((current) => {
+        if (current >= 92) return current;
+        if (current < 20) return Math.min(20, current + 2);
+        if (current < 60) return Math.min(60, current + 1);
+        return Math.min(92, current + 0.5);
+      });
+    }, 700);
+    return () => clearInterval(t);
+  }, [running, job]);
+
   // Poll job status
   useEffect(() => {
-    if (!job || job.status === 'completed' || job.status === 'failed') return;
+    if (!job || job.id === 'pending' || job.status === 'completed' || job.status === 'failed') return;
     const t = setInterval(async () => {
       try {
         const data = await apiGet(`/jobs/${job.id}`);
         setJob(data);
+        if (Number.isFinite(Number(data.progress))) {
+          setProgress((current) => Math.max(current, Math.min(100, Number(data.progress))));
+        }
         const ids = normalizeOutputMediaIds(data);
         if (data.status === 'completed') setOutputMediaIds(ids);
         if (data.status === 'completed') {
+          setProgress(100);
           setRunning(false);
           toast.success('Generation complete');
         }
@@ -113,8 +141,9 @@ export default function Generate() {
       return;
     }
     setRunning(true);
+    setProgress(3);
     setOutputMediaIds([]);
-    setJob({ id: 'pending', status: 'queued', output_media_ids: [] });
+    setJob({ id: 'pending', status: 'queued', progress: 0, output_media_ids: [] });
     try {
       const data = await apiPost('/generate', {
         identity_pack_id: packId,
@@ -127,9 +156,11 @@ export default function Generate() {
         provider: provider || undefined,
       });
       setJob(data);
+      setProgress((current) => Math.max(current, Number(data.progress) || 8));
       setOutputMediaIds(normalizeOutputMediaIds(data));
     } catch (err) {
       setRunning(false);
+      setProgress(0);
       setOutputMediaIds([]);
       setJob(null);
       toast.error(err?.message || 'Failed to start');
@@ -139,6 +170,7 @@ export default function Generate() {
   const gridCols = outputMediaIds.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
   const activePack = packs.find((p) => p.id === packId);
   const showResults = job?.status === 'completed' && outputMediaIds.length > 0;
+  const visibleProgress = Math.max(0, Math.min(100, Math.round(progress)));
 
   return (
     <div className="h-full w-full flex">
@@ -179,12 +211,25 @@ export default function Generate() {
               background: 'radial-gradient(circle at 50% 50%, rgba(212,175,55,0.18) 0%, transparent 60%)',
             }} />
             <Loader2 strokeWidth={1.25} className="w-10 h-10 text-gold animate-spin mb-6" />
-            <p className="font-display text-2xl text-white mb-1" data-testid="job-status">{
-              job.status === 'processing' ? 'Rendering your scene…' :
-              job.status === 'failed' ? 'Generation failed' :
-              'Preparing generation…'
-            }</p>
-            <p className="text-white/40 text-sm">This usually takes 15–45 seconds per image</p>
+            <div className="relative z-10 w-full max-w-md px-8 text-center">
+              <p className="font-display text-2xl text-white mb-2" data-testid="job-status">
+                {progressStage(visibleProgress, job.status)}
+              </p>
+              <div className="text-gold text-4xl font-semibold tabular-nums mb-4" data-testid="generation-progress">
+                {visibleProgress}%
+              </div>
+              <div className="h-2 w-full rounded-full bg-white/10 overflow-hidden border border-white/[0.06]">
+                <div
+                  className="h-full bg-gold transition-all duration-500 ease-out"
+                  style={{ width: `${visibleProgress}%` }}
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-between text-xs text-white/40">
+                <span>{progressStage(visibleProgress, job.status)}</span>
+                <span>{visibleProgress < 100 ? 'Working…' : 'Done'}</span>
+              </div>
+              <p className="text-white/40 text-sm mt-5">This usually takes 15–45 seconds per image</p>
+            </div>
           </div>
         )}
 
@@ -371,7 +416,7 @@ export default function Generate() {
             className="w-full flex items-center justify-center gap-2 bg-gold text-black font-medium py-3 rounded hover:bg-gold-soft disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {running ? <Loader2 strokeWidth={1.5} className="w-4 h-4 animate-spin" /> : <Sparkles strokeWidth={1.5} className="w-4 h-4" />}
-            {running ? 'Generating…' : 'Generate'}
+            {running ? `Generating ${visibleProgress}%` : 'Generate'}
           </button>
         </div>
       </div>
