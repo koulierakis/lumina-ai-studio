@@ -10,17 +10,23 @@ export default function IdentityPacks() {
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [loadError, setLoadError] = useState('');
   const fileRef = useRef(null);
 
   const load = async () => {
     setLoading(true);
+    setLoadError('');
     try {
       const data = await apiGet('/identity-packs');
-      setPacks(data);
-      if (!selected && data.length) {
-        setSelected(data[0]);
-        localStorage.setItem('lumina_active_pack', data[0].id);
+      const normalized = Array.isArray(data) ? data : [];
+      setPacks(normalized);
+      if (!selected && normalized.length) {
+        setSelected(normalized[0]);
+        localStorage.setItem('lumina_active_pack', normalized[0].id);
       }
+    } catch (err) {
+      setPacks([]);
+      setLoadError(err?.message || 'Identity Packs are temporarily unavailable.');
     } finally {
       setLoading(false);
     }
@@ -43,7 +49,7 @@ export default function IdentityPacks() {
       setSelected(data);
       localStorage.setItem('lumina_active_pack', data.id);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to create');
+      toast.error(err?.message || err?.response?.data?.detail || 'Failed to create');
     }
   };
 
@@ -57,30 +63,42 @@ export default function IdentityPacks() {
       setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
       toast.success('Reference photos added');
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Upload failed');
+      toast.error(err?.message || err?.response?.data?.detail || 'Upload failed');
     }
   };
 
   const removePhoto = async (photoId) => {
     if (!selected) return;
-    const data = await apiDelete(`/identity-packs/${selected.id}/photos/${photoId}`);
-    setSelected(data);
-    setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
+    try {
+      const data = await apiDelete(`/identity-packs/${selected.id}/photos/${photoId}`);
+      setSelected(data);
+      setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
+    } catch (err) {
+      toast.error(err?.message || 'Could not remove photo');
+    }
   };
 
   const setPrimary = async (photoId) => {
     if (!selected) return;
-    const data = await apiPatch(`/identity-packs/${selected.id}`, { primary_photo_id: photoId });
-    setSelected(data);
-    setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
+    try {
+      const data = await apiPatch(`/identity-packs/${selected.id}`, { primary_photo_id: photoId });
+      setSelected(data);
+      setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
+    } catch (err) {
+      toast.error(err?.message || 'Could not set primary photo');
+    }
   };
 
   const removePack = async (id) => {
     if (!window.confirm('Permanently delete this Identity Pack and its photos?')) return;
-    await apiDelete(`/identity-packs/${id}`);
-    if (selected?.id === id) setSelected(null);
-    toast.success('Pack deleted');
-    await load();
+    try {
+      await apiDelete(`/identity-packs/${id}`);
+      if (selected?.id === id) setSelected(null);
+      toast.success('Pack deleted');
+      await load();
+    } catch (err) {
+      toast.error(err?.message || 'Could not delete pack');
+    }
   };
 
   const selectPack = (p) => {
@@ -127,7 +145,19 @@ export default function IdentityPacks() {
 
         <div className="px-2 pb-6 space-y-1">
           {loading && <div className="px-4 text-sm text-white/40">Loading…</div>}
-          {!loading && packs.length === 0 && (
+          {!loading && loadError && (
+            <div className="px-4 py-5">
+              <p className="text-amber-200/90 text-xs leading-relaxed">{loadError}</p>
+              <button
+                type="button"
+                onClick={load}
+                className="mt-3 text-xs px-3 py-1.5 rounded bg-white/5 text-white/70 hover:bg-white/10 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+          {!loading && !loadError && packs.length === 0 && (
             <div className="px-4 py-8 text-center">
               <p className="text-white/40 text-sm">No packs yet</p>
               <p className="text-white/30 text-xs mt-1">Create one to begin</p>
