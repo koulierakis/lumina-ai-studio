@@ -1,7 +1,11 @@
 import axios from 'axios';
 
 const CONFIGURED_BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || '').replace(/\/+$/, '');
-const BACKEND_URL = process.env.NODE_ENV === 'development' ? '' : CONFIGURED_BACKEND_URL;
+const DEV_BACKEND_URL =
+  typeof window !== 'undefined'
+    ? `${window.location.protocol}//${window.location.hostname}:8000`
+    : 'http://127.0.0.1:8000';
+const BACKEND_URL = process.env.NODE_ENV === 'development' ? DEV_BACKEND_URL : CONFIGURED_BACKEND_URL;
 export const API_BASE = `${BACKEND_URL}/api`;
 const DEFAULT_TIMEOUT = 25000;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
