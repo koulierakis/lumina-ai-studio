@@ -27,6 +27,9 @@ def _hydrate_windows_user_environment() -> None:
         "GEMINI_API_KEY",
         "EMERGENT_LLM_KEY",
         "OPENAI_API_KEY",
+        "CLOUDFLARE_API_TOKEN",
+        "CLOUDFLARE_ACCOUNT_ID",
+        "CLOUDFLARE_IMAGE_MODEL",
     )
 
     try:
@@ -64,6 +67,7 @@ from .base import (
     ProviderTimeoutError,
     ProviderUnsupportedCapabilityError,
 )
+from .cloudflare_provider import CloudflareWorkersAIProvider
 from .comfyui_provider import ComfyUIProvider
 from .gemini_provider import GeminiImageProvider
 from .manager import ProviderManager
@@ -78,6 +82,7 @@ _REGISTRY: Dict[str, Type[ImageProvider]] = {
     "bfl": BflImageProvider,
     "replicate": ReplicateImageProvider,
     "gemini": GeminiImageProvider,
+    "cloudflare": CloudflareWorkersAIProvider,
     "mock": MockImageProvider,
     "openai": OpenAIImageProvider,
     "local": LocalImageProvider,
