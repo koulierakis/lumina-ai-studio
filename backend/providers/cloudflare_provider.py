@@ -27,6 +27,7 @@ from .base import (
     GeneratedImage,
     GenerationInput,
     ImageProvider,
+    ProviderCapabilities,
     ProviderError,
     ProviderInvalidResponseError,
 )
@@ -40,7 +41,7 @@ REFERENCE_MAX_SIDE = 511
 class CloudflareWorkersAIProvider(ImageProvider):
     name = "cloudflare"
     priority = 11
-    capabilities = __import__("backend.providers.base", fromlist=["ProviderCapabilities"]).ProviderCapabilities(
+    capabilities = ProviderCapabilities(
         generation=True,
         editing=False,
         identity_references=True,
@@ -62,15 +63,10 @@ class CloudflareWorkersAIProvider(ImageProvider):
         return bool(os.getenv("CLOUDFLARE_API_TOKEN") and os.getenv("CLOUDFLARE_ACCOUNT_ID"))
 
     def _model(self, spec: GenerationInput) -> str:
-        return (
-            spec.model
-            or os.getenv("CLOUDFLARE_IMAGE_MODEL")
-            or DEFAULT_MODEL
-        )
+        return spec.model or os.getenv("CLOUDFLARE_IMAGE_MODEL") or DEFAULT_MODEL
 
     @staticmethod
     def _dimensions(aspect_ratio: str) -> tuple[int, int]:
-        # Keep output around one megapixel while respecting Workers AI ranges.
         return {
             "1:1": (1024, 1024),
             "16:9": (1344, 768),
