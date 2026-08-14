@@ -47,6 +47,11 @@ def _local_passwordless_enabled() -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _tailscale_passwordless_enabled() -> bool:
+    value = os.environ.get("LUMINA_TAILSCALE_PASSWORDLESS", "1")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def verify_credentials(email: str, password: str) -> bool:
     if not email or not password:
         return False
@@ -91,28 +96,57 @@ def decode_token(token: str) -> str | None:
         return None
 
 
-def _is_loopback_request(request: Request) -> bool:
+def _client_ip(request: Request) -> ipaddress._BaseAddress | None:
     client = request.client
     host = (client.host if client else "").strip()
     if not host:
-        return False
+        return None
     try:
-        return ipaddress.ip_address(host).is_loopback
+        return ipaddress.ip_address(host)
     except ValueError:
-        return host.lower() == "localhost"
+        return None
+
+
+def _is_loopback_request(request: Request) -> bool:
+    address = _client_ip(request)
+    if address is not None:
+        return address.is_loopback
+
+    client = request.client
+    host = (client.host if client else "").strip().lower()
+    return host == "localhost"
+
+
+def _is_tailscale_request(request: Request) -> bool:
+    """Return True only for source addresses from Tailscale address space.
+
+    Tailscale peers use 100.64.0.0/10 for IPv4 and fd7a:115c:a1e0::/48
+    for IPv6. This keeps passwordless remote access confined to the private
+    tailnet instead of opening the owner API to arbitrary LAN/Internet clients.
+    """
+    address = _client_ip(request)
+    if address is None:
+        return False
+
+    if isinstance(address, ipaddress.IPv4Address):
+        return address in ipaddress.ip_network("100.64.0.0/10")
+
+    return address in ipaddress.ip_network("fd7a:115c:a1e0::/48")
 
 
 async def require_owner(request: Request) -> str:
-    """Authenticate the owner, optionally allowing passwordless loopback access.
+    """Authenticate the owner for local desktop and trusted Tailscale access.
 
     Desktop installations default to passwordless access for requests originating
-    from the same computer. Set ``LUMINA_LOCAL_PASSWORDLESS=0`` to require a
-    valid JWT even on loopback, which is also how the security integration suite
-    verifies the protected-route contract.
+    from the same computer. Trusted Tailscale peers are also allowed by default so
+    the owner's phone/laptop can use the same private LUMINA instance remotely.
+
+    Set ``LUMINA_LOCAL_PASSWORDLESS=0`` and/or
+    ``LUMINA_TAILSCALE_PASSWORDLESS=0`` to require a valid JWT for those paths.
 
     If an Authorization header is supplied it is always validated. A malformed,
     forged, expired, or wrong-owner token is never converted into passwordless
-    access by the local fallback.
+    access by either trusted-network fallback.
     """
     owner_email = _owner_email() or "owner@lumina.local"
     authorization = (request.headers.get("authorization") or "").strip()
@@ -127,6 +161,9 @@ async def require_owner(request: Request) -> str:
         return owner_email
 
     if _local_passwordless_enabled() and _is_loopback_request(request):
+        return owner_email
+
+    if _tailscale_passwordless_enabled() and _is_tailscale_request(request):
         return owner_email
 
     raise HTTPException(status_code=401, detail="Authentication required")
