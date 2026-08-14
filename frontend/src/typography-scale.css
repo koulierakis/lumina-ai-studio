@@ -1,0 +1,97 @@
+/* Global Lumina readability scale.
+   Applied after index.css so existing component styles keep their layout/visual hierarchy
+   while small text becomes consistently easier to read across the entire application. */
+
+:root {
+  --lumina-type-scale: 1.18;
+}
+
+html {
+  font-size: 18px;
+}
+
+body {
+  line-height: 1.5;
+}
+
+/* Tailwind rem-based text utilities scale automatically from the larger root font size.
+   The rules below cover legacy hard-coded px sizes and native controls. */
+
+button,
+input,
+textarea,
+select,
+option,
+label {
+  font-size: max(1rem, 14px);
+}
+
+small {
+  font-size: max(0.9rem, 13px);
+}
+
+/* Preserve relative hierarchy while eliminating unreadably tiny text. */
+[style*="font-size: 8px"],
+[style*="font-size:8px"] { font-size: 11px !important; }
+[style*="font-size: 9px"],
+[style*="font-size:9px"] { font-size: 12px !important; }
+[style*="font-size: 10px"],
+[style*="font-size:10px"] { font-size: 13px !important; }
+[style*="font-size: 11px"],
+[style*="font-size:11px"] { font-size: 14px !important; }
+[style*="font-size: 12px"],
+[style*="font-size:12px"] { font-size: 15px !important; }
+[style*="font-size: 13px"],
+[style*="font-size:13px"] { font-size: 16px !important; }
+[style*="font-size: 14px"],
+[style*="font-size:14px"] { font-size: 17px !important; }
+
+/* Existing CSS classes with fixed pixel typography. */
+.mini-timeline-btn { font-size: 12px !important; }
+.left-tool,
+.inputish { font-size: 0.9rem !important; }
+
+.doc-ai-panel-header span,
+.doc-ai-section > button,
+.doc-ai-apply,
+.doc-ai-selection-actions button,
+.doc-ai-pack-item button,
+.doc-ai-field,
+.doc-ai-readiness { font-size: 14px !important; }
+.doc-ai-section h3 { font-size: 17px !important; }
+.doc-ai-error { font-size: 15px !important; }
+.doc-ai-recommendation,
+.doc-ai-pack-item,
+.doc-ai-pack-summary { font-size: 14px !important; }
+.doc-ai-recommendation em,
+.doc-ai-missing,
+.doc-ai-metadata { font-size: 12px !important; }
+.doc-ai-recommendation small,
+.doc-ai-pack-item small,
+.doc-ai-preview p,
+.doc-ai-empty { font-size: 13px !important; }
+.doc-ai-status { font-size: 11px !important; }
+
+.document-brand strong { font-size: 17px !important; }
+.document-brand span { font-size: 11px !important; }
+.document-title { font-size: 16px !important; }
+.document-save-state { font-size: 13px !important; }
+.document-icon-button,
+.document-ai-button { font-size: 14px !important; }
+
+/* Keep very large display headings from becoming disproportionate on desktop. */
+h1 { line-height: 1.08; }
+h2 { line-height: 1.12; }
+h3 { line-height: 1.18; }
+
+/* On compact/mobile screens keep the increase, but slightly reduce the root scale
+   so navigation and control surfaces still fit comfortably. */
+@media (max-width: 700px) {
+  html { font-size: 17px; }
+  button,
+  input,
+  textarea,
+  select,
+  option,
+  label { font-size: max(0.95rem, 14px); }
+}
