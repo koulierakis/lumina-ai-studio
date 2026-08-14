@@ -1,9 +1,11 @@
 """Provider-neutral Voice Studio registry."""
 
+from .elevenlabs_provider import ElevenLabsVoiceProvider
 from .gemini_provider import GeminiVoiceProvider
 from .mock_provider import MockVoiceProvider
 
 _REGISTRY = {
+    "elevenlabs": ElevenLabsVoiceProvider,
     "gemini": GeminiVoiceProvider,
     "mock": MockVoiceProvider,
 }
@@ -24,7 +26,7 @@ def _configured(provider) -> bool:
 
 
 def voice_provider_catalog():
-    known = ("gemini", "mock", "elevenlabs", "openai", "azure", "cartesia")
+    known = ("gemini", "elevenlabs", "mock", "openai", "azure", "cartesia")
     result = []
     for name in known:
         provider = _REGISTRY.get(name)
