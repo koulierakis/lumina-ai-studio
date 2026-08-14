@@ -1,10 +1,9 @@
 """Cloudflare Workers AI image provider for Lumina AI Desktop.
 
-Uses Cloudflare-hosted FLUX models through the Workers AI REST API. The
-provider supports text-to-image and identity-reference generation. FLUX.2
-Workers AI models currently accept at most four reference images, so a Lumina
-Identity Pack with five references is deterministically reduced to four for
-this fallback provider.
+Uses Cloudflare-hosted FLUX models through the Workers AI REST API. Lumina may
+store a larger Identity Pack, while Workers AI FLUX.2 currently accepts at most
+four image inputs per inference. The server orders the primary identity anchor
+first; this provider consumes that anchor plus up to three corroborating refs.
 """
 from __future__ import annotations
 
@@ -33,9 +32,11 @@ from .base import (
 )
 
 
-DEFAULT_MODEL = "@cf/black-forest-labs/flux-2-dev"
+DEFAULT_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
+DEFAULT_IDENTITY_MODEL = "@cf/black-forest-labs/flux-2-dev"
 REFERENCE_LIMIT = 4
 REFERENCE_MAX_SIDE = 511
+LUMINA_IDENTITY_PACK_LIMIT = 20
 
 
 class CloudflareWorkersAIProvider(ImageProvider):
@@ -53,8 +54,9 @@ class CloudflareWorkersAIProvider(ImageProvider):
             "@cf/black-forest-labs/flux-2-klein-4b",
             "@cf/black-forest-labs/flux-1-schnell",
         ),
-        # Lumina packs may contain five refs; Workers AI receives the first four.
-        maximum_reference_images=5,
+        # Lumina can keep a richer identity pack. This adapter selects the
+        # primary anchor + three corroborating images for each Workers AI call.
+        maximum_reference_images=LUMINA_IDENTITY_PACK_LIMIT,
         maximum_outputs=4,
     )
 
@@ -63,7 +65,13 @@ class CloudflareWorkersAIProvider(ImageProvider):
         return bool(os.getenv("CLOUDFLARE_API_TOKEN") and os.getenv("CLOUDFLARE_ACCOUNT_ID"))
 
     def _model(self, spec: GenerationInput) -> str:
-        return spec.model or os.getenv("CLOUDFLARE_IMAGE_MODEL") or DEFAULT_MODEL
+        if spec.model:
+            return spec.model
+        if spec.reference_images:
+            # Identity work gets the stronger model by default. Plain image
+            # generation stays on Klein to preserve the free daily budget.
+            return os.getenv("CLOUDFLARE_IDENTITY_MODEL") or DEFAULT_IDENTITY_MODEL
+        return os.getenv("CLOUDFLARE_IMAGE_MODEL") or DEFAULT_MODEL
 
     @staticmethod
     def _dimensions(aspect_ratio: str) -> tuple[int, int]:
@@ -86,11 +94,14 @@ class CloudflareWorkersAIProvider(ImageProvider):
             parts.append(f"Avoid: {spec.negative_prompt}.")
         if reference_count:
             parts.append(
-                "The attached input images are identity references of the same person. "
-                "Preserve the exact identity, facial structure, hairline, grey hair, "
-                "wrinkles, skin texture, natural age, asymmetry and body proportions. "
-                "Do not beautify or make the person younger. Use the references only "
-                "to preserve identity while following the requested scene and outfit."
+                "IDENTITY LOCK. input_image_0 is the PRIMARY identity anchor and is the authoritative source for the person's face. "
+                "input_image_1 through input_image_3, when present, are corroborating photographs of the SAME person from other angles. "
+                "Reproduce the person from input_image_0, not a similar person and not an averaged substitute. "
+                "Keep facial geometry, eye shape and spacing, nose shape, lips, jawline, cheekbones, ears, hairline, grey-hair pattern, "
+                "skin tone, wrinkles, pores, natural asymmetry, apparent age and body proportions consistent with the references. "
+                "Do not beautify, rejuvenate, age, reshape, smooth, stylize or idealize the face. "
+                "No plastic skin, beauty filter, excessive sharpening, artificial HDR, glamour retouching or synthetic-looking texture. "
+                "Change only the requested scene, clothing, pose or lighting. The final result must look like an ordinary high-end real photograph."
             )
         return " ".join(part for part in parts if part)
 
@@ -100,7 +111,7 @@ class CloudflareWorkersAIProvider(ImageProvider):
             image = image.convert("RGB")
             image.thumbnail((REFERENCE_MAX_SIDE, REFERENCE_MAX_SIDE), Image.Resampling.LANCZOS)
             output = io.BytesIO()
-            image.save(output, format="JPEG", quality=92, optimize=True)
+            image.save(output, format="JPEG", quality=95, optimize=True)
             return output.getvalue(), "image/jpeg"
 
     @staticmethod
@@ -221,7 +232,7 @@ class CloudflareWorkersAIProvider(ImageProvider):
                 "seed": str(seed),
             }
             if model.endswith("flux-2-dev"):
-                fields["steps"] = str(int(os.getenv("CLOUDFLARE_FLUX2_STEPS", "20")))
+                fields["steps"] = str(int(os.getenv("CLOUDFLARE_FLUX2_STEPS", "25")))
             files: list[tuple[str, str, str, bytes]] = []
             for index, raw in enumerate(refs):
                 prepared, mime = self._prepare_reference(raw)
