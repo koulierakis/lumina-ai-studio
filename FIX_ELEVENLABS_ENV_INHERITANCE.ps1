@@ -7,7 +7,7 @@ $content = [System.IO.File]::ReadAllText($launcher, [System.Text.UTF8Encoding]::
 $marker = '# LUMINA_ELEVENLABS_USER_ENV_HYDRATION'
 
 if ($content -notmatch [regex]::Escape($marker)) {
-    $anchor = "$ErrorActionPreference = 'Stop'"
+    $anchor = '$ErrorActionPreference = ''Stop'''
     if (-not $content.Contains($anchor)) { throw 'Could not find launcher insertion anchor.' }
 
     $block = @'
@@ -32,7 +32,6 @@ Remove-Variable elevenLabsUserKey -ErrorAction SilentlyContinue
     Write-Host 'Launcher already contains ElevenLabs User-scope hydration.' -ForegroundColor Yellow
 }
 
-# Validate that a persistent User-scope value exists without printing it.
 $userKey = [Environment]::GetEnvironmentVariable('ELEVENLABS_API_KEY', 'User')
 if ([string]::IsNullOrWhiteSpace($userKey)) {
     throw 'ELEVENLABS_API_KEY is not present in Windows User environment. Re-save the key before launching LUMINA.'
@@ -40,7 +39,6 @@ if ([string]::IsNullOrWhiteSpace($userKey)) {
 Write-Host ('Persistent User key detected: YES (length ' + $userKey.Length + ')') -ForegroundColor Green
 Remove-Variable userKey -ErrorAction SilentlyContinue
 
-# Stop only the LUMINA services through the canonical launcher, then start them again.
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -Action stop -RepoRoot $root
 Start-Sleep -Seconds 2
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $launcher -Action start -RepoRoot $root
