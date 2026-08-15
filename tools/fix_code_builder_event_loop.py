@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-TARGET = Path(__file__).resolve().parents[1] / "backend" / "code_builder" / "ollama_service.py"
+TARGET = Path.cwd() / "backend" / "code_builder" / "ollama_service.py"
 
 old = '''        if client is None:\n            self._client = httpx.AsyncClient(\n                base_url=self.configuration.base_url,\n                timeout=self.configuration.timeouts.to_httpx_timeout(),\n                verify=self.configuration.verify_tls,\n                follow_redirects=(\n                    self.configuration.follow_redirects\n                ),\n                headers={\n                    "Accept": "application/json",\n                    "Content-Type": "application/json",\n                    "User-Agent": self.configuration.user_agent,\n                },\n                limits=httpx.Limits(\n                    max_connections=20,\n                    max_keepalive_connections=10,\n                    keepalive_expiry=30.0,\n                ),\n                trust_env=False,\n            )\n        else:\n            self._client = client\n'''
 
@@ -13,6 +13,9 @@ request_new = '''                client = await self._client_for_current_loop()\
 
 close_old = '''        if self._owns_client:\n            await self._client.aclose()\n'''
 close_new = '''        if self._owns_client and not self._client.is_closed:\n            current_loop = asyncio.get_running_loop()\n            if self._client_loop is None or self._client_loop is current_loop:\n                await self._client.aclose()\n'''
+
+if not TARGET.is_file():
+    raise SystemExit(f"Target not found: {TARGET}")
 
 text = TARGET.read_text(encoding="utf-8")
 for before, after, label in (
