@@ -32,6 +32,14 @@ class ElevenLabsVoiceProvider:
         return key
 
     @staticmethod
+    def _timeout(minimum: int = 60) -> int:
+        try:
+            configured = int(os.environ.get("ELEVENLABS_TIMEOUT_SECONDS", "180"))
+        except ValueError:
+            configured = 180
+        return max(minimum, configured)
+
+    @staticmethod
     def _style_settings(style: str) -> dict:
         """Translate a short style label or free-form Greek/English direction into voice settings.
 
@@ -115,7 +123,7 @@ class ElevenLabsVoiceProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=int(os.environ.get("ELEVENLABS_TIMEOUT_SECONDS", "180"))) as response:
+            with urllib.request.urlopen(request, timeout=self._timeout(60)) as response:
                 data = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -149,7 +157,7 @@ class ElevenLabsVoiceProvider:
         field("remove_background_noise", "false")
         for filename, mime, data in audio_files:
             body.extend(f"--{boundary}\r\n".encode())
-            body.extend(f'Content-Disposition: form-data; name="files"; filename="{filename}"\r\n'.encode())
+            body.extend(f'Content-Disposition: form-data; name="files[]"; filename="{filename}"\r\n'.encode())
             body.extend(f"Content-Type: {mime or 'application/octet-stream'}\r\n\r\n".encode())
             body.extend(data)
             body.extend(b"\r\n")
@@ -166,7 +174,7 @@ class ElevenLabsVoiceProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=int(os.environ.get("ELEVENLABS_TIMEOUT_SECONDS", "180"))) as response:
+            with urllib.request.urlopen(request, timeout=self._timeout(180)) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
