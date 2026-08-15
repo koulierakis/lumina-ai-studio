@@ -14,14 +14,14 @@ $files = @(
 
 Write-Host 'Fetching latest Personal Voice branch...' -ForegroundColor Cyan
 git fetch origin | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'git fetch failed.' }
+
+# Copy Git blobs byte-for-byte. Avoid piping `git show` through PowerShell because
+# the active Windows console code page can corrupt UTF-8 Greek text.
+git restore --source=$branch --worktree -- $files
+if ($LASTEXITCODE -ne 0) { throw 'Could not restore Personal Voice files from branch.' }
 
 foreach ($file in $files) {
-  $dest = Join-Path $root $file
-  $dir = Split-Path -Parent $dest
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  $content = git show "$branch`:$file"
-  if ($LASTEXITCODE -ne 0) { throw "Could not read $file from $branch" }
-  [System.IO.File]::WriteAllText($dest, ($content -join "`n") + "`n", (New-Object System.Text.UTF8Encoding($false)))
   Write-Host "Installed $file" -ForegroundColor Green
 }
 
@@ -37,6 +37,9 @@ Write-Host 'Validating frontend import...' -ForegroundColor Cyan
 if (-not (Select-String -Path .\frontend\src\pages\VoiceStudio.jsx -Pattern "PersonalVoiceStudio" -Quiet)) {
   throw 'VoiceStudio.jsx was not connected to PersonalVoiceStudio.'
 }
+
+$ui = [System.IO.File]::ReadAllText((Join-Path $root 'frontend\src\pages\PersonalVoiceStudio.jsx'), [System.Text.Encoding]::UTF8)
+if (-not $ui.Contains('Διάβασε φυσικά')) { throw 'Greek UTF-8 validation failed in PersonalVoiceStudio.jsx.' }
 
 Write-Host ''
 Write-Host 'MY VOICE INSTALLATION COMPLETE' -ForegroundColor Green
