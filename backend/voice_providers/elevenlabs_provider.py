@@ -33,7 +33,14 @@ class ElevenLabsVoiceProvider:
 
     @staticmethod
     def _style_settings(style: str) -> dict:
-        style_key = (style or "calm").strip().lower()
+        """Translate a short style label or free-form Greek/English direction into voice settings.
+
+        ElevenLabs TTS accepts numeric voice settings rather than a generic free-form
+        style prompt for multilingual_v2. LUMINA keeps the user's natural-language
+        direction and maps it locally, so style control does not require another paid
+        model call.
+        """
+        style_text = (style or "calm").strip().lower()
         presets = {
             "calm": {"stability": 0.72, "similarity_boost": 0.88, "style": 0.12, "speed": 0.94},
             "corporate": {"stability": 0.78, "similarity_boost": 0.90, "style": 0.10, "speed": 0.98},
@@ -48,7 +55,37 @@ class ElevenLabsVoiceProvider:
             "radio": {"stability": 0.70, "similarity_boost": 0.88, "style": 0.22, "speed": 1.00},
             "audiobook": {"stability": 0.76, "similarity_boost": 0.90, "style": 0.14, "speed": 0.94},
         }
-        settings = dict(presets.get(style_key, presets["calm"]))
+        if style_text in presets:
+            settings = dict(presets[style_text])
+        else:
+            settings = dict(presets["calm"])
+            keyword_presets = (
+                (("επαγγελμα", "corporate", "business", "παρουσίαση", "σοβαρ"), "corporate"),
+                (("ντοκιμαντέρ", "documentary", "αφηγη"), "documentary"),
+                (("podcast", "συζήτηση", "συνομιλ"), "podcast"),
+                (("συναισθη", "emotional", "συγκινη"), "emotional"),
+                (("ενεργ", "energetic", "δυναμικ", "ένταση", "ενθουσια"), "energetic"),
+                (("κίνητρο", "motivational", "εμπνευσ"), "motivational"),
+                (("διαφήμι", "commercial", "promo"), "commercial"),
+                (("πολυτελ", "luxury", "premium"), "luxury"),
+                (("κινηματογραφ", "cinematic", "trailer"), "cinematic"),
+                (("ραδιόφων", "radio", "broadcast"), "radio"),
+                (("audiobook", "βιβλί", "ανάγνωση"), "audiobook"),
+                (("ήρεμ", "calm", "χαλαρ", "gentle", "soft"), "calm"),
+            )
+            for words, preset_name in keyword_presets:
+                if any(word in style_text for word in words):
+                    settings = dict(presets[preset_name])
+                    break
+            if any(word in style_text for word in ("αργά", "αργο", "slow", "πιο αργ")):
+                settings["speed"] = max(0.75, settings["speed"] - 0.12)
+            if any(word in style_text for word in ("γρήγορα", "γρηγορ", "fast", "πιο γρήγ")):
+                settings["speed"] = min(1.20, settings["speed"] + 0.12)
+            if any(word in style_text for word in ("σταθερ", "controlled", "συγκρατη")):
+                settings["stability"] = min(0.90, settings["stability"] + 0.10)
+            if any(word in style_text for word in ("εκφρασ", "expressive", "θεατρ", "δραματικ")):
+                settings["stability"] = max(0.30, settings["stability"] - 0.12)
+                settings["style"] = min(0.55, settings["style"] + 0.18)
         settings["use_speaker_boost"] = True
         return settings
 
@@ -78,7 +115,7 @@ class ElevenLabsVoiceProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with urllib.request.urlopen(request, timeout=int(os.environ.get("ELEVENLABS_TIMEOUT_SECONDS", "180"))) as response:
                 data = response.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -89,7 +126,8 @@ class ElevenLabsVoiceProvider:
             "provider": "elevenlabs",
             "model": model,
             "voice_id": voice_id,
-            "style": style,
+            "style_prompt": style,
+            "voice_settings": payload["voice_settings"],
             "mock": False,
         }
 
@@ -128,7 +166,7 @@ class ElevenLabsVoiceProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with urllib.request.urlopen(request, timeout=int(os.environ.get("ELEVENLABS_TIMEOUT_SECONDS", "180"))) as response:
                 result = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
