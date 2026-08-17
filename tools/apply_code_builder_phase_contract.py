@@ -59,6 +59,27 @@ def main() -> None:
         "duplicate execution guard",
     )
 
+    text = replace_once(
+        text,
+        '''    return phase in {\n        CodeBuilderTaskPhase.QUEUED,\n        CodeBuilderTaskPhase.ANALYZING,\n        CodeBuilderTaskPhase.AWAITING_APPROVAL,\n        CodeBuilderTaskPhase.APPROVED,\n        CodeBuilderTaskPhase.EXECUTING,\n    }''',
+        '''    return phase in {\n        CodeBuilderTaskPhase.QUEUED,\n        CodeBuilderTaskPhase.ANALYZING,\n        CodeBuilderTaskPhase.PLANNING,\n        CodeBuilderTaskPhase.VALIDATING,\n        CodeBuilderTaskPhase.AWAITING_APPROVAL,\n        CodeBuilderTaskPhase.APPROVED,\n        CodeBuilderTaskPhase.APPLYING,\n        CodeBuilderTaskPhase.VERIFYING,\n        CodeBuilderTaskPhase.EXECUTING,\n    }''',
+        "cancellation phase guard",
+    )
+
+    text = replace_once(
+        text,
+        '''        if stored_task.phase in {\n            CodeBuilderTaskPhase.ANALYZING,\n            CodeBuilderTaskPhase.EXECUTING,\n            CodeBuilderTaskPhase.ROLLING_BACK,\n        }:''',
+        '''        if stored_task.phase in {\n            CodeBuilderTaskPhase.ANALYZING,\n            CodeBuilderTaskPhase.PLANNING,\n            CodeBuilderTaskPhase.VALIDATING,\n            CodeBuilderTaskPhase.APPLYING,\n            CodeBuilderTaskPhase.VERIFYING,\n            CodeBuilderTaskPhase.EXECUTING,\n            CodeBuilderTaskPhase.ROLLING_BACK,\n        }:''',
+        "active task deletion guard",
+    )
+
+    text = replace_once(
+        text,
+        '''        try:\n            stored_task.request = _bind_prepared_patch_to_request(\n                stored_task\n            )''',
+        '''        review_payload = _serialize_value(stored_task.review_result)\n        if isinstance(review_payload, Mapping) and str(\n            review_payload.get("verdict") or ""\n        ).strip().casefold() == "block":\n            raise HTTPException(\n                status_code=status.HTTP_409_CONFLICT,\n                detail={\n                    "error": "ai_review_blocked",\n                    "message": (\n                        "The independent AI review marked this prepared change "\n                        "as BLOCK. Resolve the review findings and prepare a new "\n                        "patch before approval."\n                    ),\n                    "task_id": normalized_task_id,\n                },\n            )\n\n        try:\n            stored_task.request = _bind_prepared_patch_to_request(\n                stored_task\n            )''',
+        "AI review approval gate",
+    )
+
     ROUTER.write_text(text, encoding="utf-8")
     print("CODE BUILDER PHASE CONTRACT APPLIED")
 
