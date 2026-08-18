@@ -2255,15 +2255,9 @@ class PlanningService:
             - self.configuration.maximum_output_tokens
             - self.configuration.input_token_safety_margin,
         )
-        if (
-            self.configuration.context_window == DEFAULT_CONTEXT_WINDOW
-            and self.configuration.input_token_safety_margin
-            == DEFAULT_INPUT_TOKEN_SAFETY_MARGIN
-        ):
-            adaptive_input_budget_tokens = max(
-                adaptive_input_budget_tokens,
-                self.configuration.maximum_context_input_tokens,
-            )
+        # Never expand repository context beyond the model's real input
+        # capacity. The previous default special-case could request more
+        # context tokens than the configured context window can hold.
         context_budget_tokens = max(
             512,
             min(
