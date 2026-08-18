@@ -927,6 +927,65 @@ def _build_preparation_request(stored_task: StoredTask) -> TaskRequest:
     )
 
 
+def _lock_prepared_operations_to_validation(
+    prepared: Mapping[str, Any],
+    raw_operations: Sequence[Any],
+) -> list[Any]:
+    validation = prepared.get("patch_validation")
+    validation_results = (
+        validation.get("results")
+        if isinstance(validation, Mapping)
+        else None
+    )
+    results = (
+        list(validation_results)
+        if isinstance(validation_results, Sequence)
+        and not isinstance(validation_results, (str, bytes, bytearray))
+        else []
+    )
+
+    by_operation_id: dict[str, Mapping[str, Any]] = {}
+    for result in results:
+        if not isinstance(result, Mapping):
+            continue
+        operation_id = result.get("operation_id")
+        if operation_id is not None:
+            by_operation_id[str(operation_id)] = result
+
+    locked: list[Any] = []
+    for index, raw_operation in enumerate(raw_operations):
+        if not isinstance(raw_operation, Mapping):
+            locked.append(raw_operation)
+            continue
+
+        operation = dict(raw_operation)
+        if operation.get("expected_sha256"):
+            locked.append(operation)
+            continue
+
+        validation_result: Mapping[str, Any] | None = None
+        operation_id = operation.get("operation_id")
+        if operation_id is not None:
+            validation_result = by_operation_id.get(str(operation_id))
+
+        if validation_result is None and index < len(results):
+            candidate = results[index]
+            if isinstance(candidate, Mapping):
+                operation_path = str(operation.get("path") or "")
+                result_path = str(candidate.get("path") or candidate.get("relative_path") or "")
+                if not operation_path or operation_path == result_path:
+                    validation_result = candidate
+
+        if validation_result is not None:
+            original_sha256 = validation_result.get("original_sha256")
+            if original_sha256:
+                operation["expected_sha256"] = str(original_sha256)
+
+        locked.append(operation)
+
+    return locked
+
+
 def _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:
     prepared = _serialize_value(stored_task.preparation_result)
     if not isinstance(prepared, Mapping):
@@ -951,7 +1010,10 @@ def _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:
     metadata = dict(stored_task.request.metadata)
     metadata.pop("patch_operations", None)
     metadata.pop("execution_patch_operations", None)
-    metadata["approved_patch_operations"] = list(raw_operations)
+    metadata["approved_patch_operations"] = _lock_prepared_operations_to_validation(
+        prepared,
+        raw_operations,
+    )
     metadata["approved_preparation_plan"] = prepared.get("plan")
     metadata["approved_preparation_task_id"] = stored_task.request.task_id
     return stored_task.request.model_copy(update={"metadata": metadata})
@@ -2349,6 +2411,22 @@ async def create_code_builder_task(
         created_task is not stored_task
     )
 
+    if is_existing_idempotent_task:
+        existing_payload = created_task.api_request.model_dump(mode="json")
+        incoming_payload = payload.model_dump(mode="json")
+        if existing_payload != incoming_payload:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "idempotency_key_conflict",
+                    "message": (
+                        "This Idempotency-Key is already bound to a different "
+                        "Code Builder request."
+                    ),
+                    "task_id": created_task.request.task_id,
+                },
+            )
+
     if not is_existing_idempotent_task:
         _schedule_task_execution(
             background_tasks=background_tasks,
@@ -2527,6 +2605,46 @@ async def get_code_builder_task_events(
     return tuple(events)
 
 
+def _validate_review_allows_approval(
+    review_result: Any,
+    *,
+    task_id: str,
+) -> None:
+    serialized_review = _serialize_value(review_result)
+    if not isinstance(serialized_review, Mapping):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "ai_review_unavailable",
+                "message": "Independent AI review must complete before approval.",
+                "task_id": task_id,
+            },
+        )
+
+    review_status = str(serialized_review.get("status") or "").strip().casefold()
+    verdict = str(serialized_review.get("verdict") or "").strip().casefold()
+
+    if review_status != "completed" or verdict not in {"pass", "warn", "block"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "ai_review_unavailable",
+                "message": "Independent AI review must complete successfully before approval.",
+                "task_id": task_id,
+            },
+        )
+
+    if verdict == "block":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "ai_review_blocked",
+                "message": "AI review blocked this prepared change. Revise the task before approval.",
+                "task_id": task_id,
+            },
+        )
+
+
 @router.post(
     "/tasks/{task_id}/approve",
     response_model=TaskApprovalResponse,
@@ -2640,18 +2758,10 @@ async def approve_code_builder_task(
                 execution_started=False,
             )
 
-        serialized_review = _serialize_value(stored_task.review_result)
-        if isinstance(serialized_review, Mapping):
-            verdict = str(serialized_review.get("verdict") or "").strip().casefold()
-            if verdict == "block":
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail={
-                        "error": "ai_review_blocked",
-                        "message": "AI review blocked this prepared change. Revise the task before approval.",
-                        "task_id": normalized_task_id,
-                    },
-                )
+        _validate_review_allows_approval(
+            stored_task.review_result,
+            task_id=normalized_task_id,
+        )
 
         try:
             stored_task.request = _bind_prepared_patch_to_request(
