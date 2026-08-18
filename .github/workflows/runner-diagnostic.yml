@@ -1,0 +1,19 @@
+name: runner-diagnostic
+
+on:
+  push:
+    branches:
+      - work/code-builder-refresh
+
+permissions:
+  contents: read
+
+jobs:
+  runner-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Runner started
+        run: |
+          echo "RUNNER_DIAGNOSTIC_STARTED"
+          python --version
+          node --version || true
