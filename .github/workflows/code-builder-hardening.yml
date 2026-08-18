@@ -11,6 +11,7 @@ on:
       - 'backend/tests/test_planning*.py'
       - 'frontend/src/pages/CodeBuilder.jsx'
       - 'frontend/src/pages/CodeBuilder.test.js'
+      - 'tools/apply_code_builder_*.py'
       - 'INSTALL_CODE_BUILDER_REFRESH.ps1'
       - '.github/workflows/code-builder-hardening.yml'
 
@@ -32,6 +33,19 @@ jobs:
         run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py backend/code_builder/ollama_service.py
       - name: Run all Code Builder and planning tests
         run: python -m pytest backend/tests/test_code_builder*.py backend/tests/test_planning*.py -q
+      - name: Verify installer repairs are repeat-safe
+        run: |
+          python tools/apply_code_builder_hardening.py
+          python tools/apply_code_builder_path_tracking_hardening.py
+          python tools/apply_code_builder_policy_hardening.py
+          python tools/apply_code_builder_review_adapter.py
+          python tools/apply_code_builder_review_gate.py
+          python tools/apply_code_builder_stale_guard.py
+          python tools/apply_code_builder_idempotency_guard.py
+          python tools/apply_code_builder_planning_defaults.py
+          python tools/apply_code_builder_approval_phase_guard.py
+          python tools/apply_code_builder_ui_hardening.py
+          git diff --exit-code -- backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py frontend/src/pages/CodeBuilder.jsx
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
