@@ -1197,7 +1197,8 @@ def _run_awaitable_sync(
             return asyncio.run(_runner())
         except asyncio.TimeoutError as exc:
             raise TaskTimeoutError(
-                f"{operation_name} timed out."
+                f"{operation_name} timed out.",
+                timeout_seconds=timeout_seconds,
             ) from exc
 
     def _run_in_thread() -> Any:
