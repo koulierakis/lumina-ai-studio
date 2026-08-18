@@ -1461,10 +1461,7 @@ def _validate_task_id(task_id: str) -> str:
 def _phase_allows_approval(
     phase: CodeBuilderTaskPhase,
 ) -> bool:
-    return phase in {
-        CodeBuilderTaskPhase.AWAITING_APPROVAL,
-        CodeBuilderTaskPhase.QUEUED,
-    }
+    return phase is CodeBuilderTaskPhase.AWAITING_APPROVAL
 
 
 def _phase_allows_cancellation(
