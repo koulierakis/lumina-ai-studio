@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import json
 import logging
 import threading
 import time
@@ -61,6 +62,7 @@ from .task_service import (
     get_task_result_changed_paths,
     get_task_result_error,
     is_successful_task_result,
+    _run_awaitable_sync,
 )
 
 
@@ -1025,28 +1027,19 @@ def _review_prepared_change(
     stored_task: StoredTask,
     preparation_result: Any,
 ) -> dict[str, Any]:
+    ollama_service = task_service.ollama_service
     reviewer = getattr(
-        task_service.ollama_service,
+        ollama_service,
         "analyze_code_task",
         None,
     )
-    model = getattr(
-        task_service.ollama_service,
-        "model",
-        None,
-    )
 
-    if not callable(reviewer):
-        return {
-            "status": "unavailable",
-            "model": str(model) if model else None,
-            "summary": (
-                "AI review is unavailable because the configured Code "
-                "Builder Ollama adapter does not expose a synchronous "
-                "review-compatible analysis method."
-            ),
-            "reviewed_at_epoch": time.time(),
-        }
+    planning_service = getattr(task_service, "planning_service", None)
+    planning_configuration = getattr(planning_service, "configuration", None)
+    model = (
+        getattr(planning_configuration, "model", None)
+        or getattr(ollama_service, "model", None)
+    )
 
     serialized_preparation = _serialize_value(preparation_result)
     review_instruction = (
@@ -1056,26 +1049,83 @@ def _review_prepared_change(
         "modify files. Check scope alignment, correctness risks, unsafe or "
         "destructive changes, missing tests, plan/patch mismatches, and "
         "rollback concerns. Give a concise verdict using PASS, WARN, or "
-        "BLOCK, followed by concrete findings with file paths when known."
+        "BLOCK as the first word, followed by concrete findings with file "
+        "paths when known."
+    )
+
+    timeout_seconds = min(
+        stored_task.request.task_timeout_seconds,
+        300.0,
     )
 
     try:
-        content = reviewer(
-            instruction=review_instruction,
-            repository_context=serialized_preparation,
-            user_context={
+        if callable(reviewer):
+            content = reviewer(
+                instruction=review_instruction,
+                repository_context=serialized_preparation,
+                user_context={
+                    "original_instruction": stored_task.request.instruction,
+                    "task_id": stored_task.request.task_id,
+                    "purpose": "pre_approval_review",
+                },
+                target_paths=stored_task.request.target_paths,
+                excluded_paths=stored_task.request.excluded_paths,
+                timeout_seconds=timeout_seconds,
+                cancellation_token=stored_task.cancellation_token,
+            )
+        else:
+            generator = getattr(ollama_service, "generate", None)
+            if not callable(generator) or not model:
+                return {
+                    "status": "unavailable",
+                    "model": str(model) if model else None,
+                    "summary": (
+                        "Independent AI review is unavailable because no "
+                        "compatible local model generation method is configured."
+                    ),
+                    "reviewed_at_epoch": time.time(),
+                }
+
+            review_payload = {
                 "original_instruction": stored_task.request.instruction,
-                "task_id": stored_task.request.task_id,
-                "purpose": "pre_approval_review",
-            },
-            target_paths=stored_task.request.target_paths,
-            excluded_paths=stored_task.request.excluded_paths,
-            timeout_seconds=min(
-                stored_task.request.task_timeout_seconds,
-                300.0,
-            ),
-            cancellation_token=stored_task.cancellation_token,
-        )
+                "target_paths": list(stored_task.request.target_paths),
+                "excluded_paths": list(stored_task.request.excluded_paths),
+                "prepared_change": serialized_preparation,
+            }
+            prompt = json.dumps(
+                review_payload,
+                ensure_ascii=False,
+                default=str,
+            )
+            # Keep the review bounded even when the prepared diff is large.
+            prompt = prompt[:500_000]
+
+            options: dict[str, Any] = {
+                "temperature": 0.0,
+                "num_predict": 768,
+            }
+            context_window = getattr(
+                planning_configuration,
+                "context_window",
+                None,
+            )
+            if isinstance(context_window, int) and context_window > 0:
+                options["num_ctx"] = context_window
+
+            raw_response = _run_awaitable_sync(
+                generator(
+                    model=str(model),
+                    prompt=prompt,
+                    system_prompt=review_instruction,
+                    options=options,
+                    timeout_seconds=timeout_seconds,
+                    verify_model=False,
+                ),
+                timeout_seconds=timeout_seconds,
+                operation_name="Independent Code Builder review",
+            )
+            content = getattr(raw_response, "content", raw_response)
+
     except Exception as exc:
         logger.warning(
             "Code Builder AI review failed for task %s: %s",
@@ -2762,6 +2812,7 @@ async def approve_code_builder_task(
             stored_task.review_result,
             task_id=normalized_task_id,
         )
+
 
         try:
             stored_task.request = _bind_prepared_patch_to_request(
