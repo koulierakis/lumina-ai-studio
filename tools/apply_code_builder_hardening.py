@@ -91,9 +91,15 @@ def harden_router() -> None:
 
 def harden_task_service() -> None:
     text = TASK_SERVICE.read_text(encoding="utf-8")
-    old = '''        except asyncio.TimeoutError as exc:\n            raise TaskTimeoutError(\n                f"{operation_name} timed out."\n            ) from exc'''
-    new = '''        except asyncio.TimeoutError as exc:\n            raise TaskTimeoutError(\n                f"{operation_name} timed out.",\n                timeout_seconds=timeout_seconds,\n            ) from exc'''
-    text = replace_once(text, old, new, "async timeout translation", TASK_SERVICE)
+
+    async_old = '''        except asyncio.TimeoutError as exc:\n            raise TaskTimeoutError(\n                f"{operation_name} timed out."\n            ) from exc'''
+    async_new = '''        except asyncio.TimeoutError as exc:\n            raise TaskTimeoutError(\n                f"{operation_name} timed out.",\n                timeout_seconds=timeout_seconds,\n            ) from exc'''
+    text = replace_once(text, async_old, async_new, "async timeout translation", TASK_SERVICE)
+
+    future_old = '''        except FutureTimeoutError as exc:\n            future.cancel()\n            raise TaskTimeoutError(\n                f"{operation_name} timed out."\n            ) from exc'''
+    future_new = '''        except FutureTimeoutError as exc:\n            future.cancel()\n            raise TaskTimeoutError(\n                f"{operation_name} timed out.",\n                timeout_seconds=timeout_seconds,\n            ) from exc'''
+    text = replace_once(text, future_old, future_new, "thread timeout translation", TASK_SERVICE)
+
     TASK_SERVICE.write_text(text, encoding="utf-8")
 
 
