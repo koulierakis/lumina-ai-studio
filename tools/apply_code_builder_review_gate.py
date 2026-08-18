@@ -18,11 +18,16 @@ def main() -> None:
         text = text.replace(route_anchor, helper + route_anchor, 1)
 
     old = '''        serialized_review = _serialize_value(stored_task.review_result)\n        if isinstance(serialized_review, Mapping):\n            verdict = str(serialized_review.get("verdict") or "").strip().casefold()\n            if verdict == "block":\n                raise HTTPException(\n                    status_code=status.HTTP_409_CONFLICT,\n                    detail={\n                        "error": "ai_review_blocked",\n                        "message": "AI review blocked this prepared change. Revise the task before approval.",\n                        "task_id": normalized_task_id,\n                    },\n                )\n'''
-    new = '''        _validate_review_allows_approval(\n            stored_task.review_result,\n            task_id=normalized_task_id,\n        )\n'''
-    if new not in text:
-        if old not in text:
-            raise RuntimeError("Could not find existing approval review guard")
-        text = text.replace(old, new, 1)
+    call = '''        _validate_review_allows_approval(\n            stored_task.review_result,\n            task_id=normalized_task_id,\n        )\n'''
+
+    if old in text:
+        text = text.replace(old, call, 1)
+    elif call not in text:
+        raise RuntimeError("Could not find existing approval review guard")
+
+    double_call = call + "\n" + call
+    while double_call in text:
+        text = text.replace(double_call, call + "\n", 1)
 
     ROUTER.write_text(text, encoding="utf-8")
     print("CODE BUILDER REVIEW GATE APPLIED")
