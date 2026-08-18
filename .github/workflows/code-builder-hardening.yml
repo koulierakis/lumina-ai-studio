@@ -1,0 +1,33 @@
+name: code-builder-hardening
+
+on:
+  push:
+    branches:
+      - work/code-builder-refresh
+  pull_request:
+    paths:
+      - 'backend/code_builder/**'
+      - 'backend/tests/test_code_builder_hardening_contract.py'
+      - 'tools/apply_code_builder_hardening.py'
+      - '.github/workflows/code-builder-hardening.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  focused-code-builder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Apply Code Builder hardening to validation workspace
+        run: python tools/apply_code_builder_hardening.py
+      - name: Compile Code Builder
+        run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py
+      - name: Run hardening contract tests
+        run: python -m pytest backend/tests/test_code_builder_hardening_contract.py -q
+      - name: Run approval and transaction boundary tests
+        run: python -m pytest backend/tests/test_code_builder_router_transaction.py backend/tests/test_code_builder_preapproval_write_guard.py backend/tests/test_code_builder_reviewer.py -q
