@@ -4,9 +4,19 @@ on:
   push:
     branches:
       - work/code-builder-refresh
+  pull_request:
+    paths:
+      - 'backend/code_builder/**'
+      - 'backend/tests/test_code_builder*.py'
+      - 'backend/tests/test_planning*.py'
+      - 'frontend/src/pages/CodeBuilder.jsx'
+      - 'frontend/src/pages/CodeBuilder.test.js'
+      - 'tools/apply_code_builder_*.py'
+      - 'INSTALL_CODE_BUILDER_REFRESH.ps1'
+      - '.github/workflows/code-builder-hardening.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   focused-code-builder:
@@ -14,17 +24,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install -r backend/requirements.txt
-      - name: Apply AI review gate
-        run: python tools/apply_code_builder_review_gate.py
-      - name: Compile Code Builder
+      - name: Compile committed Code Builder
         run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py backend/code_builder/ollama_service.py
       - name: Run all Code Builder and planning tests
         run: python -m pytest backend/tests/test_code_builder*.py backend/tests/test_planning*.py -q
+      - name: Verify installer repairs are repeat-safe
+        run: |
+          python tools/apply_code_builder_hardening.py
+          python tools/apply_code_builder_path_tracking_hardening.py
+          python tools/apply_code_builder_policy_hardening.py
+          python tools/apply_code_builder_review_adapter.py
+          python tools/apply_code_builder_review_gate.py
+          python tools/apply_code_builder_stale_guard.py
+          python tools/apply_code_builder_idempotency_guard.py
+          python tools/apply_code_builder_planning_defaults.py
+          python tools/apply_code_builder_approval_phase_guard.py
+          python tools/apply_code_builder_ui_hardening.py
+          git diff --exit-code -- backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py frontend/src/pages/CodeBuilder.jsx
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -41,14 +62,3 @@ jobs:
       - name: Build Code Builder frontend
         working-directory: frontend
         run: npm run build
-      - name: Persist verified AI review gate
-        run: |
-          if git diff --quiet -- backend/code_builder/router.py; then
-            echo 'AI review gate is already committed.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/code_builder/router.py
-          git commit -m 'Enforce Code Builder AI review before approval'
-          git push origin HEAD:work/code-builder-refresh
