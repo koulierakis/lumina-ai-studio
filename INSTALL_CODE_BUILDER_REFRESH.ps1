@@ -15,6 +15,7 @@ $tools = @(
     'tools\apply_code_builder_policy_hardening.py',
     'tools\apply_code_builder_review_gate.py',
     'tools\apply_code_builder_stale_guard.py',
+    'tools\apply_code_builder_idempotency_guard.py',
     'tools\apply_code_builder_ui_hardening.py'
 )
 
@@ -55,6 +56,7 @@ try {
         .\backend\tests\test_code_builder_patch_policy_contract.py `
         .\backend\tests\test_code_builder_review_gate_contract.py `
         .\backend\tests\test_code_builder_stale_file_contract.py `
+        .\backend\tests\test_code_builder_idempotency_contract.py `
         .\backend\tests\test_code_builder_transaction_boundary.py `
         .\backend\tests\test_code_builder_execution_pipeline.py -q
     if ($LASTEXITCODE -ne 0) { throw 'Code Builder protected tests failed.' }
@@ -79,6 +81,7 @@ try {
     $routerText = Get-Content $router -Raw
     if ($routerText -notmatch 'ai_review_unavailable') { throw 'Fail-closed AI review gate is missing.' }
     if ($routerText -notmatch '_lock_prepared_operations_to_validation') { throw 'Stale-file protection is missing.' }
+    if ($routerText -notmatch 'idempotency_key_conflict') { throw 'Idempotency conflict protection is missing.' }
 
     Write-Host ''
     Write-Host 'CODE BUILDER FINALIZATION COMPLETE' -ForegroundColor Green
