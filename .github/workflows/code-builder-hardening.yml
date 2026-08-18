@@ -21,18 +21,10 @@ on:
       - 'backend/tests/test_code_builder_path_tracking_contract.py'
       - 'frontend/src/pages/CodeBuilder.jsx'
       - 'frontend/src/pages/CodeBuilder.test.js'
-      - 'tools/apply_code_builder_hardening.py'
-      - 'tools/apply_code_builder_path_tracking_hardening.py'
-      - 'tools/apply_code_builder_policy_hardening.py'
-      - 'tools/apply_code_builder_review_adapter.py'
-      - 'tools/apply_code_builder_review_gate.py'
-      - 'tools/apply_code_builder_stale_guard.py'
-      - 'tools/apply_code_builder_idempotency_guard.py'
-      - 'tools/apply_code_builder_ui_hardening.py'
       - '.github/workflows/code-builder-hardening.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   focused-code-builder:
@@ -40,30 +32,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.sha }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - run: pip install -r backend/requirements.txt
-      - name: Apply Code Builder backend hardening
-        run: python tools/apply_code_builder_hardening.py
-      - name: Apply Code Builder path tracking hardening
-        run: python tools/apply_code_builder_path_tracking_hardening.py
-      - name: Apply Code Builder patch policy hardening
-        run: python tools/apply_code_builder_policy_hardening.py
-      - name: Apply Code Builder real review adapter
-        run: python tools/apply_code_builder_review_adapter.py
-      - name: Apply Code Builder review gate hardening
-        run: python tools/apply_code_builder_review_gate.py
-      - name: Apply Code Builder stale-file guard
-        run: python tools/apply_code_builder_stale_guard.py
-      - name: Apply Code Builder idempotency guard
-        run: python tools/apply_code_builder_idempotency_guard.py
-      - name: Apply Code Builder UI hardening
-        run: python tools/apply_code_builder_ui_hardening.py
-      - name: Compile Code Builder
-        run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py
-      - name: Run hardening contract tests
+      - name: Compile committed Code Builder
+        run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py backend/code_builder/ollama_service.py
+      - name: Run committed hardening contract tests
         run: python -m pytest backend/tests/test_code_builder_hardening_contract.py backend/tests/test_code_builder_timeout_contract.py backend/tests/test_code_builder_default_build_contract.py backend/tests/test_code_builder_planning_budget_contract.py backend/tests/test_code_builder_patch_policy_contract.py backend/tests/test_code_builder_review_gate_contract.py backend/tests/test_code_builder_review_adapter_contract.py backend/tests/test_code_builder_stale_file_contract.py backend/tests/test_code_builder_idempotency_contract.py backend/tests/test_code_builder_path_tracking_contract.py -q
       - name: Run approval and transaction boundary tests
         run: python -m pytest backend/tests/test_code_builder_transaction_boundary.py backend/tests/test_code_builder_execution_pipeline.py -q
@@ -83,15 +59,3 @@ jobs:
       - name: Build Code Builder frontend
         working-directory: frontend
         run: npm run build
-      - name: Persist verified Code Builder hardening on branch
-        if: github.event_name == 'push' && github.ref_name == 'work/code-builder-refresh'
-        run: |
-          if git diff --quiet -- backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py frontend/src/pages/CodeBuilder.jsx; then
-            echo 'Code Builder already contains verified hardening.'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py frontend/src/pages/CodeBuilder.jsx
-          git commit -m 'Apply verified Code Builder runtime hardening'
-          git push origin HEAD:work/code-builder-refresh
