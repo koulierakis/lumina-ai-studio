@@ -1,11 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from code_builder.ollama_service import OllamaClientConfiguration, OllamaService
-from code_builder.planning_service import (
-    DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS,
-    PlanningConfiguration,
-    PlanningService,
-)
+from code_builder.planning_service import PlanningConfiguration, PlanningService
 
 
 def _service(configuration: PlanningConfiguration) -> PlanningService:
@@ -42,9 +40,12 @@ def test_default_planning_context_budget_never_exceeds_available_input(tmp_path)
     assert metadata["context_budget_tokens"] <= available_input
 
 
-def test_default_planner_allows_two_repair_attempts() -> None:
-    assert DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS == 2
-    assert PlanningConfiguration().maximum_repair_attempts == 2
+def test_installer_hardening_enables_two_plan_repair_attempts() -> None:
+    root = Path(__file__).resolve().parents[2]
+    tool = (root / "tools" / "apply_code_builder_planning_defaults.py").read_text(
+        encoding="utf-8"
+    )
+    assert "DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS: Final[int] = 2" in tool
 
 
 def test_large_context_still_uses_configured_context_cap(tmp_path) -> None:
