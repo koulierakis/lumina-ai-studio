@@ -12,6 +12,7 @@ on:
       - 'frontend/src/pages/CodeBuilder.jsx'
       - 'frontend/src/pages/CodeBuilder.test.js'
       - 'tools/apply_code_builder_ui_hardening.py'
+      - 'tools/apply_code_builder_approval_phase_guard.py'
       - 'INSTALL_CODE_BUILDER_REFRESH.ps1'
       - '.github/workflows/code-builder-hardening.yml'
 
@@ -29,9 +30,11 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r backend/requirements.txt
+      - name: Apply strict approval phase guard
+        run: python tools/apply_code_builder_approval_phase_guard.py
       - name: Apply UI rejection-gate repair
         run: python tools/apply_code_builder_ui_hardening.py
-      - name: Compile committed Code Builder
+      - name: Compile Code Builder
         run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py backend/code_builder/ollama_service.py
       - name: Run all Code Builder and planning tests
         run: python -m pytest backend/tests/test_code_builder*.py backend/tests/test_planning*.py -q
@@ -51,15 +54,15 @@ jobs:
       - name: Build Code Builder frontend
         working-directory: frontend
         run: npm run build
-      - name: Persist verified UI rejection-gate repair
+      - name: Persist verified approval boundary repairs
         if: github.event_name == 'push' && github.ref_name == 'work/code-builder-refresh'
         run: |
-          if git diff --quiet -- frontend/src/pages/CodeBuilder.jsx; then
-            echo 'UI rejection-gate repair is already committed.'
+          if git diff --quiet -- backend/code_builder/router.py frontend/src/pages/CodeBuilder.jsx; then
+            echo 'Approval boundary repairs are already committed.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add frontend/src/pages/CodeBuilder.jsx
-          git commit -m 'Keep Code Builder rejection available when review blocks approval'
+          git add backend/code_builder/router.py frontend/src/pages/CodeBuilder.jsx
+          git commit -m 'Finalize Code Builder approval boundary'
           git push origin HEAD:work/code-builder-refresh
