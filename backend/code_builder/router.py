@@ -115,8 +115,13 @@ class CodeBuilderRepositoryError(CodeBuilderRouterError):
 class CodeBuilderTaskPhase(str, enum.Enum):
     QUEUED = "queued"
     ANALYZING = "analyzing"
+    PLANNING = "planning"
+    VALIDATING = "validating"
     AWAITING_APPROVAL = "awaiting_approval"
     APPROVED = "approved"
+    APPLYING = "applying"
+    VERIFYING = "verifying"
+    # Backward-compatible aggregate retained for stored/legacy clients.
     EXECUTING = "executing"
     ROLLING_BACK = "rolling_back"
     COMPLETED = "completed"
@@ -1356,8 +1361,12 @@ def _phase_allows_cancellation(
     return phase in {
         CodeBuilderTaskPhase.QUEUED,
         CodeBuilderTaskPhase.ANALYZING,
+        CodeBuilderTaskPhase.PLANNING,
+        CodeBuilderTaskPhase.VALIDATING,
         CodeBuilderTaskPhase.AWAITING_APPROVAL,
         CodeBuilderTaskPhase.APPROVED,
+        CodeBuilderTaskPhase.APPLYING,
+        CodeBuilderTaskPhase.VERIFYING,
         CodeBuilderTaskPhase.EXECUTING,
     }
 
@@ -1437,22 +1446,22 @@ def _update_phase_from_event(
             CodeBuilderTaskPhase.ANALYZING
         ),
         TaskStatus.PLANNING.value: (
-            CodeBuilderTaskPhase.ANALYZING
+            CodeBuilderTaskPhase.PLANNING
         ),
         TaskStatus.BACKING_UP.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.APPLYING
         ),
         TaskStatus.GENERATING_PATCH.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.VALIDATING
         ),
         TaskStatus.VALIDATING_PATCH.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.VALIDATING
         ),
         TaskStatus.APPLYING_PATCH.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.APPLYING
         ),
         TaskStatus.BUILDING.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.VERIFYING
         ),
         TaskStatus.ROLLING_BACK.value: (
             CodeBuilderTaskPhase.ROLLING_BACK
@@ -1485,19 +1494,22 @@ def _update_phase_from_event(
     )
 
     if new_phase is None:
-        if normalized_stage in {
-            "analysis",
-            "planning",
-        }:
+        if normalized_stage == "analysis":
             new_phase = CodeBuilderTaskPhase.ANALYZING
+        elif normalized_stage == "planning":
+            new_phase = CodeBuilderTaskPhase.PLANNING
         elif normalized_stage in {
-            "backup",
             "patch_generation",
             "patch_validation",
-            "patch_application",
-            "build",
         }:
-            new_phase = CodeBuilderTaskPhase.EXECUTING
+            new_phase = CodeBuilderTaskPhase.VALIDATING
+        elif normalized_stage in {
+            "backup",
+            "patch_application",
+        }:
+            new_phase = CodeBuilderTaskPhase.APPLYING
+        elif normalized_stage == "build":
+            new_phase = CodeBuilderTaskPhase.VERIFYING
         elif normalized_stage == "rollback":
             new_phase = CodeBuilderTaskPhase.ROLLING_BACK
 
@@ -1505,11 +1517,15 @@ def _update_phase_from_event(
         stored_task.require_approval
         and stored_task.approved_at_epoch is None
         and new_phase in {
+            CodeBuilderTaskPhase.APPLYING,
+            CodeBuilderTaskPhase.VERIFYING,
             CodeBuilderTaskPhase.EXECUTING,
             CodeBuilderTaskPhase.COMPLETED,
         }
     ):
-        new_phase = CodeBuilderTaskPhase.ANALYZING
+        # Preparation may generate/validate a diff, but public state must never
+        # imply repository mutation before explicit approval.
+        new_phase = CodeBuilderTaskPhase.VALIDATING
 
     if new_phase is not None:
         stored_task.phase = new_phase
@@ -1577,6 +1593,8 @@ def _run_stored_task_sync(
 ) -> None:
     with stored_task.execution_lock:
         if stored_task.phase in {
+            CodeBuilderTaskPhase.APPLYING,
+            CodeBuilderTaskPhase.VERIFYING,
             CodeBuilderTaskPhase.EXECUTING,
             CodeBuilderTaskPhase.COMPLETED,
             CodeBuilderTaskPhase.ROLLED_BACK,
@@ -1590,7 +1608,7 @@ def _run_stored_task_sync(
         stored_task.phase = (
             CodeBuilderTaskPhase.ANALYZING
             if preparing
-            else CodeBuilderTaskPhase.EXECUTING
+            else CodeBuilderTaskPhase.APPLYING
         )
         stored_task.started_at_epoch = time.time()
         stored_task.finished_at_epoch = None
@@ -2622,6 +2640,19 @@ async def approve_code_builder_task(
                 execution_started=False,
             )
 
+        serialized_review = _serialize_value(stored_task.review_result)
+        if isinstance(serialized_review, Mapping):
+            verdict = str(serialized_review.get("verdict") or "").strip().casefold()
+            if verdict == "block":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "error": "ai_review_blocked",
+                        "message": "AI review blocked this prepared change. Revise the task before approval.",
+                        "task_id": normalized_task_id,
+                    },
+                )
+
         try:
             stored_task.request = _bind_prepared_patch_to_request(
                 stored_task
@@ -3015,6 +3046,10 @@ async def delete_code_builder_task(
     with stored_task.execution_lock:
         if stored_task.phase in {
             CodeBuilderTaskPhase.ANALYZING,
+            CodeBuilderTaskPhase.PLANNING,
+            CodeBuilderTaskPhase.VALIDATING,
+            CodeBuilderTaskPhase.APPLYING,
+            CodeBuilderTaskPhase.VERIFYING,
             CodeBuilderTaskPhase.EXECUTING,
             CodeBuilderTaskPhase.ROLLING_BACK,
         }:
