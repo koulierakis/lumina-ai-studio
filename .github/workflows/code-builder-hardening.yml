@@ -5,15 +5,8 @@ on:
     branches:
       - work/code-builder-refresh
   pull_request:
-    paths:
-      - 'backend/code_builder/**'
-      - 'backend/tests/test_code_builder*.py'
-      - 'backend/tests/test_planning*.py'
-      - 'frontend/src/pages/CodeBuilder.jsx'
-      - 'frontend/src/pages/CodeBuilder.test.js'
-      - 'tools/apply_code_builder_*.py'
-      - 'INSTALL_CODE_BUILDER_REFRESH.ps1'
-      - '.github/workflows/code-builder-hardening.yml'
+    branches:
+      - release/lumina-complete
 
 permissions:
   contents: read
@@ -23,8 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
