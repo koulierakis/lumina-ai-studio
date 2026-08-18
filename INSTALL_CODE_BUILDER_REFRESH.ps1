@@ -18,6 +18,7 @@ $tools = @(
     'tools\apply_code_builder_review_gate.py',
     'tools\apply_code_builder_stale_guard.py',
     'tools\apply_code_builder_idempotency_guard.py',
+    'tools\apply_code_builder_planning_defaults.py',
     'tools\apply_code_builder_ui_hardening.py'
 )
 
@@ -46,23 +47,11 @@ try {
     }
 
     Write-Host 'Checking Code Builder backend files...' -ForegroundColor Cyan
-    python -m py_compile .\backend\code_builder\router.py .\backend\code_builder\task_service.py .\backend\code_builder\planning_service.py .\backend\code_builder\patch_service.py .\backend\code_builder\build_service.py
+    python -m py_compile .\backend\code_builder\router.py .\backend\code_builder\task_service.py .\backend\code_builder\planning_service.py .\backend\code_builder\patch_service.py .\backend\code_builder\build_service.py .\backend\code_builder\ollama_service.py
     if ($LASTEXITCODE -ne 0) { throw 'Code Builder compile check failed.' }
 
-    Write-Host 'Running protected Code Builder tests...' -ForegroundColor Cyan
-    python -m pytest `
-        .\backend\tests\test_code_builder_hardening_contract.py `
-        .\backend\tests\test_code_builder_timeout_contract.py `
-        .\backend\tests\test_code_builder_default_build_contract.py `
-        .\backend\tests\test_code_builder_planning_budget_contract.py `
-        .\backend\tests\test_code_builder_patch_policy_contract.py `
-        .\backend\tests\test_code_builder_review_gate_contract.py `
-        .\backend\tests\test_code_builder_review_adapter_contract.py `
-        .\backend\tests\test_code_builder_stale_file_contract.py `
-        .\backend\tests\test_code_builder_idempotency_contract.py `
-        .\backend\tests\test_code_builder_path_tracking_contract.py `
-        .\backend\tests\test_code_builder_transaction_boundary.py `
-        .\backend\tests\test_code_builder_execution_pipeline.py -q
+    Write-Host 'Running all Code Builder and planning tests...' -ForegroundColor Cyan
+    python -m pytest .\backend\tests\test_code_builder*.py .\backend\tests\test_planning*.py -q
     if ($LASTEXITCODE -ne 0) { throw 'Code Builder protected tests failed.' }
 
     Write-Host 'Checking visible Code Builder flow...' -ForegroundColor Cyan
@@ -83,10 +72,13 @@ try {
     }
 
     $routerText = Get-Content $router -Raw
+    $planningText = Get-Content $planningService -Raw
     if ($routerText -notmatch 'ai_review_unavailable') { throw 'Fail-closed AI review gate is missing.' }
     if ($routerText -notmatch '_lock_prepared_operations_to_validation') { throw 'Stale-file protection is missing.' }
     if ($routerText -notmatch 'idempotency_key_conflict') { throw 'Idempotency conflict protection is missing.' }
     if ($routerText -notmatch 'Independent Code Builder review') { throw 'Real Ollama review adapter is missing.' }
+    if ($planningText -notmatch 'DEFAULT_MAX_OUTPUT_TOKENS: Final\[int\] = 1_024') { throw 'Planning output budget is not finalized.' }
+    if ($planningText -notmatch 'DEFAULT_INPUT_TOKEN_SAFETY_MARGIN: Final\[int\] = 256') { throw 'Planning safety margin is not finalized.' }
 
     Write-Host ''
     Write-Host 'CODE BUILDER FINALIZATION COMPLETE' -ForegroundColor Green
