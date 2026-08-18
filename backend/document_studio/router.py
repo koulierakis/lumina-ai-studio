@@ -15,8 +15,10 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from models import MediaAsset, now_iso
 from persistence import LocalPersistenceCollection, SQLitePersistenceProvider
+from pydantic import BaseModel, ConfigDict, Field
 from storage import save_bytes
 
+from .generation_orchestrator import DocumentAIProviderRegistry, UnknownDocumentAIProvider
 from .models import (
     BankProfile,
     ClauseTemplate,
@@ -39,12 +41,17 @@ from .models import (
     DocumentVersion,
     EnterpriseDocumentTemplate,
     ExportJobRequest,
+    NaturalDocumentCreationRequest,
+    PackAdvisorRequest,
+    PackAdvisorResponse,
     PackageBuildRequest,
+    PackGenerationRequest,
     ReviewActionRequest,
     TrackChangeActionRequest,
     TrackChangeRequest,
     VersionActionRequest,
 )
+from .natural_creation import NaturalCreationResult
 from .service import (
     CHART_TYPES,
     CLAUSE_LIBRARY,
@@ -56,6 +63,16 @@ from .service import (
     PACKAGE_TYPES,
     SMART_TABLE_TYPES,
     TEMPLATES,
+    AIDocumentPreview,
+    AIFactIntegrityViolation,
+    AIProviderTimedOut,
+    AIProviderUnavailable,
+    InvalidAIProvider,
+    InvalidAIServiceRequest,
+    MalformedAIGeneration,
+    PackGenerationPreview,
+    UnsupportedAIDocumentType,
+    advise_document_pack,
     analyze_document,
     apply_design_preset,
     apply_design_system,
@@ -65,10 +82,13 @@ from .service import (
     build_package,
     classify_document_request,
     compare_documents,
+    create_natural_document_preview,
     create_review_item,
     create_track_change,
     extract_smart_fields,
     extract_text_from_upload,
+    generate_ai_document_preview,
+    generate_document_pack_preview,
     get_design_presets,
     get_template,
     legal_review_document,
@@ -105,16 +125,49 @@ ALLOWED_DOCUMENT_MIMES = {
 MAX_DOCUMENT_BYTES = 50 * 1024 * 1024
 
 
+class AIGenerationPreviewRequest(BaseModel):
+    """Typed route input for one canonical, non-persistent AI draft."""
+
+    model_config = ConfigDict(extra="forbid")
+    objective: str = Field(min_length=1, max_length=20_000)
+    document_type: str = Field(min_length=1, max_length=100)
+    company_profile_id: str | None = None
+    country: str = "GR"
+    language: str = "en"
+    tone: str = "automatic"
+    style: str = "automatic"
+    structured_fields: dict = Field(default_factory=dict)
+    provider: str | None = None
+    fallback_provider: str | None = None
+    allow_fallback: bool = False
+
+
+class PackGenerationPreviewRequest(BaseModel):
+    """PackGenerationRequest-compatible input with explicit provider policy."""
+
+    model_config = ConfigDict(extra="forbid")
+    objective: str = Field(min_length=1, max_length=20_000)
+    company_profile_id: str | None = None
+    selected_document_types: list[str] = Field(default_factory=list, max_length=100)
+    generate_all: bool = False
+    title: str = Field(default="Document Pack", max_length=200)
+    provider: str | None = None
+    fallback_provider: str | None = None
+    allow_fallback: bool = False
+
+
 def _download_content_disposition(title: str, extension: str) -> str:
     safe_extension = "".join(ch for ch in extension.lower() if ch.isalnum()) or "bin"
-    ascii_stem = "".join(
-        ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_"
-        for ch in str(title or "document")
-    ).strip("_")[:80] or "document"
+    ascii_stem = (
+        "".join(
+            ch if ch.isascii() and (ch.isalnum() or ch in "-_") else "_"
+            for ch in str(title or "document")
+        ).strip("_")[:80]
+        or "document"
+    )
     unicode_name = quote(f"{str(title or 'document')}.{safe_extension}", safe="")
     return (
-        f'attachment; filename="{ascii_stem}.{safe_extension}"; '
-        f"filename*=UTF-8''{unicode_name}"
+        f"attachment; filename=\"{ascii_stem}.{safe_extension}\"; filename*=UTF-8''{unicode_name}"
     )
 
 
@@ -182,6 +235,52 @@ async def _profile(owner: str, profile_id: str | None = None) -> CompanyProfile:
     profile = CompanyProfile(owner_email=owner)
     await profiles_coll.insert_one(profile.model_dump())
     return profile
+
+
+async def _preview_profile(owner: str, profile_id: str | None = None) -> CompanyProfile:
+    """Resolve only owner-scoped profile data without creating persistence records."""
+    query = {"owner_email": owner}
+    if profile_id:
+        query["id"] = profile_id
+    doc = await profiles_coll.find_one(query, {"_id": 0})
+    if doc:
+        return await _hydrate_profile(owner, CompanyProfile(**doc))
+    if profile_id:
+        raise HTTPException(404, "Company profile not found")
+    return CompanyProfile(owner_email=owner)
+
+
+def _ai_provider_registry() -> DocumentAIProviderRegistry:
+    """Construct the fixed allowlisted registry; tests may replace this factory."""
+    return DocumentAIProviderRegistry()
+
+
+def _validated_ai_registry(*provider_names: str | None) -> DocumentAIProviderRegistry:
+    registry = _ai_provider_registry()
+    try:
+        for provider_name in provider_names:
+            if provider_name:
+                registry.get(provider_name)
+    except UnknownDocumentAIProvider as exc:
+        raise HTTPException(400, "The requested document AI provider is not supported") from exc
+    return registry
+
+
+def _raise_ai_http_error(exc: Exception) -> None:
+    """Translate sanitized service failures into stable HTTP semantics."""
+    if isinstance(exc, (InvalidAIServiceRequest, InvalidAIProvider)):
+        raise HTTPException(400, str(exc)) from exc
+    if isinstance(exc, UnsupportedAIDocumentType):
+        raise HTTPException(422, str(exc)) from exc
+    if isinstance(exc, AIFactIntegrityViolation):
+        raise HTTPException(422, str(exc)) from exc
+    if isinstance(exc, MalformedAIGeneration):
+        raise HTTPException(502, str(exc)) from exc
+    if isinstance(exc, AIProviderTimedOut):
+        raise HTTPException(504, str(exc)) from exc
+    if isinstance(exc, AIProviderUnavailable):
+        raise HTTPException(503, str(exc)) from exc
+    raise HTTPException(500, "Document AI preview failed") from exc
 
 
 async def _document(document_id: str, owner: str) -> CorporateDocument:
@@ -1054,9 +1153,7 @@ async def create_folder(body: dict, owner: str = Depends(require_owner)) -> Docu
 async def rename_folder(
     folder_id: str, body: dict, owner: str = Depends(require_owner)
 ) -> DocumentFolder:
-    current = await folders_coll.find_one(
-        {"id": folder_id, "owner_email": owner}, {"_id": 0}
-    )
+    current = await folders_coll.find_one({"id": folder_id, "owner_email": owner}, {"_id": 0})
     if not current:
         raise HTTPException(404, "Folder not found")
     name = str(body.get("name") or "").strip()
@@ -1074,9 +1171,7 @@ async def rename_folder(
     if duplicate:
         raise HTTPException(409, "A folder with this name already exists")
     updated = DocumentFolder(**{**current, "name": name, "updated_at": now_iso()})
-    await folders_coll.replace_one(
-        {"id": folder_id, "owner_email": owner}, updated.model_dump()
-    )
+    await folders_coll.replace_one({"id": folder_id, "owner_email": owner}, updated.model_dump())
     return updated
 
 
@@ -1084,9 +1179,7 @@ async def rename_folder(
 async def move_folder(
     folder_id: str, body: dict, owner: str = Depends(require_owner)
 ) -> DocumentFolder:
-    current = await folders_coll.find_one(
-        {"id": folder_id, "owner_email": owner}, {"_id": 0}
-    )
+    current = await folders_coll.find_one({"id": folder_id, "owner_email": owner}, {"_id": 0})
     if not current:
         raise HTTPException(404, "Folder not found")
     parent_id = body.get("parent_id") or None
@@ -1117,12 +1210,8 @@ async def move_folder(
     )
     if duplicate:
         raise HTTPException(409, "A folder with this name already exists")
-    updated = DocumentFolder(
-        **{**current, "parent_id": parent_id, "updated_at": now_iso()}
-    )
-    await folders_coll.replace_one(
-        {"id": folder_id, "owner_email": owner}, updated.model_dump()
-    )
+    updated = DocumentFolder(**{**current, "parent_id": parent_id, "updated_at": now_iso()})
+    await folders_coll.replace_one({"id": folder_id, "owner_email": owner}, updated.model_dump())
     return updated
 
 
@@ -1249,9 +1338,7 @@ async def update_collection(
     if "document_ids" in body:
         requested = list(
             dict.fromkeys(
-                str(item).strip()
-                for item in body.get("document_ids", [])
-                if str(item).strip()
+                str(item).strip() for item in body.get("document_ids", []) if str(item).strip()
             )
         )[:500]
         existing = {
@@ -1324,6 +1411,87 @@ async def create_tag(body: dict, owner: str = Depends(require_owner)) -> Documen
     tag = DocumentTag(owner_email=owner, name=name, color=color.upper())
     await tags_coll.insert_one(tag.model_dump())
     return tag
+
+
+@router.post("/pack-advisor", response_model=PackAdvisorResponse)
+async def pack_advisor_preview(
+    body: PackAdvisorRequest, owner: str = Depends(require_owner)
+) -> PackAdvisorResponse:
+    profile = await _preview_profile(owner, body.company_profile_id)
+    try:
+        return advise_document_pack(body, profile)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/natural-create/preview", response_model=NaturalCreationResult)
+async def natural_create_preview(
+    body: NaturalDocumentCreationRequest, owner: str = Depends(require_owner)
+) -> NaturalCreationResult:
+    profile = await _preview_profile(owner, body.company_profile_id)
+    registry = _validated_ai_registry(body.provider)
+    provider = registry.get(body.provider)
+    try:
+        return await create_natural_document_preview(body, profile, provider)
+    except Exception as exc:
+        _raise_ai_http_error(exc)
+
+
+@router.post("/generate-ai/preview", response_model=AIDocumentPreview)
+async def ai_generation_preview(
+    body: AIGenerationPreviewRequest, owner: str = Depends(require_owner)
+) -> AIDocumentPreview:
+    profile = await _preview_profile(owner, body.company_profile_id)
+    registry = _validated_ai_registry(body.provider, body.fallback_provider)
+    request = NaturalDocumentCreationRequest(
+        request=body.objective,
+        company_profile_id=body.company_profile_id,
+        country=body.country,
+        language=body.language,
+        tone=body.tone,
+        style=body.style,
+        requested_type=body.document_type,
+        structured_fields=body.structured_fields,
+        provider=body.provider,
+        allow_fallback=body.allow_fallback,
+    )
+    try:
+        return await generate_ai_document_preview(
+            request,
+            profile,
+            provider_name=body.provider,
+            fallback_provider_name=body.fallback_provider,
+            registry=registry,
+        )
+    except Exception as exc:
+        _raise_ai_http_error(exc)
+
+
+@router.post("/generate-pack/preview", response_model=PackGenerationPreview)
+async def pack_generation_preview(
+    body: PackGenerationPreviewRequest, owner: str = Depends(require_owner)
+) -> PackGenerationPreview:
+    if body.fallback_provider and not body.allow_fallback:
+        raise HTTPException(400, "Fallback was supplied but is disabled by the request")
+    profile = await _preview_profile(owner, body.company_profile_id)
+    registry = _validated_ai_registry(body.provider, body.fallback_provider)
+    request = PackGenerationRequest(
+        objective=body.objective,
+        company_profile_id=body.company_profile_id,
+        selected_document_types=body.selected_document_types,
+        generate_all=body.generate_all,
+        title=body.title,
+    )
+    try:
+        return await generate_document_pack_preview(
+            request,
+            profile,
+            provider_name=body.provider,
+            fallback_provider_name=(body.fallback_provider if body.allow_fallback else None),
+            registry=registry,
+        )
+    except Exception as exc:
+        _raise_ai_http_error(exc)
 
 
 @router.get("", response_model=list[CorporateDocument])
@@ -1936,9 +2104,7 @@ async def document_review_action(
         after = str(suggestion.get("after") or suggestion.get("replacement") or "")
         if not before or before == after:
             raise HTTPException(409, "Suggestion must replace existing text with new text")
-        reviewed_document = CorporateDocument(
-            **{**document.model_dump(), "metadata": metadata}
-        )
+        reviewed_document = CorporateDocument(**{**document.model_dump(), "metadata": metadata})
         tracked_metadata, change = create_track_change(
             reviewed_document,
             owner,
@@ -2580,9 +2746,7 @@ async def create_export_job(body: ExportJobRequest, owner: str = Depends(require
                 name = f"{index:03d}-{safe_title}.{ext}"
                 archive.writestr(name, data)
                 manifest.append({"document_id": document.id, "filename": name, "mime_type": mime})
-        archive.writestr(
-            "manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2)
-        )
+        archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
     data = buffer.getvalue()
     filename, _, size = save_bytes(data, "application/zip", kind="generated")
     media = MediaAsset(

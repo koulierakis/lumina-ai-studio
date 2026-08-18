@@ -115,6 +115,38 @@ def _service(repository_root: Path, plan: GeneratedChangePlan) -> TaskService:
     )
 
 
+def test_nested_pytest_build_preserves_repository_and_backup(tmp_path: Path) -> None:
+    test_path = "tests/test_nested_pass.py"
+    (tmp_path / "tests").mkdir()
+    (tmp_path / test_path).write_text("def test_pass():\n    assert True\n", encoding="utf-8")
+    backup_service = BackupService(tmp_path)
+    backup = backup_service.create_backup((test_path,), reason="nested pytest diagnostic")
+    manifest = Path(backup.manifest_path)
+    assert manifest.exists()
+
+    build = BuildService(
+        BuildServiceConfiguration(
+            repository_root=tmp_path,
+            custom_command_policy={"executable_paths": frozenset({sys.executable})},
+        )
+    ).execute_sequence(
+        (
+            BuildCommandSpec(
+                command_id="nested-pytest-diagnostic",
+                kind=BuildCommandKind.PYTEST,
+                arguments=(test_path,),
+                timeout_seconds=60,
+            ),
+        )
+    )
+    command = build.commands[0]
+    assert command.status is BuildStatus.SUCCEEDED, (
+        f"stdout={command.stdout!r}; stderr={command.stderr!r}; "
+        f"cwd={command.working_directory!r}; args={command.arguments!r}"
+    )
+    assert manifest.exists(), f"nested pytest removed backup manifest: {manifest}"
+
+
 def test_approved_generated_change_plan_executes_with_backup_and_diff(
     tmp_path: Path,
 ) -> None:
@@ -157,7 +189,11 @@ def test_approved_generated_change_plan_executes_with_backup_and_diff(
         event_callback=lambda event: events.append(event.stage.value),
     )
 
-    assert result.status is TaskStatus.SUCCEEDED
+    assert result.status is TaskStatus.SUCCEEDED, (
+        f"error_type={result.error_type}; error_message={result.error_message}; "
+        f"rollback_attempted={result.rollback_attempted}; "
+        f"rollback_succeeded={result.rollback_succeeded}"
+    )
     assert (tmp_path / test_path).read_text(encoding="utf-8") == new_content
     assert result.backup is not None
     assert result.patch_validation is not None
@@ -205,7 +241,11 @@ def test_execution_rolls_back_when_validation_fails(
 
     result = _service(tmp_path, _plan_for(test_path)).execute_internal(request)
 
-    assert result.status is TaskStatus.ROLLED_BACK
+    assert result.status is TaskStatus.ROLLED_BACK, (
+        f"error_type={result.error_type}; error_message={result.error_message}; "
+        f"rollback_attempted={result.rollback_attempted}; "
+        f"rollback_succeeded={result.rollback_succeeded}"
+    )
     assert result.rollback_attempted is True
     assert result.rollback_succeeded is True
     assert result.rollback_result is not None

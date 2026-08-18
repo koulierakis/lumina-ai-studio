@@ -39,9 +39,13 @@ function Placeholder() {
   return <div className="pointer-events-none absolute left-0 top-0 text-neutral-400">Start typing your document…</div>;
 }
 
-function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
+function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady, disabled }) {
   const [editor] = useLexicalComposerContext();
   const lastExternalHtml = useRef(html || '');
+
+  useEffect(() => {
+    editor.setEditable(!disabled);
+  }, [disabled, editor]);
 
   useEffect(() => {
     onEditorReady?.(editor);
@@ -75,7 +79,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
       let value = '';
       editor.getEditorState().read(() => {
         value = $generateHtmlFromNodes(editor, null);
-      });
+      }, { editor });
       return sanitizeEditorHtml(value);
     },
   }), [editor]);
@@ -133,7 +137,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
       const nextHtml = sanitizeEditorHtml($generateHtmlFromNodes(editor, null));
       lastExternalHtml.current = nextHtml;
       onHtmlChange(nextHtml);
-    });
+    }, { editor });
   }} />;
 }
 
@@ -167,7 +171,7 @@ const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtml
         <HistoryPlugin />
         <ListPlugin />
         <LinkPlugin />
-        <EditorBridge html={html} onHtmlChange={onHtmlChange} editorApiRef={ref || editorApiRef} onEditorReady={onEditorReady} />
+        <EditorBridge html={html} onHtmlChange={onHtmlChange} editorApiRef={ref || editorApiRef} onEditorReady={onEditorReady} disabled={disabled} />
       </div>
     </LexicalComposer>
   );

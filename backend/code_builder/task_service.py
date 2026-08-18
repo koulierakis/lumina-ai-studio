@@ -3000,6 +3000,30 @@ class TaskService:
             message="Implementation planning started.",
         )
 
+        approved_preparation_plan = _extract_value(
+            context.request.metadata,
+            ("approved_preparation_plan",),
+        )
+
+        if approved_preparation_plan is not None:
+            context.plan = approved_preparation_plan
+            context.raise_if_interrupted()
+            planned_paths = _extract_paths(context.plan)
+            self._record_event(
+                context,
+                recorder,
+                stage=TaskStage.PLANNING,
+                status=TaskStatus.PLANNING,
+                level=TaskEventLevel.INFO,
+                message="Approved prepared implementation plan reused.",
+                details={
+                    "plan_type": type(context.plan).__name__,
+                    "planned_paths": list(planned_paths),
+                    "approved_preparation_reused": True,
+                },
+            )
+            return
+
         try:
             context.plan = _create_plan(
                 context,

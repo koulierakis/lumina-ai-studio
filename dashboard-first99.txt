@@ -1,0 +1,99 @@
+  1: import { useCallback, useEffect, useMemo, useState } from 'react';
+  2: import { useNavigate } from 'react-router-dom';
+  3: import {
+  4:   Bot, CheckCircle2, ChevronRight, CircleAlert, FileText, Film, Globe2,
+  5:   ImageIcon, Loader2, Mic2, Plus, RefreshCw, Settings2, Sparkles, Wallet,
+  6:   Workflow, Zap,
+  7: } from 'lucide-react';
+  8: import { apiGet } from '../lib/api';
+  9: import AuthImage from '../components/AuthImage';
+ 10: import { CONTROL_CENTER_TOOLS, activeJobs, buildMessages, formatRelativeTime, suggestedActions } from '../dashboard/model';
+ 11: 
+ 12: const TOOL_ICONS = { image: ImageIcon, video: Film, voice: Mic2, document: FileText, finance: Wallet, research: Globe2, automation: Workflow, settings: Settings2 };
+ 13: 
+ 14: function ToolCard({ tool, onOpen }) {
+ 15:   const Icon = TOOL_ICONS[tool.icon] || Sparkles;
+ 16:   return <button onClick={() => onOpen(tool.to)} data-testid={`dashboard-tool-${tool.key}`} className="lumina-glass group rounded-xl p-5 text-left hover:border-gold/45 hover:bg-white/[0.035] transition-all">
+ 17:     <div className="flex items-start justify-between gap-3"><span className="rounded-lg bg-gold/10 p-2.5 text-gold"><Icon className="w-5 h-5" strokeWidth={1.35} /></span><ChevronRight className="w-4 h-4 text-white/25 group-hover:text-gold transition-colors" /></div>
+ 18:     <h3 className="mt-5 text-sm font-medium text-white">{tool.label}</h3><p className="mt-1.5 text-xs leading-relaxed text-white/45">{tool.description}</p>
+ 19:   </button>;
+ 20: }
+ 21: 
+ 22: const emptyData = () => ({ gallery: [], jobs: [], projects: [], providers: [], health: null, panelErrors: {}, system: null });
+ 23: 
+ 24: export default function Dashboard() {
+ 25:   const navigate = useNavigate();
+ 26:   const [data, setData] = useState(emptyData);
+ 27:   const [loading, setLoading] = useState(true);
+ 28:   const [error, setError] = useState(false);
+ 29: 
+ 30:   const load = useCallback(async () => {
+ 31:     setLoading(true); setError(false);
+ 32:     let overview = null;
+ 33:     let system = null;
+ 34:     const panelErrors = {};
+ 35:     try {
+ 36:       overview = await apiGet('/workspace/overview');
+ 37:     } catch {
+ 38:       panelErrors.overview = 'Workspace overview is unavailable.';
+ 39:     }
+ 40:     try {
+ 41:       system = await apiGet('/system/status');
+ 42:     } catch {
+ 43:       panelErrors.system = 'System status is unavailable.';
+ 44:     }
+ 45:     if (overview) {
+ 46:       Object.assign(panelErrors, overview.panel_errors || {});
+ 47:       setData({
+ 48:         gallery: (overview.media || []).map((item) => ({ ...item, media_id: item.id })),
+ 49:         jobs: overview.jobs || [],
+ 50:         projects: overview.projects || [],
+ 51:         providers: overview.readiness?.providers || [],
+ 52:         health: overview.readiness,
+ 53:         panelErrors,
+ 54:         system,
+ 55:       });
+ 56:     } else {
+ 57:       setData({ ...emptyData(), panelErrors, system });
+ 58:     }
+ 59:     setError(Object.keys(panelErrors).length > 0);
+ 60:     setLoading(false);
+ 61:   }, []);
+ 62: 
+ 63:   useEffect(() => { load(); }, [load]);
+ 64:   const running = useMemo(() => activeJobs(data.jobs), [data.jobs]);
+ 65:   const messages = useMemo(() => buildMessages({ ...data, system: data.system }), [data]);
+ 66:   const actions = useMemo(() => suggestedActions(data), [data]);
+ 67:   const system = data.system;
+ 68:   const systemReadyLabel = system?.system_ready ? 'Ready' : system?.overall_readiness === 'degraded' ? 'Degraded' : system ? 'Checking' : '—';
+ 69:   const backendLabel = system?.backend?.status === 'ok' ? 'Online' : 'Offline';
+ 70:   const localAiLabel = system?.ollama?.online ? 'Online' : 'Offline';
+ 71:   const codingModelLabel = system?.coding_model?.installed ? (system.coding_model.name || 'Installed') : (system?.coding_model?.name ? 'Missing' : '—');
+ 72:   const activeJobCount = typeof system?.active_jobs === 'number' ? system.active_jobs : running.length;
+ 73:   const warningCount = Array.isArray(system?.warnings) ? system.warnings.length : Object.keys(data.panelErrors).length;
+ 74: 
+ 75:   return <main className="h-full w-full overflow-y-auto" data-testid="dashboard-page">
+ 76:     <div className="mx-auto max-w-[1540px] p-6 sm:p-10">
+ 77:       <header className="flex flex-col gap-5 border-b border-white/[0.07] pb-8 sm:flex-row sm:items-end sm:justify-between">
+ 78:         <div><p className="text-[11px] uppercase tracking-[0.28em] text-gold">Control center</p><h2 className="mt-2 font-display text-4xl tracking-tight text-white sm:text-5xl">Good to see you.</h2><p className="mt-2 text-sm text-white/50">Everything important in your Lumina workspace, in one calm view.</p></div>
+ 79:         <div className="flex gap-2"><button onClick={load} disabled={loading} className="rounded-md border border-white/10 px-3 py-2 text-xs text-white/65 hover:text-white disabled:opacity-40"><RefreshCw className={`mr-2 inline h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />Refresh</button><button onClick={() => navigate('/studio/generate')} data-testid="dashboard-new-image" className="rounded-md bg-gold px-4 py-2 text-xs font-medium text-black hover:bg-gold-soft"><Plus className="mr-1.5 inline h-3.5 w-3.5" />New image</button></div>
+ 80:       </header>
+ 81: 
+ 82:       {error && <div className="mt-5 flex items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100"><CircleAlert className="h-4 w-4" />Some workspace data could not be refreshed. The available information is shown below.</div>}
+ 83: 
+ 84:       <section className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6" data-testid="dashboard-system-status">
+ 85:         {[
+ 86:           ['System Ready', loading ? '—' : systemReadyLabel, CheckCircle2, system?.system_ready ? 'All core services ready' : 'One or more services need attention'],
+ 87:           ['Backend', loading ? '—' : backendLabel, Zap, 'Local API process'],
+ 88:           ['Local AI', loading ? '—' : localAiLabel, Bot, 'Ollama runtime'],
+ 89:           ['Coding Model', loading ? '—' : codingModelLabel, Sparkles, system?.coding_model?.name || 'Configured model'],
+ 90:           ['Active Jobs', loading ? '—' : activeJobCount, Loader2, activeJobCount ? 'Lumina is working for you' : 'Nothing is waiting'],
+ 91:           ['Warnings', loading ? '—' : warningCount, CircleAlert, warningCount ? 'See messages below' : 'No active warnings'],
+ 92:         ].map(([label, value, Icon, detail]) => <div key={label} className="lumina-glass rounded-xl p-5"><div className="flex items-start justify-between"><span className="text-xs text-white/50">{label}</span><Icon className="h-4 w-4 text-gold" strokeWidth={1.4} /></div><div className="mt-5 text-2xl font-light text-white truncate" title={String(value)}>{value}</div><p className="mt-1 text-xs text-white/40">{detail}</p></div>)}
+ 93:       </section>
+ 94: 
+ 95:       {!!system?.warnings?.length && <div className="mt-4 space-y-2" data-testid="dashboard-system-warnings">{system.warnings.map((warning) => <div key={warning} className="rounded-lg border border-amber-300/15 bg-amber-300/[0.04] px-4 py-2 text-xs text-amber-100/90">{warning}</div>)}</div>}
+ 96: 
+ 97:       <section className="mt-10"><div className="flex items-center justify-between"><div><h3 className="font-display text-3xl text-white">Your studios</h3><p className="mt-1 text-sm text-white/45">Quick access to every Lumina workspace.</p></div><span className="hidden text-[10px] uppercase tracking-[0.2em] text-white/30 md:block">Widget-ready layout</span></div><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{CONTROL_CENTER_TOOLS.map((tool) => <ToolCard key={tool.key} tool={tool} onOpen={navigate} />)}</div></section>
+ 98: 
+ 99:       <section className="mt-10 grid gap-6 xl:grid-cols-3">

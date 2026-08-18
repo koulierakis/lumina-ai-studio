@@ -18,7 +18,9 @@ import WorkspaceCenter from './pages/WorkspaceCenter';
 import ProjectDetail from './pages/ProjectDetail';
 import PlatformHub from './pages/PlatformHub';
 import CodeCreator from './pages/CodeCreator';
+import CodeBuilder from './pages/CodeBuilder';
 import DocumentStudio from './pages/DocumentStudio';
+import ExecutiveAdvisor from './pages/ExecutiveAdvisor';
 
 export default function App() {
   return (
@@ -49,8 +51,10 @@ export default function App() {
             >
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
+              <Route path="advisor" element={<ExecutiveAdvisor />} />
               <Route path="developer" element={<DeveloperCenter />} />
               <Route path="code-creator" element={<CodeCreator />} />
+              <Route path="code-builder" element={<CodeBuilder />} />
               <Route path="generate" element={<Generate />} />
               <Route path="identity" element={<IdentityPacks />} />
               <Route path="gallery" element={<Gallery />} />
@@ -64,7 +68,7 @@ export default function App() {
               <Route path="projects" element={<WorkspaceCenter mode="projects" />} />
               <Route path="projects/:projectId" element={<ProjectDetail />} />
               <Route path="documents" element={<DocumentStudio />} />
-              <Route path="finance" element={<ComingSoon title="JSA Finance" />} />
+              <Route path="finance" element={<Navigate to="/studio/advisor" replace />} />
               <Route path="research" element={<ComingSoon title="Internet Research" />} />
               <Route path="automations" element={<ComingSoon title="Automations" />} />
               <Route path="settings" element={<WorkspaceCenter mode="settings" />} />

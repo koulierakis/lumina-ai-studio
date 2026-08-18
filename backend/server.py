@@ -37,6 +37,7 @@ import os
 import io
 import re
 import socket
+import shutil
 import subprocess
 import tempfile
 import traceback
