@@ -2,15 +2,11 @@ from __future__ import annotations
 
 import time
 
-import pytest
-from fastapi import HTTPException
-
 from code_builder.router import (
-    ApprovalDecision,
     CodeBuilderTaskPhase,
     StoredTask,
-    TaskApprovalRequest,
     TaskCreateRequest,
+    _phase_allows_approval,
     _phase_allows_cancellation,
     _update_phase_from_event,
 )
@@ -81,6 +77,21 @@ def test_postapproval_events_expose_apply_and_verify_phases() -> None:
     assert stored.phase.value == "verifying"
     _update_phase_from_event(stored, {"status": "succeeded", "stage": "completion"})
     assert stored.phase.value == "completed"
+
+
+def test_approval_is_only_allowed_after_preparation_finishes() -> None:
+    assert _phase_allows_approval(CodeBuilderTaskPhase.AWAITING_APPROVAL)
+    for phase in (
+        CodeBuilderTaskPhase.QUEUED,
+        CodeBuilderTaskPhase.ANALYZING,
+        CodeBuilderTaskPhase.PLANNING,
+        CodeBuilderTaskPhase.VALIDATING,
+        CodeBuilderTaskPhase.APPROVED,
+        CodeBuilderTaskPhase.APPLYING,
+        CodeBuilderTaskPhase.VERIFYING,
+        CodeBuilderTaskPhase.COMPLETED,
+    ):
+        assert not _phase_allows_approval(phase)
 
 
 def test_all_nonterminal_work_phases_are_cancellable() -> None:
