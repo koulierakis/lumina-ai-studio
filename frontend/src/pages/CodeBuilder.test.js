@@ -14,10 +14,12 @@ describe('Code Builder transactional workspace', () => {
     expect(page).toContain("task?.phase === 'awaiting_approval'");
     expect(page).toContain('Boolean(preparation?.patch)');
     expect(page).toContain('Boolean(preparation?.patch_validation)');
-    expect(page).toContain('Boolean(review)');
+    expect(page).toContain("const reviewAllowsApproval = review?.status === 'completed'");
+    expect(page).toContain("['pass', 'warn'].includes(review?.verdict)");
     expect(page).toContain("const reviewBlocked = review?.verdict === 'block'");
-    expect(page).toContain('&& !reviewBlocked');
+    expect(page).toContain('reviewAllowsApproval;');
     expect(page).toContain('data-testid="code-builder-review-blocked"');
+    expect(page).toContain('data-testid="code-builder-review-unavailable"');
     expect(page).toContain('data-testid="code-builder-approve"');
     expect(page).toContain('data-testid="code-builder-reject"');
     expect(page).toContain('data-testid="code-builder-ai-review"');
