@@ -8,6 +8,8 @@ on:
     paths:
       - 'backend/code_builder/**'
       - 'backend/tests/test_code_builder_hardening_contract.py'
+      - 'backend/tests/test_code_builder_transaction_boundary.py'
+      - 'backend/tests/test_code_builder_execution_pipeline.py'
       - 'tools/apply_code_builder_hardening.py'
       - '.github/workflows/code-builder-hardening.yml'
 
@@ -30,4 +32,4 @@ jobs:
       - name: Run hardening contract tests
         run: python -m pytest backend/tests/test_code_builder_hardening_contract.py -q
       - name: Run approval and transaction boundary tests
-        run: python -m pytest backend/tests/test_code_builder_router_transaction.py backend/tests/test_code_builder_preapproval_write_guard.py backend/tests/test_code_builder_reviewer.py -q
+        run: python -m pytest backend/tests/test_code_builder_transaction_boundary.py backend/tests/test_code_builder_execution_pipeline.py -q
