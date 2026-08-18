@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - work/code-builder-refresh
+  pull_request:
+    branches:
+      - release/lumina-complete
 
 permissions:
   contents: read
