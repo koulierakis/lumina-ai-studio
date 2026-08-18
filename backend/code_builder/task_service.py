@@ -1211,7 +1211,8 @@ def _run_awaitable_sync(
         except FutureTimeoutError as exc:
             future.cancel()
             raise TaskTimeoutError(
-                f"{operation_name} timed out."
+                f"{operation_name} timed out.",
+                timeout_seconds=timeout_seconds,
             ) from exc
 
 
