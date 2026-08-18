@@ -10,6 +10,7 @@ on:
       - 'backend/tests/test_code_builder_hardening_contract.py'
       - 'backend/tests/test_code_builder_transaction_boundary.py'
       - 'backend/tests/test_code_builder_execution_pipeline.py'
+      - 'backend/tests/test_code_builder_timeout_contract.py'
       - 'tools/apply_code_builder_hardening.py'
       - '.github/workflows/code-builder-hardening.yml'
 
@@ -32,18 +33,18 @@ jobs:
       - name: Compile Code Builder
         run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py
       - name: Run hardening contract tests
-        run: python -m pytest backend/tests/test_code_builder_hardening_contract.py -q
+        run: python -m pytest backend/tests/test_code_builder_hardening_contract.py backend/tests/test_code_builder_timeout_contract.py -q
       - name: Run approval and transaction boundary tests
         run: python -m pytest backend/tests/test_code_builder_transaction_boundary.py backend/tests/test_code_builder_execution_pipeline.py -q
-      - name: Persist verified router hardening on branch
+      - name: Persist verified Code Builder hardening on branch
         if: github.event_name == 'push' && github.ref_name == 'work/code-builder-refresh'
         run: |
-          if git diff --quiet -- backend/code_builder/router.py; then
-            echo 'Router already contains verified hardening.'
+          if git diff --quiet -- backend/code_builder/router.py backend/code_builder/task_service.py; then
+            echo 'Code Builder already contains verified hardening.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add backend/code_builder/router.py
+          git add backend/code_builder/router.py backend/code_builder/task_service.py
           git commit -m 'Apply verified Code Builder runtime hardening'
           git push origin HEAD:work/code-builder-refresh
