@@ -19,6 +19,7 @@ $tools = @(
     'tools\apply_code_builder_stale_guard.py',
     'tools\apply_code_builder_idempotency_guard.py',
     'tools\apply_code_builder_planning_defaults.py',
+    'tools\apply_code_builder_approval_phase_guard.py',
     'tools\apply_code_builder_ui_hardening.py'
 )
 
@@ -82,6 +83,7 @@ try {
     if ($routerText -notmatch '_lock_prepared_operations_to_validation') { throw 'Stale-file protection is missing.' }
     if ($routerText -notmatch 'idempotency_key_conflict') { throw 'Idempotency conflict protection is missing.' }
     if ($routerText -notmatch 'Independent Code Builder review') { throw 'Real Ollama review adapter is missing.' }
+    if ($routerText -notmatch 'return phase is CodeBuilderTaskPhase.AWAITING_APPROVAL') { throw 'Strict approval phase guard is missing.' }
     if ($planningText -notmatch 'DEFAULT_MAX_OUTPUT_TOKENS: Final\[int\] = 1_024') { throw 'Planning output budget is not finalized.' }
     if ($planningText -notmatch 'DEFAULT_INPUT_TOKEN_SAFETY_MARGIN: Final\[int\] = 256') { throw 'Planning safety margin is not finalized.' }
 
