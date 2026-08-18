@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from code_builder.ollama_service import OllamaClientConfiguration, OllamaService
-from code_builder.planning_service import PlanningConfiguration, PlanningService
+from code_builder.planning_service import (
+    DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS,
+    PlanningConfiguration,
+    PlanningService,
+)
 
 
 def _service(configuration: PlanningConfiguration) -> PlanningService:
@@ -36,6 +40,11 @@ def test_default_planning_context_budget_never_exceeds_available_input(tmp_path)
         - configuration.input_token_safety_margin,
     )
     assert metadata["context_budget_tokens"] <= available_input
+
+
+def test_default_planner_allows_two_repair_attempts() -> None:
+    assert DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS == 2
+    assert PlanningConfiguration().maximum_repair_attempts == 2
 
 
 def test_large_context_still_uses_configured_context_cap(tmp_path) -> None:
