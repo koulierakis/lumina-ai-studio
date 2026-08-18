@@ -1812,7 +1812,7 @@ def _resolve_build_commands(
     if not context.configuration.use_default_build_sequence:
         return ()
 
-    return create_default_validation_sequence(
+    commands = create_default_validation_sequence(
         backend_directory=(
             context.configuration.default_backend_directory
         ),
@@ -1832,6 +1832,23 @@ def _resolve_build_commands(
             context.remaining_seconds(),
         ),
     )
+
+    frontend_root = (
+        context.configuration.repository_root
+        / context.configuration.default_frontend_directory
+    )
+    has_typescript_config = any(
+        (frontend_root / name).is_file()
+        for name in ("tsconfig.json", "tsconfig.base.json")
+    )
+    if not has_typescript_config:
+        commands = tuple(
+            command
+            for command in commands
+            if command.command_id != "frontend-typescript"
+        )
+
+    return commands
 
 
 def _run_build(
