@@ -15,6 +15,9 @@ describe('Code Builder transactional workspace', () => {
     expect(page).toContain('Boolean(preparation?.patch)');
     expect(page).toContain('Boolean(preparation?.patch_validation)');
     expect(page).toContain('Boolean(review)');
+    expect(page).toContain("const reviewBlocked = review?.verdict === 'block'");
+    expect(page).toContain('&& !reviewBlocked');
+    expect(page).toContain('data-testid="code-builder-review-blocked"');
     expect(page).toContain('data-testid="code-builder-approve"');
     expect(page).toContain('data-testid="code-builder-reject"');
     expect(page).toContain('data-testid="code-builder-ai-review"');
