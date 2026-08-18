@@ -51,7 +51,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Code Builder compile check failed.' }
 
     Write-Host 'Running all Code Builder and planning tests...' -ForegroundColor Cyan
-    python -m pytest .\backend\tests\test_code_builder*.py .\backend\tests\test_planning*.py -q
+    $testFiles = @(
+        Get-ChildItem .\backend\tests -File -Filter 'test_code_builder*.py'
+        Get-ChildItem .\backend\tests -File -Filter 'test_planning*.py'
+    ) | Sort-Object FullName -Unique | ForEach-Object { $_.FullName }
+    if (-not $testFiles -or $testFiles.Count -eq 0) { throw 'No Code Builder tests were found.' }
+    python -m pytest @testFiles -q
     if ($LASTEXITCODE -ne 0) { throw 'Code Builder protected tests failed.' }
 
     Write-Host 'Checking visible Code Builder flow...' -ForegroundColor Cyan
