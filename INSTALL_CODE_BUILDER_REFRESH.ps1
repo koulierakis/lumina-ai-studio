@@ -12,6 +12,7 @@ $codeBuilderPage = Join-Path $root 'frontend\src\pages\CodeBuilder.jsx'
 
 $tools = @(
     'tools\apply_code_builder_hardening.py',
+    'tools\apply_code_builder_path_tracking_hardening.py',
     'tools\apply_code_builder_policy_hardening.py',
     'tools\apply_code_builder_review_gate.py',
     'tools\apply_code_builder_stale_guard.py',
@@ -57,6 +58,7 @@ try {
         .\backend\tests\test_code_builder_review_gate_contract.py `
         .\backend\tests\test_code_builder_stale_file_contract.py `
         .\backend\tests\test_code_builder_idempotency_contract.py `
+        .\backend\tests\test_code_builder_path_tracking_contract.py `
         .\backend\tests\test_code_builder_transaction_boundary.py `
         .\backend\tests\test_code_builder_execution_pipeline.py -q
     if ($LASTEXITCODE -ne 0) { throw 'Code Builder protected tests failed.' }
