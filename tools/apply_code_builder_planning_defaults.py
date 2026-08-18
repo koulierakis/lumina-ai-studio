@@ -28,6 +28,12 @@ def main() -> None:
         'DEFAULT_INPUT_TOKEN_SAFETY_MARGIN: Final[int] = 256',
         'default input safety margin',
     )
+    text = replace_once(
+        text,
+        'DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS: Final[int] = 1',
+        'DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS: Final[int] = 2',
+        'default plan repair attempts',
+    )
     TARGET.write_text(text, encoding="utf-8")
     print("CODE BUILDER PLANNING DEFAULTS APPLIED")
 
