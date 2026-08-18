@@ -79,6 +79,7 @@ try {
 
     $routerText = Get-Content $router -Raw
     $planningText = Get-Content $planningService -Raw
+    $uiText = Get-Content $codeBuilderPage -Raw
     if ($routerText -notmatch 'ai_review_unavailable') { throw 'Fail-closed AI review gate is missing.' }
     if ($routerText -notmatch '_lock_prepared_operations_to_validation') { throw 'Stale-file protection is missing.' }
     if ($routerText -notmatch 'idempotency_key_conflict') { throw 'Idempotency conflict protection is missing.' }
@@ -86,6 +87,8 @@ try {
     if ($routerText -notmatch 'return phase is CodeBuilderTaskPhase.AWAITING_APPROVAL') { throw 'Strict approval phase guard is missing.' }
     if ($planningText -notmatch 'DEFAULT_MAX_OUTPUT_TOKENS: Final\[int\] = 1_024') { throw 'Planning output budget is not finalized.' }
     if ($planningText -notmatch 'DEFAULT_INPUT_TOKEN_SAFETY_MARGIN: Final\[int\] = 256') { throw 'Planning safety margin is not finalized.' }
+    if ($planningText -notmatch 'DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS: Final\[int\] = 2') { throw 'Planning retry protection is missing.' }
+    if ($uiText -notmatch 'code-builder-task-failure') { throw 'Visible task failure diagnostics are missing.' }
 
     Write-Host ''
     Write-Host 'CODE BUILDER FINALIZATION COMPLETE' -ForegroundColor Green
