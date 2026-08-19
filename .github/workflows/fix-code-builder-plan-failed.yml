@@ -1,0 +1,54 @@
+name: Fix Code Builder plan FAILED
+
+on:
+  push:
+    branches:
+      - fix/code-builder-plan-failed-20260819
+    paths:
+      - .github/workflows/fix-code-builder-plan-failed.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/code-builder-plan-failed-20260819
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Apply verified planning fix
+        shell: bash
+        run: |
+          git fetch origin fix/code-builder-structured-output-final
+          git show origin/fix/code-builder-structured-output-final:tools/fix_code_builder_small_model_planning.py > /tmp/fix_code_builder_small_model_planning.py
+          python /tmp/fix_code_builder_small_model_planning.py
+
+      - name: Install backend requirements
+        run: pip install -r backend/requirements.txt
+
+      - name: Verify planning fix
+        run: |
+          python -m compileall -q backend/code_builder/planning_service.py
+          python -m pytest backend/tests/test_code_builder_small_model_planning.py -q
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          if git diff --quiet -- backend/code_builder/planning_service.py backend/tests/test_code_builder_small_model_planning.py; then
+            echo "No changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/code_builder/planning_service.py backend/tests/test_code_builder_small_model_planning.py
+          git diff --cached --check
+          git commit -m "fix(code-builder): make plan generation reliable for local model"
+          git push origin HEAD:fix/code-builder-plan-failed-20260819
