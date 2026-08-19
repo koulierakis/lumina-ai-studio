@@ -63,9 +63,11 @@ def harden_router() -> None:
     for old, new, label in replacements:
         text = replace_once(text, old, new, label, ROUTER)
 
-    approval_anchor = '''        try:\n            stored_task.request = _bind_prepared_patch_to_request(\n                stored_task\n            )\n        except CodeBuilderApprovalError as exc:'''
-    approval_guard = '''        serialized_review = _serialize_value(stored_task.review_result)\n        if isinstance(serialized_review, Mapping):\n            verdict = str(serialized_review.get("verdict") or "").strip().casefold()\n            if verdict == "block":\n                raise HTTPException(\n                    status_code=status.HTTP_409_CONFLICT,\n                    detail={\n                        "error": "ai_review_blocked",\n                        "message": "AI review blocked this prepared change. Revise the task before approval.",\n                        "task_id": normalized_task_id,\n                    },\n                )\n\n        try:\n            stored_task.request = _bind_prepared_patch_to_request(\n                stored_task\n            )\n        except CodeBuilderApprovalError as exc:'''
-    text = replace_once(text, approval_anchor, approval_guard, "AI review approval guard", ROUTER)
+    final_review_call = '''        _validate_review_allows_approval(\n            stored_task.review_result,\n            task_id=normalized_task_id,\n        )'''
+    if final_review_call not in text:
+        approval_anchor = '''        try:\n            stored_task.request = _bind_prepared_patch_to_request(\n                stored_task\n            )\n        except CodeBuilderApprovalError as exc:'''
+        approval_guard = '''        serialized_review = _serialize_value(stored_task.review_result)\n        if isinstance(serialized_review, Mapping):\n            verdict = str(serialized_review.get("verdict") or "").strip().casefold()\n            if verdict == "block":\n                raise HTTPException(\n                    status_code=status.HTTP_409_CONFLICT,\n                    detail={\n                        "error": "ai_review_blocked",\n                        "message": "AI review blocked this prepared change. Revise the task before approval.",\n                        "task_id": normalized_task_id,\n                    },\n                )\n\n        try:\n            stored_task.request = _bind_prepared_patch_to_request(\n                stored_task\n            )\n        except CodeBuilderApprovalError as exc:'''
+        text = replace_once(text, approval_anchor, approval_guard, "AI review approval guard", ROUTER)
     ROUTER.write_text(text, encoding="utf-8")
 
 
