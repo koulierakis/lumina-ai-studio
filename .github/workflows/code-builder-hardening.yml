@@ -20,6 +20,9 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r backend/requirements.txt
+      - name: Validate remote finalizer syntax
+        shell: pwsh
+        run: "[scriptblock]::Create((Get-Content -Raw './REMOTE_FINALIZE_CODE_BUILDER.ps1')) | Out-Null"
       - name: Compile committed Code Builder
         run: python -m py_compile backend/code_builder/router.py backend/code_builder/task_service.py backend/code_builder/planning_service.py backend/code_builder/patch_service.py backend/code_builder/build_service.py backend/code_builder/ollama_service.py
       - name: Run all Code Builder and planning tests
