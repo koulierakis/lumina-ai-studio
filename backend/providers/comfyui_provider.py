@@ -12,7 +12,8 @@ class ComfyUIProvider(ImageProvider):
     name = "comfyui"
     priority = 5
     capabilities = ProviderCapabilities(
-        generation=True,
+        # Workflow execution is not advertised until this adapter has a concrete runner.
+        generation=False,
         editing=False,
         aspect_ratios=("1:1", "16:9", "9:16", "4:5", "3:2"),
         maximum_outputs=4,

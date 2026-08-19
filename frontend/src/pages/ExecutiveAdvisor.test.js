@@ -13,6 +13,8 @@ describe('Executive Advisor workspace', () => {
     expect(page).toContain('Deep reasoning');
     expect(page).toContain('Remember this');
     expect(page).toContain('Cloud reasoning');
+    expect(page).toContain('>Auto</button>');
+    expect(page).toContain("useState('auto')");
     expect(page).toContain('Web research');
     expect(page).toContain('openai_configured');
     expect(page).toContain("import { documentApi } from '../documents/model'");

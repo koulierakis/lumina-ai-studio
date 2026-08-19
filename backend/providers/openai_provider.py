@@ -18,10 +18,11 @@ class OpenAIImageProvider(ImageProvider):
     capabilities = ProviderCapabilities(
         generation=True,
         editing=True,
-        identity_references=True,
+        # The current adapter does not submit reference images.
+        identity_references=False,
         masks=True,
         aspect_ratios=("1:1", "16:9", "9:16"),
-        maximum_reference_images=10,
+        maximum_reference_images=0,
         maximum_outputs=4,
         models=("gpt-image-1",),
     )

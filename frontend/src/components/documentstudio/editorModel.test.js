@@ -206,6 +206,12 @@ describe('document studio page layout model', () => {
     expect(extractDocumentOutline(html).map((item) => item.text)).toEqual(['Executive Summary', 'Terms']);
     expect(findReplacePreview(html, 'corporate').count).toBe(1);
     expect(applyFindReplace(html, 'teh', 'the')).toContain('the typo');
+    const protectedMarkup = '<p class="corporate">corporate contract</p><a href="/corporate">corporate link</a>';
+    const replacedMarkup = applyFindReplace(protectedMarkup, 'corporate', 'business');
+    expect(replacedMarkup).toContain('class="corporate"');
+    expect(replacedMarkup).toContain('href="/corporate"');
+    expect(replacedMarkup).toContain('>business contract</p>');
+    expect(replacedMarkup).toContain('>business link</a>');
     expect(spellCheckFoundation(html).unknown).toContain('teh');
   });
 

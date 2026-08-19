@@ -122,3 +122,53 @@ def test_document_context_is_grounded_into_model_request(tmp_path: Path) -> None
     assert "Additional structured context" in user_message
     assert "Commission Agreement" in user_message
     assert "payable within 24 hours" in user_message
+
+
+class FailingOllama(FakeOllama):
+    async def chat(self, **kwargs):
+        from code_builder.ollama_service import OllamaServiceError
+        raise OllamaServiceError("local unavailable")
+
+
+def test_greek_auto_routing_and_bounded_document_context(tmp_path: Path) -> None:
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+    assert service.route_role("Θέλω να βελτιώσω τη ρευστότητα και τον τραπεζικό προϋπολογισμό", "auto") == "cfo"
+    bounded = service._bounded_context({
+        "documents": [
+            {"id": str(index), "title": "X" * 700, "text": "A" * 30000}
+            for index in range(5)
+        ]
+    })
+    assert len(bounded["documents"]) == 2 or len(bounded["documents"]) == 3
+    assert len(bounded["documents"]) <= 3
+    assert sum(len(item["text"]) for item in bounded["documents"]) <= 45000
+    assert all(len(item["text"]) <= 20000 for item in bounded["documents"])
+    assert all(len(item["title"]) <= 500 for item in bounded["documents"])
+
+
+def test_memory_deduplicates_exact_repeated_fact(tmp_path: Path) -> None:
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+    first = service.remember("owner@example.com", "Prefer liquidity first.", "preference")
+    second = service.remember("owner@example.com", " prefer liquidity first. ", "preference")
+    assert first["id"] == second["id"]
+    assert len(service.memories("owner@example.com")) == 1
+
+
+def test_auto_provider_falls_back_to_cloud_when_local_is_unavailable(tmp_path: Path, monkeypatch) -> None:
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FailingOllama())
+    service.model_name = lambda: "test-model"
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    async def fake_openai(**kwargs):
+        return "cloud fallback answer", [], "cloud-model"
+
+    service._ask_openai = fake_openai
+    result = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(message="Give me the recommendation.", provider="auto"),
+        )
+    )
+    assert result["answer"] == "cloud fallback answer"
+    assert result["provider"] == "openai"
+    assert result["provider_status"] == "fallback"

@@ -10,6 +10,7 @@ import ipaddress
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 import bcrypt
 import jwt
@@ -47,6 +48,11 @@ def _local_passwordless_enabled() -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _tailscale_passwordless_enabled() -> bool:
+    value = os.environ.get("LUMINA_TAILSCALE_PASSWORDLESS", "1")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def verify_credentials(email: str, password: str) -> bool:
     if not email or not password:
         return False
@@ -64,8 +70,6 @@ def verify_credentials(email: str, password: str) -> bool:
         except (ValueError, TypeError):
             return False
 
-    # Backward compatibility for existing installations. Production deployments
-    # should set OWNER_PASSWORD_HASH and remove OWNER_PASSWORD.
     return hmac.compare_digest(password, _owner_password())
 
 
@@ -91,29 +95,69 @@ def decode_token(token: str) -> str | None:
         return None
 
 
-def _is_loopback_request(request: Request) -> bool:
+def _parse_ip(value: str) -> ipaddress._BaseAddress | None:
+    try:
+        return ipaddress.ip_address(value.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
+def _client_ip(request: Request) -> ipaddress._BaseAddress | None:
     client = request.client
     host = (client.host if client else "").strip()
-    if not host:
+    return _parse_ip(host) if host else None
+
+
+def _is_loopback_request(request: Request) -> bool:
+    address = _client_ip(request)
+    if address is not None:
+        return address.is_loopback
+
+    client = request.client
+    host = (client.host if client else "").strip().lower()
+    return host == "localhost"
+
+
+def _is_tailscale_ip(address: ipaddress._BaseAddress | None) -> bool:
+    if address is None:
         return False
+    if isinstance(address, ipaddress.IPv4Address):
+        return address in ipaddress.ip_network("100.64.0.0/10")
+    return address in ipaddress.ip_network("fd7a:115c:a1e0::/48")
+
+
+def _is_tailscale_request(request: Request) -> bool:
+    return _is_tailscale_ip(_client_ip(request))
+
+
+def _is_tailscale_browser_origin(request: Request) -> bool:
+    """Recognize the owner SPA when it is opened over a Tailscale address.
+
+    On Windows, Tailscale traffic can be delivered to Uvicorn through a local
+    networking layer that does not always preserve the peer's 100.64/10 address
+    in ``request.client``. The browser Origin/Referer still identifies the private
+    tailnet URL. We only accept an HTTP(S) browser origin whose host itself is a
+    Tailscale address, keeping this fallback scoped to tailnet-hosted Lumina UI.
+    """
+    raw_origin = (request.headers.get("origin") or "").strip()
+    raw_referer = (request.headers.get("referer") or "").strip()
+    candidate = raw_origin or raw_referer
+    if not candidate:
+        return False
+
     try:
-        return ipaddress.ip_address(host).is_loopback
+        parsed = urlparse(candidate)
     except ValueError:
-        return host.lower() == "localhost"
+        return False
+
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+
+    return _is_tailscale_ip(_parse_ip(parsed.hostname))
 
 
 async def require_owner(request: Request) -> str:
-    """Authenticate the owner, optionally allowing passwordless loopback access.
-
-    Desktop installations default to passwordless access for requests originating
-    from the same computer. Set ``LUMINA_LOCAL_PASSWORDLESS=0`` to require a
-    valid JWT even on loopback, which is also how the security integration suite
-    verifies the protected-route contract.
-
-    If an Authorization header is supplied it is always validated. A malformed,
-    forged, expired, or wrong-owner token is never converted into passwordless
-    access by the local fallback.
-    """
+    """Authenticate the owner for local desktop and trusted Tailscale access."""
     owner_email = _owner_email() or "owner@lumina.local"
     authorization = (request.headers.get("authorization") or "").strip()
 
@@ -127,6 +171,11 @@ async def require_owner(request: Request) -> str:
         return owner_email
 
     if _local_passwordless_enabled() and _is_loopback_request(request):
+        return owner_email
+
+    if _tailscale_passwordless_enabled() and (
+        _is_tailscale_request(request) or _is_tailscale_browser_origin(request)
+    ):
         return owner_email
 
     raise HTTPException(status_code=401, detail="Authentication required")

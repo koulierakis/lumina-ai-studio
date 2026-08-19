@@ -1,6 +1,8 @@
 // craco.config.js
 const path = require("path");
+const os = require("os");
 require("dotenv").config();
+const { createProxyMiddleware } = require("http-proxy-middleware");
 
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build
@@ -10,6 +12,19 @@ const isDevServer = process.env.NODE_ENV !== "production";
 const config = {
   enableHealthCheck: process.env.ENABLE_HEALTH_CHECK === "true",
 };
+
+function localDevHosts() {
+  const hosts = new Set(["localhost", "127.0.0.1", os.hostname()]);
+  const interfaces = os.networkInterfaces();
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      if (entry && entry.family === "IPv4" && !entry.internal && entry.address) {
+        hosts.add(entry.address);
+      }
+    }
+  }
+  return Array.from(hosts).filter(Boolean);
+}
 
 function makeDevServerV5Compatible(devServerConfig) {
   const {
@@ -32,17 +47,57 @@ function makeDevServerV5Compatible(devServerConfig) {
     "Cross-Origin-Resource-Policy": "same-origin",
   };
 
-  if (onBeforeSetupMiddleware || setupMiddlewares) {
-    compatibleConfig.setupMiddlewares = (middlewares, devServer) => {
-      if (onBeforeSetupMiddleware) {
-        onBeforeSetupMiddleware(devServer);
-      }
-
-      return setupMiddlewares
-        ? setupMiddlewares(middlewares, devServer)
-        : middlewares;
-    };
+  // Some wrappers can inject allowedHosts: [""] when HOST is blank. WDS5
+  // rejects that configuration before the frontend starts. Keep any valid
+  // configured hosts, remove empty values, and explicitly allow this machine's
+  // local/Tailscale IPv4 addresses for private remote access.
+  if (compatibleConfig.allowedHosts !== "all") {
+    const configuredHosts = Array.isArray(compatibleConfig.allowedHosts)
+      ? compatibleConfig.allowedHosts
+      : compatibleConfig.allowedHosts
+        ? [compatibleConfig.allowedHosts]
+        : [];
+    compatibleConfig.allowedHosts = Array.from(
+      new Set([
+        ...configuredHosts.filter(
+          (host) => typeof host === "string" && host.trim().length > 0
+        ),
+        ...localDevHosts(),
+      ])
+    );
   }
+
+  compatibleConfig.setupMiddlewares = (middlewares, devServer) => {
+    if (onBeforeSetupMiddleware) {
+      onBeforeSetupMiddleware(devServer);
+    }
+
+    let configuredMiddlewares = setupMiddlewares
+      ? setupMiddlewares(middlewares, devServer)
+      : middlewares;
+
+    // The project intentionally runs webpack-dev-server 5 while react-scripts 5
+    // was designed around WDS4 hooks. Register the LUMINA API proxy here, in
+    // the final compatibility layer, so CRACO / visual-edits wrappers cannot
+    // overwrite it. It must be before the SPA history fallback.
+    const hasLuminaApiProxy = configuredMiddlewares.some(
+      (entry) => entry && entry.name === "lumina-api-proxy"
+    );
+
+    if (!hasLuminaApiProxy) {
+      configuredMiddlewares.unshift({
+        name: "lumina-api-proxy",
+        middleware: createProxyMiddleware("/api", {
+          target: "http://127.0.0.1:8000",
+          changeOrigin: false,
+          ws: false,
+          logLevel: "warn",
+        }),
+      });
+    }
+
+    return configuredMiddlewares;
+  };
 
   compatibleConfig.onListening = (devServer) => {
     devServer.close ??= (callback) => devServer.stopCallback(callback);
@@ -86,15 +141,15 @@ let webpackConfig = {
     configure: (webpackConfig) => {
 
       // Add ignored patterns to reduce watched directories
-        webpackConfig.watchOptions = {
-          ...webpackConfig.watchOptions,
-          ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            '**/build/**',
-            '**/dist/**',
-            '**/coverage/**',
-            '**/public/**',
+      webpackConfig.watchOptions = {
+        ...webpackConfig.watchOptions,
+        ignored: [
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/build/**',
+          '**/dist/**',
+          '**/coverage/**',
+          '**/public/**',
         ],
       };
 
