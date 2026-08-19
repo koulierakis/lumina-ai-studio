@@ -622,6 +622,97 @@ class GeneratedFileChange(BaseModel):
     breaking_change: bool = False
 
 
+class CompactGeneratedPlanStep(BaseModel):
+    """Small-model-friendly planning step returned by Ollama."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    order: int = Field(ge=1, le=MAX_PLAN_STEPS)
+    title: str = Field(min_length=1, max_length=1_000)
+    description: str = Field(min_length=1, max_length=MAX_TEXT_FIELD_CHARACTERS)
+    file_paths: list[str] = Field(default_factory=list, max_length=MAX_FILE_CHANGES)
+
+
+class CompactGeneratedFileChange(BaseModel):
+    """Small-model-friendly file change returned by Ollama."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    path: str = Field(min_length=1, max_length=MAX_PATH_CHARACTERS)
+    operation: str = Field(min_length=1, max_length=50)
+    destination_path: str | None = Field(default=None, max_length=MAX_PATH_CHARACTERS)
+    summary: str = Field(min_length=1, max_length=MAX_TEXT_FIELD_CHARACTERS)
+    rationale: str = Field(min_length=1, max_length=MAX_TEXT_FIELD_CHARACTERS)
+
+
+class CompactGeneratedChangePlan(BaseModel):
+    """Reduced schema used for reliable planning on small local models."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: str = Field(min_length=1, max_length=1_000)
+    summary: str = Field(min_length=1, max_length=MAX_TEXT_FIELD_CHARACTERS)
+    objective: str = Field(min_length=1, max_length=MAX_TEXT_FIELD_CHARACTERS)
+    files: list[CompactGeneratedFileChange] = Field(min_length=1, max_length=MAX_FILE_CHANGES)
+    steps: list[CompactGeneratedPlanStep] = Field(min_length=1, max_length=MAX_PLAN_STEPS)
+    acceptance_criteria: list[str] = Field(default_factory=list, max_length=MAX_ACCEPTANCE_CRITERIA)
+    test_plan: list[str] = Field(default_factory=list, max_length=MAX_ACCEPTANCE_CRITERIA)
+
+
+def _expand_compact_generated_plan(plan: CompactGeneratedChangePlan) -> "GeneratedChangePlan":
+    """Expand a compact model response into the canonical planner schema."""
+
+    files = [
+        GeneratedFileChange(
+            path=item.path,
+            operation=item.operation,
+            destination_path=item.destination_path,
+            summary=item.summary,
+            rationale=item.rationale,
+            implementation_notes=[],
+            affected_symbols=[],
+            dependencies=[],
+            tests=list(plan.test_plan),
+            risk_level="low",
+            breaking_change=False,
+        )
+        for item in plan.files
+    ]
+    steps = [
+        GeneratedPlanStep(
+            order=item.order,
+            title=item.title,
+            description=item.description,
+            file_paths=list(item.file_paths),
+            depends_on=[],
+            validation=list(plan.acceptance_criteria),
+        )
+        for item in plan.steps
+    ]
+    acceptance = list(plan.acceptance_criteria) or [
+        "The requested repository change is present and matches the approved plan."
+    ]
+    tests = list(plan.test_plan) or [
+        "Validate the affected files and run the repository's applicable verification checks."
+    ]
+    return GeneratedChangePlan(
+        title=plan.title,
+        summary=plan.summary,
+        objective=plan.objective,
+        assumptions=[],
+        risk_level="low",
+        breaking_changes=False,
+        requires_user_action=False,
+        required_user_actions=[],
+        files=files,
+        steps=steps,
+        acceptance_criteria=acceptance,
+        test_plan=tests,
+        rollback_plan=["Restore the pre-apply backup if post-apply verification fails."],
+        warnings=[],
+    )
+
+
 class GeneratedChangePlan(BaseModel):
     """Canonical structured schema requested from Ollama."""
 
@@ -2723,11 +2814,14 @@ class PlanningService:
                 )
 
         try:
+            # Use a deliberately compact schema for local small models.
+            # The response is expanded into the canonical schema immediately
+            # afterwards and still passes all repository/path validation.
             result = await self.ollama_service.generate_structured(
                 model=self.configuration.model,
                 prompt=effective_prompt,
                 system_prompt=system_prompt,
-                response_model=GeneratedChangePlan,
+                response_model=CompactGeneratedChangePlan,
                 options=self.build_ollama_options(),
                 timeout_seconds=(
                     timeout_seconds
@@ -2773,16 +2867,17 @@ class PlanningService:
 
         validated_model = result.validated_model
 
+        if isinstance(validated_model, CompactGeneratedChangePlan):
+            return _expand_compact_generated_plan(validated_model)
         if isinstance(validated_model, GeneratedChangePlan):
             return validated_model
 
         try:
-            return GeneratedChangePlan.model_validate(
-                result.data
-            )
+            compact_plan = CompactGeneratedChangePlan.model_validate(result.data)
+            return _expand_compact_generated_plan(compact_plan)
         except ValidationError as exc:
             raise PlanningValidationError(
-                "The generated change plan failed final schema "
+                "The generated change plan failed final compact-schema "
                 "validation."
             ) from exc
 
@@ -3596,7 +3691,12 @@ class PlanningService:
             "- Include acceptance criteria and a concrete test plan.\n\n"
             "REQUIRED STRUCTURE\n"
             "------------------\n"
-            f"{_generated_change_plan_contract()}"
+            "CompactGeneratedChangePlan required fields:\n"
+            "- title, summary, objective\n"
+            "- files: [{path, operation, destination_path?, summary, rationale}]\n"
+            "- steps: [{order, title, description, file_paths}]\n"
+            "- acceptance_criteria: [string]\n"
+            "- test_plan: [string]"
         )
 
     async def create_normalized_change_plan(
