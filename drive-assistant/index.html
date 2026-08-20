@@ -16,8 +16,30 @@
         <div class="eyebrow">LUMINA</div>
         <h1>Drive Assistant</h1>
       </div>
-      <button id="themeBtn" class="icon-btn" aria-label="Αλλαγή θέματος">◐</button>
+      <div class="top-actions">
+        <button id="themeBtn" class="icon-btn" aria-label="Αλλαγή θέματος">◐</button>
+        <button id="menuBtn" class="icon-btn" aria-label="Μενού">☰</button>
+      </div>
     </header>
+
+    <aside id="menuDrawer" class="drawer hidden" aria-label="Μενού Drive Assistant">
+      <div class="drawer-head"><strong>Drive Center</strong><button id="closeMenuBtn" class="icon-btn">✕</button></div>
+      <div class="drawer-grid">
+        <button data-poi="hospital">🏥 Νοσοκομεία</button>
+        <button data-poi="charging_station">⚡ Φόρτιση EV</button>
+        <button data-poi="supermarket">🛒 Supermarket</button>
+        <button data-poi="cafe">☕ Καφέ</button>
+        <button data-poi="police">👮 Αστυνομία</button>
+        <button data-poi="bank">🏦 Τράπεζες</button>
+      </div>
+      <div class="settings-list">
+        <label><span>Φωνητικές ειδοποιήσεις</span><input id="voiceAlertsToggle" type="checkbox" checked></label>
+        <label><span>Όρια / υπέρβαση</span><input id="speedAlertsToggle" type="checkbox" checked></label>
+        <label><span>Κάμερες / safety points</span><input id="cameraAlertsToggle" type="checkbox" checked></label>
+        <label><span>Καιρός διαδρομής</span><input id="weatherAlertsToggle" type="checkbox" checked></label>
+      </div>
+      <button id="centerMapBtn" class="primary wide drawer-primary">📍 Κέντρο στη θέση μου</button>
+    </aside>
 
     <main>
       <section class="hero-card">
