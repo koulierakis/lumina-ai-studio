@@ -6,6 +6,10 @@ on:
     paths:
       - 'drive-assistant/**'
       - '.github/workflows/drive-assistant-pages.yml'
+  pull_request:
+    paths:
+      - 'drive-assistant/**'
+      - '.github/workflows/drive-assistant-pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -14,7 +18,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: lumina-drive-pages
+  group: lumina-drive-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -34,6 +38,7 @@ jobs:
           grep -q 'System Monitor' drive-assistant/index.html
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: validate
     environment:
       name: github-pages
