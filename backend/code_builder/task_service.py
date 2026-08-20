@@ -797,9 +797,19 @@ def _extract_paths(source: Any) -> tuple[str, ...]:
                     "target_path",
                 ),
             )
+            destination_path = _extract_value(
+                item,
+                (
+                    "destination_path",
+                    "new_path",
+                    "destination",
+                ),
+            )
 
             if nested_path is not None:
                 paths.append(str(nested_path))
+            if destination_path is not None:
+                paths.append(str(destination_path))
 
         return tuple(dict.fromkeys(paths))
 
@@ -860,6 +870,59 @@ def _build_patch_request_from_metadata(
             ),
         }
     )
+
+    # Metadata patch operations honor task create/delete/exclusion policy.
+    create_operations = {"create", "add", "new", "create_file"}
+    delete_operations = {"delete", "remove", "delete_file"}
+    rename_operations = {"rename", "move", "rename_file"}
+
+    for operation in payload.operations:
+        operation_name = str(operation.operation).strip().casefold().replace("-", "_").replace(" ", "_")
+        if (
+            operation_name in create_operations
+            or bool(operation.create_if_missing)
+        ) and not context.request.allow_file_creation:
+            raise TaskPatchError(
+                "Patch requests file creation, but this task does not permit creating files."
+            )
+        if operation_name in delete_operations and not context.request.allow_file_deletion:
+            raise TaskPatchError(
+                "Patch requests file deletion, but this task does not permit deleting files."
+            )
+        if operation_name in rename_operations and (
+            not context.request.allow_file_creation
+            or not context.request.allow_file_deletion
+        ):
+            raise TaskPatchError(
+                "Patch requests a rename/move, which requires both file creation and deletion permission."
+            )
+
+    repository_root = context.configuration.repository_root
+    excluded_roots = tuple(
+        _normalize_repository_path(
+            repository_root,
+            excluded_path,
+            must_exist=False,
+        )
+        for excluded_path in context.request.excluded_paths
+    )
+    for operation in payload.operations:
+        candidate_paths = [operation.path]
+        if operation.destination_path:
+            candidate_paths.append(operation.destination_path)
+        for path_text in candidate_paths:
+            resolved = _normalize_repository_path(
+                repository_root,
+                path_text,
+                must_exist=False,
+            )
+            if any(
+                resolved == excluded_root or excluded_root in resolved.parents
+                for excluded_root in excluded_roots
+            ):
+                raise TaskPatchError(
+                    f"Patch targets an excluded path: {path_text}"
+                )
 
     planned_paths = _extract_plan_operation_paths(context.plan)
 
@@ -1197,7 +1260,8 @@ def _run_awaitable_sync(
             return asyncio.run(_runner())
         except asyncio.TimeoutError as exc:
             raise TaskTimeoutError(
-                f"{operation_name} timed out."
+                f"{operation_name} timed out.",
+                timeout_seconds=timeout_seconds,
             ) from exc
 
     def _run_in_thread() -> Any:
@@ -1210,7 +1274,8 @@ def _run_awaitable_sync(
         except FutureTimeoutError as exc:
             future.cancel()
             raise TaskTimeoutError(
-                f"{operation_name} timed out."
+                f"{operation_name} timed out.",
+                timeout_seconds=timeout_seconds,
             ) from exc
 
 
@@ -1810,7 +1875,7 @@ def _resolve_build_commands(
     if not context.configuration.use_default_build_sequence:
         return ()
 
-    return create_default_validation_sequence(
+    commands = create_default_validation_sequence(
         backend_directory=(
             context.configuration.default_backend_directory
         ),
@@ -1830,6 +1895,23 @@ def _resolve_build_commands(
             context.remaining_seconds(),
         ),
     )
+
+    frontend_root = (
+        context.configuration.repository_root
+        / context.configuration.default_frontend_directory
+    )
+    has_typescript_config = any(
+        (frontend_root / name).is_file()
+        for name in ("tsconfig.json", "tsconfig.base.json")
+    )
+    if not has_typescript_config:
+        commands = tuple(
+            command
+            for command in commands
+            if command.command_id != "frontend-typescript"
+        )
+
+    return commands
 
 
 def _run_build(

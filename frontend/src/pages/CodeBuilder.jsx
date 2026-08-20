@@ -126,7 +126,11 @@ export default function CodeBuilder() {
   const verification = task?.result?.build_result;
   const planFiles = useMemo(() => collectPlanFiles(plan), [plan]);
   const diffs = useMemo(() => collectDiffs(preparation), [preparation]);
-  const canApprove = task?.phase === 'awaiting_approval' && Boolean(preparation?.patch) && Boolean(preparation?.patch_validation) && Boolean(review);
+  const reviewAllowsApproval = review?.status === 'completed' && ['pass', 'warn'].includes(review?.verdict);
+  const reviewBlocked = review?.verdict === 'block';
+  const reviewUnavailable = Boolean(review) && !reviewAllowsApproval && !reviewBlocked;
+  const canReject = task?.phase === 'awaiting_approval';
+  const canApprove = task?.phase === 'awaiting_approval' && Boolean(preparation?.patch) && Boolean(preparation?.patch_validation) && reviewAllowsApproval;
   const canRollback = ['completed', 'failed', 'cancelled', 'timed_out', 'rollback_failed'].includes(task?.phase);
 
   return (
@@ -193,8 +197,10 @@ export default function CodeBuilder() {
               <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-5">
                 <h3 className="text-sm font-medium text-white">Approval gate</h3>
                 <p className="mt-2 text-xs leading-relaxed text-white/45">Approve only the prepared, validated and reviewed patch shown here. Approval starts the protected backup → apply → verification pipeline.</p>
+                {reviewBlocked && <div data-testid="code-builder-review-blocked" className="mt-3 rounded-md border border-red-400/20 bg-red-400/5 px-3 py-2 text-xs leading-relaxed text-red-100">The independent review blocked this change. Revise the task before approval.</div>}
+                {reviewUnavailable && <div data-testid="code-builder-review-unavailable" className="mt-3 rounded-md border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-xs leading-relaxed text-amber-100">The independent review did not complete successfully. Approval stays locked until a valid review is available.</div>}
                 <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Optional approval note" className="mt-4 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none placeholder:text-white/25 focus:border-gold/40" />
-                <div className="mt-4 grid grid-cols-2 gap-2"><button data-testid="code-builder-reject" onClick={() => decide('reject')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md border border-red-400/20 px-3 py-2.5 text-xs text-red-100 disabled:opacity-30"><XCircle className="h-4 w-4" />Reject</button><button data-testid="code-builder-approve" onClick={() => decide('approve')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md bg-gold px-3 py-2.5 text-xs font-medium text-black disabled:opacity-30"><CheckCircle2 className="h-4 w-4" />Approve & apply</button></div>
+                <div className="mt-4 grid grid-cols-2 gap-2"><button data-testid="code-builder-reject" onClick={() => decide('reject')} disabled={!canReject || busy} className="inline-flex items-center justify-center gap-2 rounded-md border border-red-400/20 px-3 py-2.5 text-xs text-red-100 disabled:opacity-30"><XCircle className="h-4 w-4" />Reject</button><button data-testid="code-builder-approve" onClick={() => decide('approve')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md bg-gold px-3 py-2.5 text-xs font-medium text-black disabled:opacity-30"><CheckCircle2 className="h-4 w-4" />Approve & apply</button></div>
                 {canRollback && <button onClick={rollback} disabled={busy} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/10 px-3 py-2.5 text-xs text-white/65 hover:text-white disabled:opacity-30"><RotateCcw className="h-4 w-4" />Rollback</button>}
               </section>
 
