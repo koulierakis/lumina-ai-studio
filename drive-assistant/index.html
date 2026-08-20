@@ -4,95 +4,37 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#0b1220" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>LUMINA Drive Assistant</title>
+  <link rel="manifest" href="manifest.webmanifest" />
   <link rel="preconnect" href="https://tile.openstreetmap.org" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="app">
-    <header class="topbar">
-      <div>
-        <div class="eyebrow">LUMINA</div>
-        <h1>Drive Assistant</h1>
-      </div>
-      <div class="top-actions">
-        <button id="themeBtn" class="icon-btn" aria-label="Αλλαγή θέματος">◐</button>
-        <button id="menuBtn" class="icon-btn" aria-label="Μενού">☰</button>
-      </div>
-    </header>
-
+    <header class="topbar"><div><div class="eyebrow">LUMINA</div><h1>Drive Assistant</h1></div><div class="top-actions"><span id="networkBadge" class="network-badge">ONLINE</span><button id="themeBtn" class="icon-btn" aria-label="Αλλαγή θέματος">◐</button><button id="menuBtn" class="icon-btn" aria-label="Μενού">☰</button></div></header>
     <aside id="menuDrawer" class="drawer hidden" aria-label="Μενού Drive Assistant">
       <div class="drawer-head"><strong>Drive Center</strong><button id="closeMenuBtn" class="icon-btn">✕</button></div>
-      <div class="drawer-grid">
-        <button data-poi="hospital">🏥 Νοσοκομεία</button>
-        <button data-poi="charging_station">⚡ Φόρτιση EV</button>
-        <button data-poi="supermarket">🛒 Supermarket</button>
-        <button data-poi="cafe">☕ Καφέ</button>
-        <button data-poi="police">👮 Αστυνομία</button>
-        <button data-poi="bank">🏦 Τράπεζες</button>
-      </div>
-      <div class="settings-list">
-        <label><span>Φωνητικές ειδοποιήσεις</span><input id="voiceAlertsToggle" type="checkbox" checked></label>
-        <label><span>Όρια / υπέρβαση</span><input id="speedAlertsToggle" type="checkbox" checked></label>
-        <label><span>Κάμερες / safety points</span><input id="cameraAlertsToggle" type="checkbox" checked></label>
-        <label><span>Καιρός διαδρομής</span><input id="weatherAlertsToggle" type="checkbox" checked></label>
-      </div>
+      <div class="drawer-grid"><button data-poi="hospital">🏥 Νοσοκομεία</button><button data-poi="charging_station">⚡ Φόρτιση EV</button><button data-poi="supermarket">🛒 Supermarket</button><button data-poi="cafe">☕ Καφέ</button><button data-poi="police">👮 Αστυνομία</button><button data-poi="bank">🏦 Τράπεζες</button></div>
+      <div class="settings-list"><label><span>Φωνητικές ειδοποιήσεις</span><input id="voiceAlertsToggle" type="checkbox" checked></label><label><span>Όρια / υπέρβαση</span><input id="speedAlertsToggle" type="checkbox" checked></label><label><span>Κάμερες / safety points</span><input id="cameraAlertsToggle" type="checkbox" checked></label><label><span>Καιρός διαδρομής</span><input id="weatherAlertsToggle" type="checkbox" checked></label></div>
       <button id="centerMapBtn" class="primary wide drawer-primary">📍 Κέντρο στη θέση μου</button>
     </aside>
-
     <main>
-      <section class="hero-card">
-        <div class="speed-block"><span id="speed">0</span><small>km/h</small></div>
-        <div class="limit-block"><span>ΟΡΙΟ</span><strong id="speedLimit">—</strong></div>
-        <div class="status-block"><span id="gpsStatus">GPS αναμονή</span><span id="roadName">—</span></div>
-      </section>
-
-      <section class="search-row">
-        <input id="destinationInput" type="search" placeholder="Πού θέλεις να πας;" autocomplete="off" />
-        <button id="routeBtn" class="primary">Διαδρομή</button>
-      </section>
-
-      <section class="quick-grid" aria-label="Γρήγορη αναζήτηση">
-        <button data-poi="pharmacy">💊<span>Φαρμακεία</span></button>
-        <button data-poi="fuel">⛽<span>Βενζίνη</span></button>
-        <button data-poi="restaurant">🍽️<span>Φαγητό</span></button>
-        <button data-poi="gym">🏋️<span>Γυμναστήρια</span></button>
-        <button data-poi="parking">🅿️<span>Parking</span></button>
-        <button id="freeDriveBtn">🧭<span>Free Drive</span></button>
-      </section>
-
-      <section class="map-shell">
-        <div id="map"></div>
-        <div id="maneuverCard" class="maneuver-card hidden">
-          <strong id="maneuverText">—</strong><span id="maneuverDistance">—</span>
-        </div>
-      </section>
-
-      <section class="alerts-panel">
-        <div class="section-title"><h2>Οδηγική επίγνωση</h2><span id="alertCount">0 ειδοποιήσεις</span></div>
-        <div id="alertsList" class="alerts-list"><div class="empty">Δεν υπάρχουν ενεργές ειδοποιήσεις.</div></div>
-      </section>
-
-      <section class="trip-grid">
-        <article><span>Απόσταση</span><strong id="tripDistance">0.0 km</strong></article>
-        <article><span>Χρόνος</span><strong id="tripTime">00:00</strong></article>
-        <article><span>Μ. ταχύτητα</span><strong id="avgSpeed">0 km/h</strong></article>
-      </section>
-
-      <section class="voice-card">
-        <button id="voiceBtn" class="primary wide">🎙️ Φωνητική εντολή</button>
-        <p id="voiceHint">Π.χ. «βρες βενζινάδικο» ή «πήγαινέ με Πρέβεζα»</p>
-      </section>
-
-      <section class="monitor-card">
-        <div class="section-title"><h2>System Monitor</h2><span id="readyState">CHECKING</span></div>
-        <div id="monitorGrid" class="monitor-grid"></div>
-      </section>
+      <section class="hero-card"><div class="speed-block"><span id="speed">0</span><small>km/h</small></div><div class="limit-block"><span>ΟΡΙΟ</span><strong id="speedLimit">—</strong></div><div class="status-block"><span id="gpsStatus">GPS αναμονή</span><span id="roadName">—</span></div></section>
+      <section class="search-row"><input id="destinationInput" type="search" placeholder="Πού θέλεις να πας;" autocomplete="off" /><button id="routeBtn" class="primary">Διαδρομή</button></section>
+      <section class="quick-grid" aria-label="Γρήγορη αναζήτηση"><button data-poi="pharmacy">💊<span>Φαρμακεία</span></button><button data-poi="fuel">⛽<span>Βενζίνη</span></button><button data-poi="restaurant">🍽️<span>Φαγητό</span></button><button data-poi="gym">🏋️<span>Γυμναστήρια</span></button><button data-poi="parking">🅿️<span>Parking</span></button><button id="freeDriveBtn">🧭<span>Free Drive</span></button></section>
+      <section class="map-shell"><div id="map"></div><div id="maneuverCard" class="maneuver-card hidden"><strong id="maneuverText">—</strong><span id="maneuverDistance">—</span></div></section>
+      <section class="alerts-panel"><div class="section-title"><h2>Οδηγική επίγνωση</h2><span id="alertCount">0 ειδοποιήσεις</span></div><div id="alertsList" class="alerts-list"><div class="empty">Δεν υπάρχουν ενεργές ειδοποιήσεις.</div></div></section>
+      <section class="trip-grid"><article><span>Απόσταση</span><strong id="tripDistance">0.0 km</strong></article><article><span>Χρόνος</span><strong id="tripTime">00:00</strong></article><article><span>Μ. ταχύτητα</span><strong id="avgSpeed">0 km/h</strong></article></section>
+      <section class="voice-card"><button id="voiceBtn" class="primary wide">🎙️ Φωνητική εντολή</button><p id="voiceHint">Π.χ. «βρες βενζινάδικο» ή «πήγαινέ με Πρέβεζα»</p></section>
+      <section class="monitor-card"><div class="section-title"><h2>System Monitor</h2><span id="readyState">CHECKING</span></div><div id="monitorGrid" class="monitor-grid"></div></section>
     </main>
   </div>
-
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script type="module" src="app.js"></script>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}</script>
 </body>
 </html>
