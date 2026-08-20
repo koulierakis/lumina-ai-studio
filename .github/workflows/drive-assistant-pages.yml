@@ -27,7 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: JavaScript syntax
-        run: node --check drive-assistant/app.js
+        run: |
+          node --check drive-assistant/app.js
+          node --check drive-assistant/sw.js
       - name: Required feature smoke checks
         run: |
           grep -q 'navigator.geolocation' drive-assistant/app.js
@@ -35,7 +37,17 @@ jobs:
           grep -q 'router.project-osrm.org' drive-assistant/app.js
           grep -q 'overpass-api.de' drive-assistant/app.js
           grep -q 'nominatim.openstreetmap.org' drive-assistant/app.js
+          grep -q 'api.open-meteo.com' drive-assistant/app.js
           grep -q 'System Monitor' drive-assistant/index.html
+          grep -q 'manifest.webmanifest' drive-assistant/index.html
+          grep -q 'serviceWorker' drive-assistant/index.html
+          grep -q 'viewport-fit=cover' drive-assistant/index.html
+          test -s drive-assistant/manifest.webmanifest
+          test -s drive-assistant/sw.js
+      - name: No fabricated live-feed claims
+        run: |
+          ! grep -Rqi 'simulated live traffic' drive-assistant
+          ! grep -Rqi 'radar detector' drive-assistant
 
   deploy:
     if: github.event_name != 'pull_request'
