@@ -57,50 +57,31 @@
       return true;
     }).sort((a,b)=>score(a,q)-score(b,q)||norm(a.road||a.name).localeCompare(norm(b.road||b.name),'el')||norm(a.city).localeCompare(norm(b.city),'el')).slice(0,40);
     active=-1;
-
     if(!results.length){
-      const text=nationwideFailed
-        ?'Η πανελλαδική αναζήτηση δρόμων δεν απάντησε. Δοκίμασε ξανά σε λίγα δευτερόλεπτα.'
-        :'Δεν βρέθηκαν σχετικές επιλογές. Συνέχισε να γράφεις ή πρόσθεσε πόλη.';
+      const text=nationwideFailed?'Η πανελλαδική αναζήτηση δρόμων δεν απάντησε. Δοκίμασε ξανά σε λίγα δευτερόλεπτα.':'Δεν βρέθηκαν σχετικές επιλογές. Συνέχισε να γράφεις ή πρόσθεσε πόλη.';
       menu.innerHTML=`<div class="destination-empty">${esc(text)}</div>`;
       menu.classList.remove('hidden');
       return;
     }
-
     const warning=nationwideFailed?'<div class="destination-empty">Μερικά αποτελέσματα μόνο — η πανελλαδική υπηρεσία δρόμων δεν απάντησε.</div>':'';
-    menu.innerHTML=warning+results.map((x,i)=>{
-      const road=x.road||x.name,city=x.city||'Ελλάδα';
-      return `<button type="button" class="destination-suggestion" role="option" data-index="${i}" aria-selected="false"><span class="suggestion-pin">⌖</span><span class="suggestion-copy"><small class="suggestion-road">${esc(road)}</small><strong class="suggestion-city">${esc(city)}</strong></span></button>`;
-    }).join('');
+    menu.innerHTML=warning+results.map((x,i)=>{const road=x.road||x.name,city=x.city||'Ελλάδα';return `<button type="button" class="destination-suggestion" role="option" data-index="${i}" aria-selected="false"><span class="suggestion-pin">⌖</span><span class="suggestion-copy"><small class="suggestion-road">${esc(road)}</small><strong class="suggestion-city">${esc(city)}</strong></span></button>`;}).join('');
     menu.classList.remove('hidden');
   }
 
-  const select=i=>{
-    const x=results[i];if(!x)return;
-    input.value=[x.road||x.name,x.city].filter(Boolean).join(', ');
-    input.dataset.selectedLat=String(x.lat);
-    input.dataset.selectedLng=String(x.lng);
-    input.dataset.selectedName=x.display||input.value;
-    input.dispatchEvent(new Event('change',{bubbles:true}));
-    hide();input.focus();
-  };
+  const select=i=>{const x=results[i];if(!x)return;input.value=[x.road||x.name,x.city].filter(Boolean).join(', ');input.dataset.selectedLat=String(x.lat);input.dataset.selectedLng=String(x.lng);input.dataset.selectedName=x.display||input.value;input.dispatchEvent(new Event('change',{bubbles:true}));hide();input.focus();};
 
   async function photon(q,signal){
-    const u=new URL('https://photon.komoot.io/api/');
-    u.searchParams.set('q',q);
-    u.searchParams.set('lang','el');
-    u.searchParams.set('limit','30');
-    const r=await fetch(u,{signal,headers:{Accept:'application/json'}});
-    if(!r.ok)throw new Error('photon');
-    const j=await r.json();
-    return(j.features||[]).map(fromPhoton).filter(x=>x.countrycode==='gr'&&x.display);
+    const u=new URL('https://photon.komoot.io/api/');u.searchParams.set('q',q);u.searchParams.set('lang','el');u.searchParams.set('limit','30');
+    const r=await fetch(u,{signal,headers:{Accept:'application/json'}});if(!r.ok)throw new Error('photon');
+    const j=await r.json();return(j.features||[]).map(fromPhoton).filter(x=>x.countrycode==='gr'&&x.display);
   }
 
   async function fetchOverpass(query,signal){
     let lastError=null;
     for(const endpoint of OVERPASS_ENDPOINTS){
       try{
-        const r=await fetch(endpoint,{method:'POST',body:query,signal,headers:{'Content-Type':'text/plain;charset=UTF-8','Accept':'application/json'}});
+        const body=`data=${encodeURIComponent(query)}`;
+        const r=await fetch(endpoint,{method:'POST',body,signal,headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json'}});
         if(!r.ok)throw new Error(`overpass-${r.status}`);
         return await r.json();
       }catch(e){
@@ -134,10 +115,7 @@
       const p={lat:+x.center.lat,lng:+x.center.lon};
       if(!Number.isFinite(p.lat)||!Number.isFinite(p.lng))continue;
       let nearest=null;
-      for(const t of towns){
-        const d=distance(p,t);
-        if(!nearest||d<nearest.d)nearest={...t,d};
-      }
+      for(const t of towns){const d=distance(p,t);if(!nearest||d<nearest.d)nearest={...t,d};}
       const taggedCity=x.tags['addr:city']||x.tags['is_in:city']||x.tags['is_in:town']||'';
       const city=taggedCity||nearest?.name||'Ελλάδα';
       roads.push({lat:p.lat,lng:p.lng,road:x.tags.name,name:x.tags.name,city,countrycode:'gr',display:`${x.tags.name}, ${city}`,kind:'road'});
@@ -146,13 +124,10 @@
   }
 
   async function query(value){
-    const q=value.trim();
-    if(q.length<3||!navigator.onLine)return hide();
+    const q=value.trim();if(q.length<3||!navigator.onLine)return hide();
     const key=norm(q);
     if(cache.has(key)){render(cache.get(key).items,q,{nationwideFailed:cache.get(key).nationwideFailed});return;}
-    if(controller)controller.abort();
-    controller=new AbortController();
-
+    if(controller)controller.abort();controller=new AbortController();
     try{
       if(q.length>=4){
         const [roadsResult,photonResult]=await Promise.allSettled([overpassRoads(q,controller.signal),photon(q,controller.signal)]);
@@ -164,35 +139,14 @@
         cache.set(key,{items:merged,nationwideFailed});
         render(merged,q,{nationwideFailed});
       }else{
-        const items=await photon(q,controller.signal);
-        if(controller.signal.aborted)return;
-        cache.set(key,{items,nationwideFailed:false});
-        render(items,q);
+        const items=await photon(q,controller.signal);if(controller.signal.aborted)return;
+        cache.set(key,{items,nationwideFailed:false});render(items,q);
       }
-    }catch(e){
-      if(e.name!=='AbortError')render([],q,{nationwideFailed:q.length>=4});
-    }
+    }catch(e){if(e.name!=='AbortError')render([],q,{nationwideFailed:q.length>=4});}
   }
 
-  input.addEventListener('input',()=>{
-    delete input.dataset.selectedLat;delete input.dataset.selectedLng;delete input.dataset.selectedName;
-    clearTimeout(timer);
-    const v=input.value;
-    if(v.trim().length<3)return hide();
-    timer=setTimeout(()=>query(v),650);
-  });
-
-  input.addEventListener('keydown',e=>{
-    if(menu.classList.contains('hidden')||!results.length)return;
-    if(e.key==='ArrowDown'||e.key==='ArrowUp'){
-      e.preventDefault();
-      active=e.key==='ArrowDown'?Math.min(results.length-1,active+1):Math.max(0,active-1);
-      [...menu.querySelectorAll('.destination-suggestion')].forEach((b,i)=>{
-        const on=i===active;b.classList.toggle('active',on);b.setAttribute('aria-selected',String(on));if(on)b.scrollIntoView({block:'nearest'});
-      });
-    }else if(e.key==='Enter'&&active>=0){e.preventDefault();e.stopPropagation();select(active);}else if(e.key==='Escape')hide();
-  });
-
+  input.addEventListener('input',()=>{delete input.dataset.selectedLat;delete input.dataset.selectedLng;delete input.dataset.selectedName;clearTimeout(timer);const v=input.value;if(v.trim().length<3)return hide();timer=setTimeout(()=>query(v),650);});
+  input.addEventListener('keydown',e=>{if(menu.classList.contains('hidden')||!results.length)return;if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=e.key==='ArrowDown'?Math.min(results.length-1,active+1):Math.max(0,active-1);[...menu.querySelectorAll('.destination-suggestion')].forEach((b,i)=>{const on=i===active;b.classList.toggle('active',on);b.setAttribute('aria-selected',String(on));if(on)b.scrollIntoView({block:'nearest'});});}else if(e.key==='Enter'&&active>=0){e.preventDefault();e.stopPropagation();select(active);}else if(e.key==='Escape')hide();});
   menu.addEventListener('pointerdown',e=>{const b=e.target.closest('.destination-suggestion');if(!b)return;e.preventDefault();select(+b.dataset.index);});
   document.addEventListener('pointerdown',e=>{if(!wrap.contains(e.target))hide();});
 })();
