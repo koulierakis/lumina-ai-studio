@@ -58,6 +58,9 @@ jobs:
           grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
           grep -q 'autoReroute' drive-assistant/app-v2.js
           grep -q 'wakeLock' drive-assistant/app-v2.js
+          grep -q 'greekManeuver' drive-assistant/app-v2.js
+          grep -q 'stopNavigation' drive-assistant/app-v2.js
+          grep -q 'speakTest' drive-assistant/app-v2.js
 
           grep -q 'System Monitor' drive-assistant/index.html
           grep -q 'manifest.webmanifest' drive-assistant/index.html
@@ -66,6 +69,8 @@ jobs:
           grep -q 'viewport-fit=cover' drive-assistant/index.html
           grep -q 'interactive-widget=resizes-content' drive-assistant/index.html
           grep -q 'enterkeyhint="go"' drive-assistant/index.html
+          grep -q 'testVoiceBtn' drive-assistant/index.html
+          grep -q 'stopRouteBtn' drive-assistant/index.html
           grep -q '"orientation": "any"' drive-assistant/manifest.webmanifest
           grep -q '"scope": "./"' drive-assistant/manifest.webmanifest
 
