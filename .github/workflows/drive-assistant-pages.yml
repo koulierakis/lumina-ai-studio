@@ -39,12 +39,14 @@ jobs:
         run: |
           test -s drive-assistant/index.html
           test -s drive-assistant/app-v2.js
+          test -s drive-assistant/walking-router.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
 
       - name: JavaScript syntax check
         run: |
           node --check drive-assistant/app-v2.js
+          node --check drive-assistant/walking-router.js
           node --check drive-assistant/sw.js
 
       - name: Required mobile feature smoke checks
@@ -69,6 +71,9 @@ jobs:
           grep -q 'System Monitor' drive-assistant/index.html
           grep -q 'manifest.webmanifest' drive-assistant/index.html
           grep -q 'app-v2.js' drive-assistant/index.html
+          grep -q 'walking-router.js' drive-assistant/index.html
+          grep -q 'data-travel-mode="drive"' drive-assistant/index.html
+          grep -q 'data-travel-mode="walk"' drive-assistant/index.html
           grep -q 'serviceWorker' drive-assistant/index.html
           grep -q 'viewport-fit=cover' drive-assistant/index.html
           grep -q 'interactive-widget=resizes-content' drive-assistant/index.html
@@ -81,7 +86,12 @@ jobs:
           grep -q '"orientation": "any"' drive-assistant/manifest.webmanifest
           grep -q '"scope": "./"' drive-assistant/manifest.webmanifest
 
-          grep -q "lumina-drive-v5" drive-assistant/sw.js
+          grep -q 'valhalla1.openstreetmap.de/route' drive-assistant/walking-router.js
+          grep -q "costing: 'pedestrian'" drive-assistant/walking-router.js
+          grep -q 'decodePolyline6' drive-assistant/walking-router.js
+
+          grep -q "lumina-drive-v6" drive-assistant/sw.js
+          grep -q 'walking-router.js' drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
