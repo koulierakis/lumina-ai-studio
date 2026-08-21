@@ -40,6 +40,8 @@ jobs:
           test -s drive-assistant/walking-router.js
           test -s drive-assistant/poi-catalog.js
           test -s drive-assistant/map-labels.js
+          test -s drive-assistant/user-marker-hook.js
+          test -s drive-assistant/session-bootstrap.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
@@ -48,6 +50,8 @@ jobs:
           node --check drive-assistant/walking-router.js
           node --check drive-assistant/poi-catalog.js
           node --check drive-assistant/map-labels.js
+          node --check drive-assistant/user-marker-hook.js
+          node --check drive-assistant/session-bootstrap.js
           node --check drive-assistant/sw.js
       - name: Required mobile feature smoke checks
         run: |
@@ -66,12 +70,14 @@ jobs:
           grep -q 'navigation-active' drive-assistant/styles.css
           grep -q 'poiOpenBtn' drive-assistant/index.html
           grep -q 'poiDrawer' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=11' drive-assistant/index.html
-          grep -q 'poi.css?v=11' drive-assistant/index.html
-          grep -q 'walking-router.js?v=11' drive-assistant/index.html
-          grep -q 'map-labels.js?v=11' drive-assistant/index.html
-          grep -q 'app-v2.js?v=11' drive-assistant/index.html
-          grep -q 'styles.css?v=11' drive-assistant/index.html
+          grep -q 'poi-catalog.js?v=13' drive-assistant/index.html
+          grep -q 'poi.css?v=13' drive-assistant/index.html
+          grep -q 'walking-router.js?v=13' drive-assistant/index.html
+          grep -q 'map-labels.js?v=13' drive-assistant/index.html
+          grep -q 'user-marker-hook.js?v=13' drive-assistant/index.html
+          grep -q 'session-bootstrap.js?v=13' drive-assistant/index.html
+          grep -q 'app-v2.js?v=13' drive-assistant/index.html
+          grep -q 'styles.css?v=13' drive-assistant/index.html
           grep -q 'data-travel-mode="drive"' drive-assistant/index.html
           grep -q 'data-travel-mode="walk"' drive-assistant/index.html
           grep -q 'valhalla1.openstreetmap.de/route' drive-assistant/walking-router.js
@@ -81,14 +87,13 @@ jobs:
           grep -q 'Mini market' drive-assistant/poi-catalog.js
           grep -q 'Σημεία ενδιαφέροντος' drive-assistant/poi-catalog.js
           grep -q 'poi-route' drive-assistant/poi-catalog.js
-          grep -q 'way(' drive-assistant/map-labels.js
           grep -q '\[highway\]\[name\]' drive-assistant/map-labels.js
-          grep -q 'bindTooltip' drive-assistant/map-labels.js
-          grep -q 'map.getZoom() < 16' drive-assistant/map-labels.js
-          grep -q "lumina-drive-v11" drive-assistant/sw.js
-          grep -q 'map-labels.js?v=11' drive-assistant/sw.js
-          grep -q 'poi-catalog.js?v=11' drive-assistant/sw.js
-          grep -q 'poi.css?v=11' drive-assistant/sw.js
+          grep -q 'lumina-current-road' drive-assistant/map-labels.js
+          grep -q '__luminaCurrentUserMarker' drive-assistant/user-marker-hook.js
+          grep -q "localStorage.removeItem(SESSION_KEY)" drive-assistant/session-bootstrap.js
+          grep -q "lumina-drive-v13" drive-assistant/sw.js
+          grep -q 'user-marker-hook.js?v=13' drive-assistant/sw.js
+          grep -q 'session-bootstrap.js?v=13' drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
