@@ -49,6 +49,7 @@ jobs:
           test -s drive-assistant/sw.js
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: validate
     environment:
       name: github-pages
