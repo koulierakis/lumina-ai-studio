@@ -1,13 +1,6 @@
 name: LUMINA Drive Assistant
 
 on:
-  push:
-    branches:
-      - feature/lumina-drive-assistant
-      - feature/milestone1-pdf-docx-engine
-    paths:
-      - 'drive-assistant/**'
-      - '.github/workflows/drive-assistant-pages.yml'
   workflow_dispatch:
 
 permissions:
@@ -15,55 +8,8 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: lumina-drive-pages
-  cancel-in-progress: true
-
 jobs:
-  validate:
+  legacy-disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - name: Required single-file feature smoke checks
-        run: |
-          test -s drive-assistant/index.html
-          grep -q 'navigator.geolocation' drive-assistant/index.html
-          grep -q 'speechSynthesis' drive-assistant/index.html
-          grep -q 'SpeechRecognition' drive-assistant/index.html
-          grep -q 'mediaDevices.getUserMedia' drive-assistant/index.html
-          grep -q 'ensureMicPermission' drive-assistant/index.html
-          grep -q 'voiceBtn' drive-assistant/index.html
-          grep -q 'freeDriveBtn' drive-assistant/index.html
-          grep -q 'toggleFreeDrive' drive-assistant/index.html
-          grep -q 'viewport-fit=cover' drive-assistant/index.html
-          grep -q 'Driver Assistant' drive-assistant/index.html
-      - name: Inline JavaScript syntax check
-        run: |
-          python - <<'PY'
-          import re, pathlib
-          p = pathlib.Path('drive-assistant/index.html')
-          s = p.read_text(encoding='utf-8')
-          blocks = re.findall(r'<script[^>]*>(.*?)</script>', s, re.S|re.I)
-          if not blocks:
-              raise SystemExit('No inline script found')
-          pathlib.Path('/tmp/drive-inline.js').write_text('\n'.join(blocks), encoding='utf-8')
-          PY
-          node --check /tmp/drive-inline.js
-
-  deploy:
-    needs: validate
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-      - name: Upload Drive site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: drive-assistant
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - run: echo "Drive Pages deployment moved to feature/lumina-drive-assistant"
