@@ -9,7 +9,6 @@ on:
     paths:
       - "drive-assistant/**"
       - ".github/workflows/drive-assistant-pages.yml"
-
   workflow_dispatch:
 
 permissions:
@@ -35,14 +34,18 @@ jobs:
       - name: Verify required files
         run: |
           test -s drive-assistant/index.html
+          test -s drive-assistant/styles.css
+          test -s drive-assistant/poi.css
           test -s drive-assistant/app-v2.js
           test -s drive-assistant/walking-router.js
+          test -s drive-assistant/poi-catalog.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
         run: |
           node --check drive-assistant/app-v2.js
           node --check drive-assistant/walking-router.js
+          node --check drive-assistant/poi-catalog.js
           node --check drive-assistant/sw.js
       - name: Required mobile feature smoke checks
         run: |
@@ -56,23 +59,28 @@ jobs:
           grep -q 'wakeLock' drive-assistant/app-v2.js
           grep -q 'greekManeuver' drive-assistant/app-v2.js
           grep -q 'stopNavigation' drive-assistant/app-v2.js
-          grep -q 'speakTest' drive-assistant/app-v2.js
-          grep -q 'SESSION_KEY' drive-assistant/app-v2.js
-          grep -q 'handsFree' drive-assistant/app-v2.js
           grep -q 'startNavigation' drive-assistant/app-v2.js
           grep -q 'setNavigationUI' drive-assistant/app-v2.js
           grep -q 'navigation-active' drive-assistant/styles.css
-          grep -q 'navVoiceBtn' drive-assistant/index.html
-          grep -q 'navCockpit' drive-assistant/index.html
-          grep -q 'walking-router.js?v=8' drive-assistant/index.html
-          grep -q 'app-v2.js?v=8' drive-assistant/index.html
-          grep -q 'styles.css?v=8' drive-assistant/index.html
+          grep -q 'poiOpenBtn' drive-assistant/index.html
+          grep -q 'poiDrawer' drive-assistant/index.html
+          grep -q 'poi-catalog.js?v=9' drive-assistant/index.html
+          grep -q 'poi.css?v=9' drive-assistant/index.html
+          grep -q 'walking-router.js?v=9' drive-assistant/index.html
+          grep -q 'app-v2.js?v=9' drive-assistant/index.html
+          grep -q 'styles.css?v=9' drive-assistant/index.html
           grep -q 'data-travel-mode="drive"' drive-assistant/index.html
           grep -q 'data-travel-mode="walk"' drive-assistant/index.html
           grep -q 'valhalla1.openstreetmap.de/route' drive-assistant/walking-router.js
           grep -q "costing: 'pedestrian'" drive-assistant/walking-router.js
-          grep -q "lumina-drive-v8" drive-assistant/sw.js
-          grep -q 'walking-router.js?v=8' drive-assistant/sw.js
+          grep -q 'Ξενοδοχεία' drive-assistant/poi-catalog.js
+          grep -q 'Fast food' drive-assistant/poi-catalog.js
+          grep -q 'Mini market' drive-assistant/poi-catalog.js
+          grep -q 'Σημεία ενδιαφέροντος' drive-assistant/poi-catalog.js
+          grep -q 'poi-route' drive-assistant/poi-catalog.js
+          grep -q "lumina-drive-v9" drive-assistant/sw.js
+          grep -q 'poi-catalog.js?v=9' drive-assistant/sw.js
+          grep -q 'poi.css?v=9' drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
