@@ -1,0 +1,11 @@
+{
+  "name": "LUMINA Drive Assistant",
+  "short_name": "LUMINA Drive",
+  "description": "Browser-first AI driving assistant",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "orientation": "portrait-primary",
+  "lang": "el-GR"
+}

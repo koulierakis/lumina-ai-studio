@@ -1,0 +1,63 @@
+name: LUMINA Drive Assistant
+
+on:
+  push:
+    branches: [feature/lumina-drive-assistant]
+    paths:
+      - 'drive-assistant/**'
+      - '.github/workflows/drive-assistant-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: lumina-drive-pages
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: JavaScript syntax
+        run: |
+          node --check drive-assistant/app-v2.js
+          node --check drive-assistant/sw.js
+      - name: Required feature smoke checks
+        run: |
+          grep -q 'navigator.geolocation' drive-assistant/app-v2.js
+          grep -q 'speechSynthesis' drive-assistant/app-v2.js
+          grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
+          grep -q 'overpass-api.de' drive-assistant/app-v2.js
+          grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
+          grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
+          grep -q 'autoReroute' drive-assistant/app-v2.js
+          grep -q 'wakeLock' drive-assistant/app-v2.js
+          grep -q 'System Monitor' drive-assistant/index.html
+          grep -q 'manifest.webmanifest' drive-assistant/index.html
+          grep -q 'app-v2.js' drive-assistant/index.html
+          grep -q 'serviceWorker' drive-assistant/index.html
+          grep -q 'viewport-fit=cover' drive-assistant/index.html
+          test -s drive-assistant/manifest.webmanifest
+          test -s drive-assistant/sw.js
+
+  deploy:
+    needs: validate
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Drive site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: drive-assistant
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
