@@ -30,6 +30,9 @@ jobs:
           grep -q 'navigator.geolocation' drive-assistant/index.html
           grep -q 'speechSynthesis' drive-assistant/index.html
           grep -q 'SpeechRecognition' drive-assistant/index.html
+          grep -q 'mediaDevices.getUserMedia' drive-assistant/index.html
+          grep -q 'ensureMicPermission' drive-assistant/index.html
+          grep -q 'voiceBtn' drive-assistant/index.html
           grep -q 'freeDriveBtn' drive-assistant/index.html
           grep -q 'toggleFreeDrive' drive-assistant/index.html
           grep -q 'viewport-fit=cover' drive-assistant/index.html
