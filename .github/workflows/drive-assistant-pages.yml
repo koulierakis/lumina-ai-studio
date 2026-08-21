@@ -61,6 +61,10 @@ jobs:
           grep -q 'greekManeuver' drive-assistant/app-v2.js
           grep -q 'stopNavigation' drive-assistant/app-v2.js
           grep -q 'speakTest' drive-assistant/app-v2.js
+          grep -q 'SESSION_KEY' drive-assistant/app-v2.js
+          grep -q 'handsFree' drive-assistant/app-v2.js
+          grep -q 'startNavigation' drive-assistant/app-v2.js
+          grep -q 'visibilitychange' drive-assistant/app-v2.js
 
           grep -q 'System Monitor' drive-assistant/index.html
           grep -q 'manifest.webmanifest' drive-assistant/index.html
@@ -71,10 +75,13 @@ jobs:
           grep -q 'enterkeyhint="go"' drive-assistant/index.html
           grep -q 'testVoiceBtn' drive-assistant/index.html
           grep -q 'stopRouteBtn' drive-assistant/index.html
+          grep -q 'routePreview' drive-assistant/index.html
+          grep -q 'startRouteBtn' drive-assistant/index.html
+          grep -q 'handsFreeBtn' drive-assistant/index.html
           grep -q '"orientation": "any"' drive-assistant/manifest.webmanifest
           grep -q '"scope": "./"' drive-assistant/manifest.webmanifest
 
-          grep -q "lumina-drive-v4" drive-assistant/sw.js
+          grep -q "lumina-drive-v5" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
