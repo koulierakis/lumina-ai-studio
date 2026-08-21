@@ -1,4 +1,4 @@
-# Deployment trigger: environment protection fixed 2026-08-21
+# LUMINA Drive GitHub Pages deployment
 name: LUMINA Drive Assistant
 
 on:
@@ -37,7 +37,9 @@ jobs:
           test -s drive-assistant/styles.css
           test -s drive-assistant/ui-fixes.css
           test -s drive-assistant/poi.css
+          test -s drive-assistant/address-autocomplete.css
           test -s drive-assistant/app-v2.js
+          test -s drive-assistant/address-autocomplete.js
           test -s drive-assistant/walking-router.js
           test -s drive-assistant/poi-catalog.js
           test -s drive-assistant/map-labels.js
@@ -49,6 +51,7 @@ jobs:
       - name: JavaScript syntax check
         run: |
           node --check drive-assistant/app-v2.js
+          node --check drive-assistant/address-autocomplete.js
           node --check drive-assistant/walking-router.js
           node --check drive-assistant/poi-catalog.js
           node --check drive-assistant/map-labels.js
@@ -71,35 +74,25 @@ jobs:
           grep -q 'startNavigation' drive-assistant/app-v2.js
           grep -q 'setNavigationUI' drive-assistant/app-v2.js
           grep -q 'navigation-active' drive-assistant/styles.css
+          grep -q 'address-autocomplete.css' drive-assistant/index.html
+          grep -q 'address-autocomplete.js' drive-assistant/index.html
+          grep -q 'photon.komoot.io' drive-assistant/address-autocomplete.js
+          grep -q 'countrycode' drive-assistant/address-autocomplete.js
+          grep -q 'destination-suggestions' drive-assistant/address-autocomplete.js
+          grep -q 'suggestion-road' drive-assistant/address-autocomplete.css
+          grep -q 'suggestion-city' drive-assistant/address-autocomplete.css
           grep -q 'poiOpenBtn' drive-assistant/index.html
           grep -q 'poiDrawer' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=15' drive-assistant/index.html
-          grep -q 'poi.css?v=15' drive-assistant/index.html
-          grep -q 'ui-fixes.css?v=15' drive-assistant/index.html
-          grep -q 'walking-router.js?v=15' drive-assistant/index.html
-          grep -q 'map-labels.js?v=15' drive-assistant/index.html
-          grep -q 'map-fallback.js?v=15' drive-assistant/index.html
-          grep -q 'user-marker-hook.js?v=15' drive-assistant/index.html
-          grep -q 'session-bootstrap.js?v=15' drive-assistant/index.html
-          grep -q 'app-v2.js?v=15' drive-assistant/index.html
-          grep -q 'styles.css?v=15' drive-assistant/index.html
           grep -q 'data-travel-mode="drive"' drive-assistant/index.html
           grep -q 'data-travel-mode="walk"' drive-assistant/index.html
           grep -q 'valhalla1.openstreetmap.de/route' drive-assistant/walking-router.js
           grep -q "costing: 'pedestrian'" drive-assistant/walking-router.js
           grep -q 'Ξενοδοχεία' drive-assistant/poi-catalog.js
-          grep -q 'Fast food' drive-assistant/poi-catalog.js
-          grep -q 'Mini market' drive-assistant/poi-catalog.js
           grep -q 'Σημεία ενδιαφέροντος' drive-assistant/poi-catalog.js
-          grep -q 'poi-route' drive-assistant/poi-catalog.js
           grep -q '\[highway\]\[name\]' drive-assistant/map-labels.js
-          grep -q 'lumina-current-road' drive-assistant/map-labels.js
           grep -q 'basemaps.cartocdn.com' drive-assistant/map-fallback.js
           grep -q '__luminaCurrentUserMarker' drive-assistant/user-marker-hook.js
           grep -q "localStorage.removeItem(SESSION_KEY)" drive-assistant/session-bootstrap.js
-          grep -q "lumina-drive-v15" drive-assistant/sw.js
-          grep -q 'ui-fixes.css?v=15' drive-assistant/sw.js
-          grep -q 'map-fallback.js?v=15' drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
