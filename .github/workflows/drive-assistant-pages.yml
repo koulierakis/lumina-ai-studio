@@ -2,7 +2,9 @@ name: LUMINA Drive Assistant
 
 on:
   push:
-    branches: [feature/lumina-drive-assistant]
+    branches:
+      - feature/lumina-drive-assistant
+      - feature/milestone1-pdf-docx-engine
     paths:
       - 'drive-assistant/**'
       - '.github/workflows/drive-assistant-pages.yml'
