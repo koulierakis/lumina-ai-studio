@@ -25,20 +25,25 @@ Source of truth: `feature/lumina-drive-assistant`
 - Persistent user alert settings.
 - Runtime System Monitor showing real browser capability state.
 - Driver-safe responsive UI with portrait/landscape adaptation and safe-area support.
+- Mobile virtual-keyboard viewport handling via `interactive-widget=resizes-content`.
+- Search-field mobile keyboard optimization via `inputmode=search` and `enterkeyhint=go`.
+- PWA scope/id hardening and unrestricted orientation so portrait/landscape responsive layouts can both operate.
 - Browser manifest and service-worker application shell for degraded/offline reopening of core UI assets.
+- Service-worker shell cache upgraded to `lumina-drive-v4` after mobile UX hardening.
 - Online/offline state handling without fabricated live feeds.
 
 ## Validation
-- Dedicated LUMINA Drive GitHub Actions validation: PASS.
-- JavaScript syntax: PASS for `app-v2.js` and `sw.js`.
-- Automated smoke gates: PASS for GPS, Greek browser voice, routing, geocoding, OSM safety/POI data, weather, automatic rerouting, Wake Lock, manifest, service worker and mobile viewport integration.
+- Dedicated LUMINA Drive GitHub Actions validation: PASS before the current mobile-hardening iteration.
+- JavaScript syntax gates cover `app-v2.js` and `sw.js`.
+- Automated smoke gates cover GPS, Greek browser voice, routing, geocoding, OSM safety/POI data, weather, automatic rerouting, Wake Lock, manifest, service worker, mobile viewport integration, mobile search keyboard hints and PWA orientation/scope.
 - Pull-request deployment is intentionally skipped; browser deployment is performed only from branch pushes.
 
 ## Deployment
-- Repository visibility was changed to permit GitHub Pages on the current GitHub plan.
-- GitHub Pages source has been set to **GitHub Actions** by the repository owner.
-- Deployment workflow has been corrected so PR validation cannot attempt a Pages deployment.
-- A fresh branch-push deployment has been triggered; HTTPS URL verification remains the active deployment gate.
+- Repository visibility permits GitHub Pages on the current GitHub plan.
+- GitHub Pages source is **GitHub Actions**.
+- The `github-pages` environment protection blocker was removed by allowing deployment without the previous branch restriction.
+- LUMINA Drive Assistant workflow run **#64** completed successfully after the environment fix.
+- Subsequent mobile-hardening commits automatically trigger the same validate → deploy pipeline.
 
 ## Data-source constraints
 - A phone browser cannot physically detect radio radar without dedicated hardware; enforcement warnings are map/database based.
@@ -49,9 +54,9 @@ Source of truth: `feature/lumina-drive-assistant`
 - Offline shell caching does not make online routing/map/data APIs available without connectivity.
 
 ## Remaining gates
-1. Confirm branch-push GitHub Pages deployment PASS and HTTPS browser URL.
-2. Real Android Chrome GPS permission/accuracy test.
-3. Real Greek speech output/input test on device.
-4. Real route/POI/safety-warning road test.
+1. Real Android Chrome GPS permission/accuracy test.
+2. Real Greek speech output/input test on device.
+3. Real route/POI/safety-warning road test.
+4. Verify the latest mobile-hardening deployment completes green after the final commit in this iteration.
 5. Optional production traffic/community incident provider selection.
 6. Later LUMINA tool integration when desktop access is available.
