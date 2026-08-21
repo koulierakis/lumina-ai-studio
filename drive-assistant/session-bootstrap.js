@@ -3,6 +3,6 @@
   try {
     localStorage.removeItem(SESSION_KEY);
     sessionStorage.removeItem(SESSION_KEY);
-    localStorage.setItem('lumina-drive-build','14');
+    localStorage.setItem('lumina-drive-build','15');
   } catch {}
 })();
