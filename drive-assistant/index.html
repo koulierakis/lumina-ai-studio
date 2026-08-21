@@ -14,6 +14,9 @@
   <link rel="preconnect" href="https://tile.openstreetmap.org" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    .travel-mode{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 10px}.travel-mode button{min-height:46px;border:1px solid var(--border);border-radius:14px;background:var(--card);color:var(--text);font-weight:750}.travel-mode button.active{background:var(--accent);color:#071211;border-color:transparent}.travel-mode-hint{display:block;margin:-3px 3px 10px;color:var(--muted);font-size:12px}
+  </style>
 </head>
 <body>
   <div id="app">
@@ -29,6 +32,8 @@
     <main>
       <section class="hero-card"><div class="speed-block"><span id="speed">0</span><small>km/h</small></div><div class="limit-block"><span>ΟΡΙΟ</span><strong id="speedLimit">—</strong></div><div class="status-block"><span id="gpsStatus">GPS αναμονή</span><span id="roadName">—</span></div></section>
       <section class="search-row"><input id="destinationInput" type="search" placeholder="Πού θέλεις να πας;" autocomplete="off" autocapitalize="sentences" enterkeyhint="go" inputmode="search" aria-label="Προορισμός" /><button id="routeBtn" class="primary">Οδηγίες</button></section>
+      <section class="travel-mode" aria-label="Τρόπος μετακίνησης"><button type="button" data-travel-mode="drive" aria-pressed="true">🚗 Αυτοκίνητο</button><button type="button" data-travel-mode="walk" aria-pressed="false">🚶 Περπάτημα</button></section>
+      <small id="travelModeHint" class="travel-mode-hint">🚗 Διαδρομή με αυτοκίνητο.</small>
       <section id="routePreview" class="route-preview hidden" aria-live="polite"><div><span>Προεπισκόπηση διαδρομής</span><strong id="previewDestination">—</strong><small id="previewSummary">—</small></div><button id="startRouteBtn" class="primary">▶ Έναρξη</button></section>
       <section class="quick-grid" aria-label="Γρήγορη αναζήτηση"><button data-poi="pharmacy">💊<span>Φαρμακεία</span></button><button data-poi="fuel">⛽<span>Βενζίνη</span></button><button data-poi="restaurant">🍽️<span>Φαγητό</span></button><button data-poi="gym">🏋️<span>Γυμναστήρια</span></button><button data-poi="parking">🅿️<span>Parking</span></button><button id="freeDriveBtn">🧭<span>Free Drive</span></button></section>
       <section class="map-shell"><div id="map"></div><div id="maneuverCard" class="maneuver-card hidden"><strong id="maneuverText">—</strong><span id="maneuverDistance">—</span></div></section>
@@ -39,6 +44,7 @@
     </main>
   </div>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="walking-router.js"></script>
   <script type="module" src="app-v2.js"></script>
   <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}</script>
 </body>
