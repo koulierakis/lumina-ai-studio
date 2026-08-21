@@ -64,8 +64,12 @@ jobs:
           grep -q 'app-v2.js' drive-assistant/index.html
           grep -q 'serviceWorker' drive-assistant/index.html
           grep -q 'viewport-fit=cover' drive-assistant/index.html
+          grep -q 'interactive-widget=resizes-content' drive-assistant/index.html
+          grep -q 'enterkeyhint="go"' drive-assistant/index.html
+          grep -q '"orientation": "any"' drive-assistant/manifest.webmanifest
+          grep -q '"scope": "./"' drive-assistant/manifest.webmanifest
 
-          grep -q "lumina-drive-v3" drive-assistant/sw.js
+          grep -q "lumina-drive-v4" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
