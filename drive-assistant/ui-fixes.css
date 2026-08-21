@@ -1,0 +1,36 @@
+/* LUMINA Drive v15 mobile UI corrections */
+.monitor-card{display:none!important}
+.secondary-ui.alerts-panel{margin-top:10px;padding:12px 14px}
+.secondary-ui.alerts-panel .section-title h2{font-size:15px;margin:0}
+.secondary-ui.alerts-panel .section-title span{font-size:11px}
+.trip-grid{gap:9px!important}
+.trip-grid article{display:flex;flex-direction:column;gap:6px;min-width:0;padding:13px!important}
+.trip-grid article span{display:block;color:var(--muted);font-size:11px;line-height:1.2}
+.trip-grid article strong{display:block;font-size:17px;line-height:1.15;word-break:normal;overflow-wrap:normal}
+.home-actions{grid-template-columns:1fr!important}
+.home-action{min-height:68px!important;grid-template-columns:44px 1fr 24px!important}
+.home-action-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:14px;background:rgba(87,221,209,.08);font-size:23px!important;line-height:1!important;overflow:hidden}
+.home-action strong{font-size:16px!important;line-height:1.15}
+.home-action small{display:block!important;font-size:11px!important;line-height:1.25}
+#freeDriveBtn .home-action-icon{font-size:0!important}
+#freeDriveBtn .home-action-icon::after{content:'◎';font-size:27px;color:var(--accent);font-weight:800}
+#map{background:#dbeaf0}
+.leaflet-container{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.leaflet-control-attribution{font-size:9px!important;max-width:72%;white-space:normal;text-align:right}
+@media(max-width:640px){
+  main{padding-left:12px!important;padding-right:12px!important}
+  .hero-card{grid-template-columns:86px 1fr 62px!important;gap:10px!important;padding:14px!important}
+  .status-block span:first-child{font-size:11px!important}
+  .status-block span:last-child{font-size:15px!important}
+  .search-row{grid-template-columns:minmax(0,1fr) auto!important}
+  .search-row input{min-width:0;font-size:16px}
+  .search-row .primary{padding:0 16px!important}
+  .travel-mode button{font-size:15px}
+  .home-actions{grid-template-columns:1fr!important}
+  .home-action{padding:11px 13px!important}
+  #map{height:50vh!important;min-height:360px!important}
+  .trip-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
+  .trip-grid article{padding:11px 9px!important}
+  .trip-grid article strong{font-size:15px!important}
+}
+body.navigation-active .monitor-card,body.navigation-active .alerts-panel,body.navigation-active .trip-grid{display:none!important}
