@@ -29,12 +29,16 @@ Source of truth: `feature/lumina-drive-assistant`
 - Online/offline state handling without fabricated live feeds.
 
 ## Validation
-- Latest GitHub Actions validation: PASS.
+- Dedicated LUMINA Drive GitHub Actions validation: PASS.
 - JavaScript syntax: PASS for `app-v2.js` and `sw.js`.
 - Automated smoke gates: PASS for GPS, Greek browser voice, routing, geocoding, OSM safety/POI data, weather, automatic rerouting, Wake Lock, manifest, service worker and mobile viewport integration.
+- Pull-request deployment is intentionally skipped; browser deployment is performed only from branch pushes.
 
-## Current deployment blocker
-The GitHub Pages deployment workflow is correctly configured, but this private repository does not currently have a GitHub Pages site enabled. GitHub Actions attempted to enable it automatically and GitHub rejected that operation with `Resource not accessible by integration`. One repository-owner action is required in GitHub Settings: enable Pages and select **GitHub Actions** as the source. After that, the existing workflow can deploy the browser build without code changes.
+## Deployment
+- Repository visibility was changed to permit GitHub Pages on the current GitHub plan.
+- GitHub Pages source has been set to **GitHub Actions** by the repository owner.
+- Deployment workflow has been corrected so PR validation cannot attempt a Pages deployment.
+- A fresh branch-push deployment has been triggered; HTTPS URL verification remains the active deployment gate.
 
 ## Data-source constraints
 - A phone browser cannot physically detect radio radar without dedicated hardware; enforcement warnings are map/database based.
@@ -44,8 +48,8 @@ The GitHub Pages deployment workflow is correctly configured, but this private r
 - Browser background execution and voice recognition behavior vary by Android browser/vendor.
 - Offline shell caching does not make online routing/map/data APIs available without connectivity.
 
-## Remaining gates after Pages is enabled
-1. GitHub Pages deployment PASS and HTTPS browser URL.
+## Remaining gates
+1. Confirm branch-push GitHub Pages deployment PASS and HTTPS browser URL.
 2. Real Android Chrome GPS permission/accuracy test.
 3. Real Greek speech output/input test on device.
 4. Real route/POI/safety-warning road test.
