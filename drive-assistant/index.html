@@ -10,10 +10,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>LUMINA Drive Assistant</title>
-  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="manifest" href="manifest.webmanifest?v=8" />
   <link rel="preconnect" href="https://tile.openstreetmap.org" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=8" />
 </head>
 <body>
   <div id="app">
@@ -31,16 +31,17 @@
       <small id="travelModeHint" class="travel-mode-hint pretrip-ui">🚗 Διαδρομή με αυτοκίνητο.</small>
       <section id="routePreview" class="route-preview hidden pretrip-ui" aria-live="polite"><div><span>ΠΡΟΕΠΙΣΚΟΠΗΣΗ ΔΙΑΔΡΟΜΗΣ</span><strong id="previewDestination">—</strong><small id="previewSummary">—</small></div><button id="startRouteBtn" class="primary">▶ Έναρξη</button></section>
       <section class="quick-grid pretrip-ui" aria-label="Γρήγορη αναζήτηση"><button data-poi="pharmacy">💊<span>Φαρμακεία</span></button><button data-poi="fuel">⛽<span>Βενζίνη</span></button><button data-poi="restaurant">🍽️<span>Φαγητό</span></button><button data-poi="gym">🏋️<span>Γυμναστήρια</span></button><button data-poi="parking">🅿️<span>Parking</span></button><button id="freeDriveBtn">🧭<span>Free Drive</span></button></section>
-
       <section id="navCockpit" class="nav-cockpit hidden" aria-live="polite"><div class="nav-speed"><span id="navSpeed">0</span><small>km/h</small></div><div class="nav-road"><span id="navRoad">Τρέχουσα θέση</span><strong id="navDestination">Πλοήγηση</strong></div><div class="nav-limit"><span>ΟΡΙΟ</span><strong id="navSpeedLimit">—</strong></div></section>
       <section class="map-shell"><div id="map"></div><div id="maneuverCard" class="maneuver-card hidden"><div><small>ΕΠΟΜΕΝΗ ΟΔΗΓΙΑ</small><strong id="maneuverText">—</strong></div><span id="maneuverDistance">—</span></div><div id="navVoiceDock" class="nav-voice-dock hidden"><button id="navVoiceBtn" class="nav-mic" aria-label="Μίλα στη LUMINA">🎙️<span>LUMINA</span></button><button id="navCenterBtn" class="nav-mini" aria-label="Κέντρο στη θέση μου">◎</button><button id="navStopBtn" class="nav-mini nav-stop" aria-label="Τέλος διαδρομής">■</button></div></section>
-
       <section class="voice-card pretrip-ui"><div class="voice-actions"><button id="voiceBtn" class="primary">🎙️ Μία εντολή</button><button id="handsFreeBtn" class="secondary">⚪ Hands-free OFF</button></div><p id="voiceHint">Hands-free: πες «LUMINA» και μετά την εντολή σου.</p></section>
       <section class="alerts-panel secondary-ui"><div class="section-title"><h2>Οδηγική επίγνωση</h2><span id="alertCount">0 ειδοποιήσεις</span></div><div id="alertsList" class="alerts-list"><div class="empty">Δεν υπάρχουν ενεργές ειδοποιήσεις.</div></div></section>
       <section class="trip-grid secondary-ui"><article><span>Απόσταση</span><strong id="tripDistance">0.0 km</strong></article><article><span>Χρόνος</span><strong id="tripTime">00:00</strong></article><article><span>Μ. ταχύτητα</span><strong id="avgSpeed">0 km/h</strong></article></section>
       <section class="monitor-card secondary-ui"><div class="section-title"><h2>System Monitor</h2><span id="readyState">CHECKING</span></div><div id="monitorGrid" class="monitor-grid"></div></section>
     </main>
   </div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script><script src="walking-router.js"></script><script type="module" src="app-v2.js"></script><script>if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}</script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="walking-router.js?v=8"></script>
+  <script type="module" src="app-v2.js?v=8"></script>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=8');await r.update();}catch{}});}</script>
 </body>
 </html>
