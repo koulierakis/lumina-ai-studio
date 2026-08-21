@@ -30,9 +30,8 @@ jobs:
           grep -q 'navigator.geolocation' drive-assistant/index.html
           grep -q 'speechSynthesis' drive-assistant/index.html
           grep -q 'SpeechRecognition' drive-assistant/index.html
-          grep -q 'Free Drive' drive-assistant/index.html
-          grep -q 'START FREE DRIVE' drive-assistant/index.html
-          grep -q 'STOP FREE DRIVE' drive-assistant/index.html
+          grep -q 'freeDriveBtn' drive-assistant/index.html
+          grep -q 'toggleFreeDrive' drive-assistant/index.html
           grep -q 'viewport-fit=cover' drive-assistant/index.html
           grep -q 'Driver Assistant' drive-assistant/index.html
       - name: Inline JavaScript syntax check
