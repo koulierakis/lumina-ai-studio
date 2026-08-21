@@ -10,11 +10,12 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>LUMINA Drive Assistant</title>
-  <link rel="manifest" href="manifest.webmanifest?v=9" />
+  <link rel="manifest" href="manifest.webmanifest?v=10" />
   <link rel="preconnect" href="https://tile.openstreetmap.org" />
+  <link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="styles.css?v=9" />
-  <link rel="stylesheet" href="poi.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="poi.css?v=10" />
 </head>
 <body>
   <div id="app">
@@ -35,6 +36,11 @@
       <section class="monitor-card secondary-ui"><div class="section-title"><h2>System Monitor</h2><span id="readyState">CHECKING</span></div><div id="monitorGrid" class="monitor-grid"></div></section>
     </main>
   </div>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script><script src="walking-router.js?v=9"></script><script type="module" src="app-v2.js?v=9"></script><script src="poi-catalog.js?v=9" defer></script><script>if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=9');await r.update();}catch{}});}</script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="map-labels.js?v=10"></script>
+  <script src="walking-router.js?v=10"></script>
+  <script type="module" src="app-v2.js?v=10"></script>
+  <script src="poi-catalog.js?v=10" defer></script>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=10');await r.update();}catch{}});}</script>
 </body>
 </html>
