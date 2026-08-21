@@ -65,6 +65,16 @@ function speak(text, key = text, ttlMs = 30000) {
   speechSynthesis.speak(u);
 }
 
+function speakTest() {
+  if (!('speechSynthesis' in window)) return addAlert('voice-test','🔇','Η φωνή δεν υποστηρίζεται','Ο browser δεν διαθέτει ελληνική σύνθεση φωνής.');
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance('Δοκιμή φωνής LUMINA Drive. Η φωνητική καθοδήγηση λειτουργεί.');
+  u.lang = 'el-GR';
+  u.rate = 0.96;
+  speechSynthesis.speak(u);
+  addAlert('voice-test','🔊','Δοκιμή φωνής','Αν άκουσες το μήνυμα, η φωνητική καθοδήγηση λειτουργεί.');
+}
+
 function addAlert(id, icon, title, detail = '', voice = '') {
   state.alerts.set(id, { icon, title, detail, at: Date.now() });
   renderAlerts();
@@ -226,6 +236,34 @@ async function routeToQuery(q) {
   } catch { addAlert('routeerr','⚠️','Σφάλμα διαδρομής','Έλεγξε τη σύνδεση και δοκίμασε ξανά.'); }
 }
 
+function greekManeuver(step) {
+  const m = step?.maneuver || {};
+  const type = m.type || '';
+  const modifier = m.modifier || '';
+  const road = step?.name ? ` προς ${step.name}` : '';
+  if (type === 'arrive') return 'Φτάνεις στον προορισμό';
+  if (type === 'depart') return `Ξεκίνα${road}`;
+  if (type === 'roundabout' || type === 'rotary') return m.exit ? `Μπες στον κυκλικό κόμβο και πάρε την ${m.exit}η έξοδο${road}` : `Μπες στον κυκλικό κόμβο${road}`;
+  if (type === 'merge') return `Μπες στη λωρίδα${road}`;
+  if (type === 'on ramp') return `Μπες στη ράμπα${road}`;
+  if (type === 'off ramp') return `Βγες από τη ράμπα${road}`;
+  if (type === 'fork') {
+    if (modifier.includes('left')) return `Κράτα αριστερά${road}`;
+    if (modifier.includes('right')) return `Κράτα δεξιά${road}`;
+    return `Κράτα την πορεία σου${road}`;
+  }
+  if (modifier === 'uturn') return `Κάνε αναστροφή${road}`;
+  if (modifier === 'sharp left') return `Στρίψε απότομα αριστερά${road}`;
+  if (modifier === 'left') return `Στρίψε αριστερά${road}`;
+  if (modifier === 'slight left') return `Κράτα ελαφρά αριστερά${road}`;
+  if (modifier === 'sharp right') return `Στρίψε απότομα δεξιά${road}`;
+  if (modifier === 'right') return `Στρίψε δεξιά${road}`;
+  if (modifier === 'slight right') return `Κράτα ελαφρά δεξιά${road}`;
+  if (modifier === 'straight') return `Συνέχισε ευθεία${road}`;
+  if (type === 'continue' || type === 'new name') return `Συνέχισε${road}`;
+  return step?.name ? `Συνέχισε προς ${step.name}` : 'Συνέχισε';
+}
+
 async function routeTo(d,{silent=false}={}) {
   const o = state.lastPos; if (!o) throw new Error('gps');
   const url = `${cfg.osrm}/route/v1/driving/${o.lng},${o.lat};${d.lng},${d.lat}?overview=full&geometries=geojson&steps=true&alternatives=false`;
@@ -240,12 +278,26 @@ async function routeTo(d,{silent=false}={}) {
   updateManeuverCard(state.routeSteps[0], state.route.distance, state.route.duration);
   detectRouteCurves(state.routeCoords);
   clearAlert('routeerr');
+  clearAlert('arrival');
   if (!silent) speak(`Η διαδρομή ξεκίνησε. Απόσταση ${(state.route.distance/1000).toFixed(1)} χιλιόμετρα και εκτιμώμενος χρόνος ${Math.round(state.route.duration/60)} λεπτά.`,'route-start',5000);
 }
 function updateManeuverCard(step, distanceM, durationS) {
-  const instruction = step?.maneuver?.instruction || step?.name || 'Συνέχισε';
-  $('#maneuverText').textContent = instruction;
+  $('#maneuverText').textContent = greekManeuver(step);
   $('#maneuverDistance').textContent = `${fmtDistance(distanceM)} · ${Math.round(durationS/60)}′`;
+}
+
+function stopNavigation({announce=true}={}) {
+  state.route = null;
+  state.routeSteps = [];
+  state.routeCoords = [];
+  state.destination = null;
+  if (state.routeLayer) { state.routeLayer.remove(); state.routeLayer = null; }
+  if (state.destinationMarker) { state.destinationMarker.remove(); state.destinationMarker = null; }
+  $('#maneuverCard').classList.add('hidden');
+  $('#maneuverText').textContent = '—';
+  $('#maneuverDistance').textContent = '—';
+  clearAlert('curves'); clearAlert('reroute'); clearAlert('arrival');
+  if (announce) speak('Η πλοήγηση σταμάτησε.','route-stop',5000);
 }
 
 function bearing(a,b,c) {
@@ -275,9 +327,10 @@ async function checkRouteProgress(c) {
   let best=null;
   for(const s of state.routeSteps){const loc=s.maneuver?.location;if(!loc)continue;const d=dist(c,{lat:loc[1],lng:loc[0]});if(!best||d<best.d)best={s,d};}
   if(best && best.d < 1200){
-    $('#maneuverText').textContent=best.s.maneuver?.instruction||best.s.name||'Συνέχισε';
+    const instruction = greekManeuver(best.s);
+    $('#maneuverText').textContent=instruction;
     $('#maneuverDistance').textContent=fmtDistance(best.d);
-    if(best.d<260 && best.d>70) speak(`Σε ${Math.round(best.d/10)*10} μέτρα, ${best.s.name||'ακολούθησε την επόμενη οδηγία'}.`,`turn:${best.s.maneuver?.location?.join(',')}`,120000);
+    if(best.d<260 && best.d>70) speak(`Σε ${Math.round(best.d/10)*10} μέτρα, ${instruction}.`,`turn:${best.s.maneuver?.location?.join(',')}`,120000);
   }
 
   if (state.settings.autoReroute && Date.now()-state.lastRerouteAt>30000 && nearestRouteDistance(c)>120) {
@@ -308,7 +361,7 @@ function setupVoice() {
   $('#voiceBtn').addEventListener('click',()=>{try{rec.start();$('#voiceHint').textContent='Ακούω…';}catch{}});
   rec.onerror=()=>{$('#voiceHint').textContent='Δεν άκουσα καθαρά. Δοκίμασε ξανά.';};
   rec.onresult=e=>{const t=e.results[0][0].transcript.toLowerCase();$('#voiceHint').textContent=`Άκουσα: ${t}`;
-    if(t.includes('βενζ'))findPOI('fuel'); else if(t.includes('φαρμακ'))findPOI('pharmacy'); else if(t.includes('εστια')||t.includes('φαγη'))findPOI('restaurant'); else if(t.includes('γυμνα'))findPOI('gym'); else if(t.includes('νοσοκο'))findPOI('hospital'); else if(t.includes('πάρκιν')||t.includes('parking'))findPOI('parking'); else {const q=t.replace(/πήγαινέ με|πήγαινε με|διαδρομή για|οδήγησέ με|προς/g,'').trim(); if(q)routeToQuery(q);}
+    if(t.includes('βενζ'))findPOI('fuel'); else if(t.includes('φαρμακ'))findPOI('pharmacy'); else if(t.includes('εστια')||t.includes('φαγη'))findPOI('restaurant'); else if(t.includes('γυμνα'))findPOI('gym'); else if(t.includes('νοσοκο'))findPOI('hospital'); else if(t.includes('πάρκιν')||t.includes('parking'))findPOI('parking'); else if(t.includes('σταμάτα')||t.includes('τέλος διαδρομ'))stopNavigation(); else {const q=t.replace(/πήγαινέ με|πήγαινε με|διαδρομή για|οδήγησέ με|προς/g,'').trim(); if(q)routeToQuery(q);}
   };
 }
 
@@ -330,6 +383,8 @@ $('#freeDriveBtn').addEventListener('click',()=>{state.freeDrive=!state.freeDriv
 $('#menuBtn').addEventListener('click',()=>$('#menuDrawer').classList.remove('hidden'));
 $('#closeMenuBtn').addEventListener('click',()=>$('#menuDrawer').classList.add('hidden'));
 $('#centerMapBtn').addEventListener('click',()=>{if(state.lastPos)state.map.setView(state.lastPos,17);$('#menuDrawer').classList.add('hidden');});
+$('#testVoiceBtn').addEventListener('click',()=>{speakTest();$('#menuDrawer').classList.add('hidden');});
+$('#stopRouteBtn').addEventListener('click',()=>{stopNavigation();$('#menuDrawer').classList.add('hidden');});
 document.addEventListener('click',e=>{const t=e.target;if(t.classList?.contains('poi-route'))routeTo({lat:+t.dataset.lat,lng:+t.dataset.lng,name:t.dataset.name});});
 window.addEventListener('online',()=>{setNetworkState();renderMonitor();}); window.addEventListener('offline',()=>{setNetworkState();renderMonitor();});
 
