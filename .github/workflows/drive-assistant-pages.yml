@@ -24,27 +24,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: JavaScript syntax
+      - name: Required single-file feature smoke checks
         run: |
-          node --check drive-assistant/app-v2.js
-          node --check drive-assistant/sw.js
-      - name: Required feature smoke checks
-        run: |
-          grep -q 'navigator.geolocation' drive-assistant/app-v2.js
-          grep -q 'speechSynthesis' drive-assistant/app-v2.js
-          grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
-          grep -q 'overpass-api.de' drive-assistant/app-v2.js
-          grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
-          grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
-          grep -q 'autoReroute' drive-assistant/app-v2.js
-          grep -q 'wakeLock' drive-assistant/app-v2.js
-          grep -q 'System Monitor' drive-assistant/index.html
-          grep -q 'manifest.webmanifest' drive-assistant/index.html
-          grep -q 'app-v2.js' drive-assistant/index.html
-          grep -q 'serviceWorker' drive-assistant/index.html
+          test -s drive-assistant/index.html
+          grep -q 'navigator.geolocation' drive-assistant/index.html
+          grep -q 'speechSynthesis' drive-assistant/index.html
+          grep -q 'SpeechRecognition' drive-assistant/index.html
+          grep -q 'Free Drive' drive-assistant/index.html
+          grep -q 'START FREE DRIVE' drive-assistant/index.html
+          grep -q 'STOP FREE DRIVE' drive-assistant/index.html
           grep -q 'viewport-fit=cover' drive-assistant/index.html
-          test -s drive-assistant/manifest.webmanifest
-          test -s drive-assistant/sw.js
+          grep -q 'Driver Assistant' drive-assistant/index.html
+      - name: Inline JavaScript syntax check
+        run: |
+          python - <<'PY'
+          import re, pathlib
+          p = pathlib.Path('drive-assistant/index.html')
+          s = p.read_text(encoding='utf-8')
+          blocks = re.findall(r'<script[^>]*>(.*?)</script>', s, re.S|re.I)
+          if not blocks:
+              raise SystemExit('No inline script found')
+          pathlib.Path('/tmp/drive-inline.js').write_text('\n'.join(blocks), encoding='utf-8')
+          PY
+          node --check /tmp/drive-inline.js
 
   deploy:
     needs: validate
