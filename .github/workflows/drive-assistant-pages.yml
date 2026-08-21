@@ -66,12 +66,12 @@ jobs:
           grep -q 'navigation-active' drive-assistant/styles.css
           grep -q 'poiOpenBtn' drive-assistant/index.html
           grep -q 'poiDrawer' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=10' drive-assistant/index.html
-          grep -q 'poi.css?v=10' drive-assistant/index.html
-          grep -q 'walking-router.js?v=10' drive-assistant/index.html
-          grep -q 'map-labels.js?v=10' drive-assistant/index.html
-          grep -q 'app-v2.js?v=10' drive-assistant/index.html
-          grep -q 'styles.css?v=10' drive-assistant/index.html
+          grep -q 'poi-catalog.js?v=11' drive-assistant/index.html
+          grep -q 'poi.css?v=11' drive-assistant/index.html
+          grep -q 'walking-router.js?v=11' drive-assistant/index.html
+          grep -q 'map-labels.js?v=11' drive-assistant/index.html
+          grep -q 'app-v2.js?v=11' drive-assistant/index.html
+          grep -q 'styles.css?v=11' drive-assistant/index.html
           grep -q 'data-travel-mode="drive"' drive-assistant/index.html
           grep -q 'data-travel-mode="walk"' drive-assistant/index.html
           grep -q 'valhalla1.openstreetmap.de/route' drive-assistant/walking-router.js
@@ -81,12 +81,14 @@ jobs:
           grep -q 'Mini market' drive-assistant/poi-catalog.js
           grep -q 'Σημεία ενδιαφέροντος' drive-assistant/poi-catalog.js
           grep -q 'poi-route' drive-assistant/poi-catalog.js
-          grep -q 'light_only_labels' drive-assistant/map-labels.js
-          grep -q 'minZoom: 15' drive-assistant/map-labels.js
-          grep -q "lumina-drive-v10" drive-assistant/sw.js
-          grep -q 'map-labels.js?v=10' drive-assistant/sw.js
-          grep -q 'poi-catalog.js?v=10' drive-assistant/sw.js
-          grep -q 'poi.css?v=10' drive-assistant/sw.js
+          grep -q 'way(' drive-assistant/map-labels.js
+          grep -q '\[highway\]\[name\]' drive-assistant/map-labels.js
+          grep -q 'bindTooltip' drive-assistant/map-labels.js
+          grep -q 'map.getZoom() < 16' drive-assistant/map-labels.js
+          grep -q "lumina-drive-v11" drive-assistant/sw.js
+          grep -q 'map-labels.js?v=11' drive-assistant/sw.js
+          grep -q 'poi-catalog.js?v=11' drive-assistant/sw.js
+          grep -q 'poi.css?v=11' drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
