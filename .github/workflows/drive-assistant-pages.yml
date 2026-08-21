@@ -14,7 +14,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: lumina-drive-pages
+  group: lumina-drive-pages-feature
   cancel-in-progress: true
 
 jobs:
@@ -30,6 +30,7 @@ jobs:
         run: |
           grep -q 'navigator.geolocation' drive-assistant/app-v2.js
           grep -q 'speechSynthesis' drive-assistant/app-v2.js
+          grep -q 'SpeechRecognition' drive-assistant/app-v2.js
           grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
           grep -q 'overpass-api.de' drive-assistant/app-v2.js
           grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
@@ -41,6 +42,8 @@ jobs:
           grep -q 'app-v2.js' drive-assistant/index.html
           grep -q 'serviceWorker' drive-assistant/index.html
           grep -q 'viewport-fit=cover' drive-assistant/index.html
+          grep -q "lumina-drive-v3" drive-assistant/sw.js
+          grep -q "cache:'no-store'" drive-assistant/sw.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
 
