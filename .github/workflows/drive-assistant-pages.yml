@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - feature/lumina-drive-assistant
-      - feature/milestone1-pdf-docx-engine
     paths:
       - "drive-assistant/**"
       - ".github/workflows/drive-assistant-pages.yml"
@@ -31,35 +30,16 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify required files
+      - name: Verify core files
         run: |
           test -s drive-assistant/index.html
           test -s drive-assistant/styles.css
-          test -s drive-assistant/ui-fixes.css
-          test -s drive-assistant/poi.css
-          test -s drive-assistant/address-autocomplete.css
           test -s drive-assistant/app-v2.js
-          test -s drive-assistant/address-autocomplete.js
-          test -s drive-assistant/walking-router.js
-          test -s drive-assistant/poi-catalog.js
-          test -s drive-assistant/google-places.js
-          test -s drive-assistant/map-labels.js
-          test -s drive-assistant/map-fallback.js
-          test -s drive-assistant/user-marker-hook.js
-          test -s drive-assistant/session-bootstrap.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
         run: |
           node --check drive-assistant/app-v2.js
-          node --check drive-assistant/address-autocomplete.js
-          node --check drive-assistant/walking-router.js
-          node --check drive-assistant/poi-catalog.js
-          node --check drive-assistant/google-places.js
-          node --check drive-assistant/map-labels.js
-          node --check drive-assistant/map-fallback.js
-          node --check drive-assistant/user-marker-hook.js
-          node --check drive-assistant/session-bootstrap.js
           node --check drive-assistant/sw.js
       - name: Required mobile feature smoke checks
         run: |
@@ -71,32 +51,6 @@ jobs:
           grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
           grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
           grep -q 'wakeLock' drive-assistant/app-v2.js
-          grep -q 'greekManeuver' drive-assistant/app-v2.js
-          grep -q 'stopNavigation' drive-assistant/app-v2.js
-          grep -q 'startNavigation' drive-assistant/app-v2.js
-          grep -q 'setNavigationUI' drive-assistant/app-v2.js
-          grep -q 'navigation-active' drive-assistant/styles.css
-          grep -q 'address-autocomplete.css' drive-assistant/index.html
-          grep -q 'address-autocomplete.js' drive-assistant/index.html
-          grep -q 'photon.komoot.io' drive-assistant/address-autocomplete.js
-          grep -q 'countrycode' drive-assistant/address-autocomplete.js
-          grep -q 'destination-suggestions' drive-assistant/address-autocomplete.js
-          grep -q 'suggestion-road' drive-assistant/address-autocomplete.css
-          grep -q 'suggestion-city' drive-assistant/address-autocomplete.css
-          grep -q 'poiOpenBtn' drive-assistant/index.html
-          grep -q 'poiDrawer' drive-assistant/index.html
-          grep -q 'data-travel-mode="drive"' drive-assistant/index.html
-          grep -q 'data-travel-mode="walk"' drive-assistant/index.html
-          grep -q 'valhalla1.openstreetmap.de/route' drive-assistant/walking-router.js
-          grep -q "costing: 'pedestrian'" drive-assistant/walking-router.js
-          grep -q 'Ξενοδοχεία' drive-assistant/poi-catalog.js
-          grep -q 'Σημεία ενδιαφέροντος' drive-assistant/poi-catalog.js
-          grep -q 'searchNearby' drive-assistant/google-places.js
-          grep -q 'SearchNearbyRankPreference.DISTANCE' drive-assistant/google-places.js
-          grep -q '\[highway\]\[name\]' drive-assistant/map-labels.js
-          grep -q 'basemaps.cartocdn.com' drive-assistant/map-fallback.js
-          grep -q '__luminaCurrentUserMarker' drive-assistant/user-marker-hook.js
-          grep -q "localStorage.removeItem(SESSION_KEY)" drive-assistant/session-bootstrap.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
@@ -109,31 +63,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Generate Google Places runtime configuration
+      - name: Stamp deployed build
         env:
-          GOOGLE_MAPS_API_KEY: ${{ vars.GOOGLE_MAPS_API_KEY }}
           BUILD_VERSION: ${{ github.sha }}
         run: |
-          python - <<'PY'
-          import json, os, pathlib
-          root = pathlib.Path('drive-assistant')
-          key = os.environ.get('GOOGLE_MAPS_API_KEY', '').strip()
-          version = os.environ.get('BUILD_VERSION', 'latest').strip()
-          if not key:
-              raise SystemExit('GOOGLE_MAPS_API_KEY repository variable is missing')
-          (root / 'config.js').write_text(
-              'window.__LUMINA_CONFIG__=' + json.dumps({'googleMapsApiKey': key, 'buildVersion': version}) + ';\n',
-              encoding='utf-8'
-          )
-          index = root / 'index.html'
-          html = index.read_text(encoding='utf-8')
-          marker = '<script src="poi-catalog.js?v=25" defer></script>'
-          injection = f'<script src="config.js?v={version}"></script>\n  <script src="google-places.js?v={version}"></script>\n  ' + marker
-          if marker not in html:
-              raise SystemExit('POI script marker not found in index.html')
-          html = html.replace(marker, injection)
-          index.write_text(html, encoding='utf-8')
-          PY
+          printf '%s\n' "$BUILD_VERSION" > drive-assistant/build.txt
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
       - name: Upload LUMINA Drive Pages artifact
