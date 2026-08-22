@@ -17,6 +17,8 @@
   let lastServiceAt = 0;
   let safetyItems = [];
   let lastPos = null;
+  let osmHealth = null;
+  let lastRemoteState = {routing:null, osm:null, geocode:null, weather:null};
 
   const rad = v => v * Math.PI / 180;
   function distance(a, b) {
@@ -130,17 +132,19 @@
       }
 
       const calming = nearest(elements.filter(x => x.tags?.traffic_calming), c);
-      if (calming && calming.d < 300) {
-        items.push({icon: '〰️', title: 'Μείωση ταχύτητας', detail: `${fmtDistance(calming.d)} · χαρτογραφημένο traffic calming`});
-      }
+      if (calming && calming.d < 300) items.push({icon:'〰️', title:'Μείωση ταχύτητας', detail:`${fmtDistance(calming.d)} · χαρτογραφημένο traffic calming`});
 
       safetyItems = items;
+      osmHealth = true;
+      lastRemoteState.osm = true;
       renderSafety();
-      window.dispatchEvent(new CustomEvent('lumina:osm-health', {detail: {ok: true}}));
+      renderMonitor(lastRemoteState);
     } catch {
       safetyItems = [];
+      osmHealth = false;
+      lastRemoteState.osm = false;
       renderSafety();
-      window.dispatchEvent(new CustomEvent('lumina:osm-health', {detail: {ok: false}}));
+      renderMonitor(lastRemoteState);
     }
   }
 
@@ -151,24 +155,28 @@
   }
 
   async function refreshServices(c) {
-    if (!navigator.onLine) return renderMonitor({routing: false, osm: false, geocode: false, weather: false});
+    if (!navigator.onLine) {
+      lastRemoteState = {routing:false, osm:false, geocode:false, weather:false};
+      return renderMonitor(lastRemoteState);
+    }
     if (Date.now() - lastServiceAt < SERVICE_TTL) return;
     lastServiceAt = Date.now();
 
-    renderMonitor({routing: null, osm: null, geocode: null, weather: null});
+    lastRemoteState = {routing:null, osm:osmHealth, geocode:null, weather:null};
+    renderMonitor(lastRemoteState);
     const tinyLng = c.lng + 0.001;
     const probes = await Promise.allSettled([
       fetchJson(`${CFG.osrm}/route/v1/driving/${c.lng},${c.lat};${tinyLng},${c.lat}?overview=false&steps=false`, {}, 8000),
-      fetchJson(`${CFG.nominatim}/reverse?format=jsonv2&lat=${c.lat}&lon=${c.lng}&zoom=14`, {headers: {Accept: 'application/json'}}, 8000),
+      fetchJson(`${CFG.nominatim}/reverse?format=jsonv2&lat=${c.lat}&lon=${c.lng}&zoom=14`, {headers:{Accept:'application/json'}}, 8000),
       fetchJson(`${CFG.weather}?latitude=${c.lat}&longitude=${c.lng}&current=temperature_2m`, {}, 8000)
     ]);
-    const state = {
+    lastRemoteState = {
       routing: probes[0].status === 'fulfilled' && probes[0].value?.code === 'Ok',
       geocode: probes[1].status === 'fulfilled' && !!probes[1].value,
       weather: probes[2].status === 'fulfilled' && !!probes[2].value?.current,
-      osm: true
+      osm: osmHealth
     };
-    renderMonitor(state);
+    renderMonitor(lastRemoteState);
   }
 
   function renderMonitor(remote = {}) {
@@ -198,31 +206,29 @@
   }
 
   function onPosition(p) {
-    const c = {lat: p.coords.latitude, lng: p.coords.longitude};
+    const c = {lat:p.coords.latitude, lng:p.coords.longitude};
     lastPos = c;
     refreshRoadSafety(c);
     refreshServices(c);
   }
 
   function start() {
-    renderMonitor({routing: navigator.onLine ? null : false, osm: navigator.onLine ? null : false, geocode: navigator.onLine ? null : false, weather: navigator.onLine ? null : false});
+    lastRemoteState = {routing:navigator.onLine?null:false, osm:navigator.onLine?null:false, geocode:navigator.onLine?null:false, weather:navigator.onLine?null:false};
+    renderMonitor(lastRemoteState);
     if (!navigator.geolocation) return;
-    navigator.geolocation.watchPosition(onPosition, () => {}, {
-      enableHighAccuracy: true,
-      maximumAge: 5000,
-      timeout: 15000
-    });
+    navigator.geolocation.watchPosition(onPosition, () => {}, {enableHighAccuracy:true, maximumAge:5000, timeout:15000});
     window.addEventListener('online', () => {
       lastServiceAt = 0;
       lastIntelAt = 0;
-      if (lastPos) {
-        refreshRoadSafety(lastPos);
-        refreshServices(lastPos);
-      }
+      osmHealth = null;
+      if (lastPos) { refreshRoadSafety(lastPos); refreshServices(lastPos); }
     });
-    window.addEventListener('offline', () => renderMonitor({routing: false, osm: false, geocode: false, weather: false}));
+    window.addEventListener('offline', () => {
+      lastRemoteState = {routing:false, osm:false, geocode:false, weather:false};
+      renderMonitor(lastRemoteState);
+    });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once: true});
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {once:true});
   else start();
 })();
