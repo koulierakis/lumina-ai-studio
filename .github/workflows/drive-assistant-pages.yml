@@ -38,6 +38,7 @@ jobs:
           test -s drive-assistant/drive-completion.js
           test -s drive-assistant/road-safety.js
           test -s drive-assistant/walking-router.js
+          test -s drive-assistant/session-bootstrap.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
@@ -65,6 +66,9 @@ jobs:
           grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
           grep -q 'autoReroute' drive-assistant/app-v2.js
           grep -q 'wakeLock' drive-assistant/app-v2.js
+          grep -q 'window.LuminaWalkingRouter' drive-assistant/walking-router.js
+          grep -q "previous !== BUILD" drive-assistant/session-bootstrap.js
+          grep -q 'MutationObserver' drive-assistant/drive-completion.js
           grep -q 'highway=construction' drive-assistant/road-safety.js
           grep -q 'railway=level_crossing' drive-assistant/road-safety.js
           grep -q '\[hazard\]' drive-assistant/road-safety.js
