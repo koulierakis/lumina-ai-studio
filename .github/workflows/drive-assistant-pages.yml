@@ -1,93 +1,16 @@
-name: LUMINA Drive Assistant
+name: LUMINA Drive Assistant Legacy Guard
 
 on:
-  push:
-    branches:
-      - feature/lumina-drive-assistant
-      - feature/milestone1-pdf-docx-engine
-    paths:
-      - "drive-assistant/**"
-      - ".github/workflows/drive-assistant-pages.yml"
-
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: lumina-drive-pages
-  cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate LUMINA Drive
+  legacy-disabled:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Verify required files
+      - name: Confirm canonical deployment branch
         run: |
-          test -s drive-assistant/index.html
-          test -s drive-assistant/app-v2.js
-          test -s drive-assistant/manifest.webmanifest
-          test -s drive-assistant/sw.js
-
-      - name: JavaScript syntax check
-        run: |
-          node --check drive-assistant/app-v2.js
-          node --check drive-assistant/sw.js
-
-      - name: Required mobile feature smoke checks
-        run: |
-          grep -q 'navigator.geolocation' drive-assistant/app-v2.js
-          grep -q 'speechSynthesis' drive-assistant/app-v2.js
-          grep -q 'SpeechRecognition' drive-assistant/app-v2.js
-          grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
-          grep -q 'overpass-api.de' drive-assistant/app-v2.js
-          grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
-          grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
-          grep -q 'autoReroute' drive-assistant/app-v2.js
-          grep -q 'wakeLock' drive-assistant/app-v2.js
-
-          grep -q 'System Monitor' drive-assistant/index.html
-          grep -q 'manifest.webmanifest' drive-assistant/index.html
-          grep -q 'app-v2.js' drive-assistant/index.html
-          grep -q 'serviceWorker' drive-assistant/index.html
-          grep -q 'viewport-fit=cover' drive-assistant/index.html
-
-          grep -q "lumina-drive-v3" drive-assistant/sw.js
-          grep -q "cache:'no-store'" drive-assistant/sw.js
-
-  deploy:
-    name: Deploy LUMINA Drive to GitHub Pages
-    needs: validate
-    runs-on: ubuntu-latest
-
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload LUMINA Drive Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: drive-assistant
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          echo "Drive Pages deployment is owned exclusively by feature/lumina-drive-assistant."
+          echo "This legacy/default branch workflow cannot deploy GitHub Pages."
