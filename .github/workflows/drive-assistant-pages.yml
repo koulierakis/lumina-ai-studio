@@ -35,11 +35,22 @@ jobs:
           test -s drive-assistant/index.html
           test -s drive-assistant/styles.css
           test -s drive-assistant/app-v2.js
+          test -s drive-assistant/drive-completion.js
+          test -s drive-assistant/walking-router.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
         run: |
           node --check drive-assistant/app-v2.js
+          node --check drive-assistant/drive-completion.js
+          node --check drive-assistant/walking-router.js
+          node --check drive-assistant/poi-catalog.js
+          node --check drive-assistant/address-autocomplete.js
+          node --check drive-assistant/map-labels.js
+          node --check drive-assistant/map-fallback.js
+          node --check drive-assistant/user-marker-hook.js
+          node --check drive-assistant/reverse-geocode-fallback.js
+          node --check drive-assistant/session-bootstrap.js
           node --check drive-assistant/sw.js
       - name: Required mobile feature smoke checks
         run: |
@@ -50,7 +61,12 @@ jobs:
           grep -q 'overpass-api.de' drive-assistant/app-v2.js
           grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
           grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
+          grep -q 'autoReroute' drive-assistant/app-v2.js
           grep -q 'wakeLock' drive-assistant/app-v2.js
+          grep -q 'drive-completion.js?v=26' drive-assistant/index.html
+          grep -q "lumina-drive-v26" drive-assistant/sw.js
+          grep -q "./index.html" drive-assistant/sw.js
+          grep -q "drive-completion.js?v=26" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
   deploy:
