@@ -1,9 +1,11 @@
 (()=>{
   const TYPE_MAP={
-    restaurant:['restaurant','greek_restaurant','seafood_restaurant','mediterranean_restaurant','bar_and_grill','family_restaurant','brunch_restaurant','pizza_restaurant','hamburger_restaurant','fast_food_restaurant'],
-    fast_food:['fast_food_restaurant','hamburger_restaurant','pizza_restaurant','sandwich_shop','meal_takeaway'],
-    cafe:['cafe','coffee_shop','bakery'],bar:['bar','pub','wine_bar'],ice_cream:['ice_cream_shop','dessert_shop'],
-    hotel:['hotel'],motel:['motel'],guest_house:['guest_house','bed_and_breakfast'],camp_site:['campground'],
+    restaurant:['restaurant','cafe','bar','bakery','meal_takeaway'],
+    fast_food:['fast_food_restaurant','meal_takeaway','hamburger_restaurant','pizza_restaurant'],
+    cafe:['cafe','coffee_shop','bakery'],
+    bar:['bar','pub'],
+    ice_cream:['ice_cream_shop'],
+    hotel:['hotel'],motel:['motel'],guest_house:['guest_house'],camp_site:['campground'],
     supermarket:['supermarket'],convenience:['convenience_store'],bakery:['bakery'],mall:['shopping_mall'],
     pharmacy:['pharmacy'],hospital:['hospital'],clinic:['medical_clinic'],dentist:['dentist'],
     fuel:['gas_station'],parking:['parking'],charging:['electric_vehicle_charging_station'],taxi:['taxi_stand'],bus:['bus_stop'],
@@ -23,15 +25,13 @@
     if(loaderPromise)return loaderPromise;
     const key=window.__LUMINA_CONFIG__?.googleMapsApiKey;
     if(!key)return Promise.reject(new Error('missing-google-key'));
-    authFailed=false;
-    window.gm_authFailure=()=>{authFailed=true};
+    authFailed=false; window.gm_authFailure=()=>{authFailed=true};
     loaderPromise=new Promise((resolve,reject)=>{
       const cb='__luminaGoogleMapsReady';
       const timer=setTimeout(()=>reject(new Error(authFailed?'google-auth-failed':'google-maps-timeout')),12000);
       window[cb]=()=>{clearTimeout(timer);delete window[cb];if(authFailed)reject(new Error('google-auth-failed'));else resolve()};
       const s=document.createElement('script');
-      s.async=true;s.defer=true;
-      s.referrerPolicy='strict-origin-when-cross-origin';
+      s.async=true;s.defer=true;s.referrerPolicy='strict-origin-when-cross-origin';
       s.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&libraries=places&language=el&region=GR&auth_referrer_policy=origin&callback=${cb}`;
       s.onerror=()=>{clearTimeout(timer);reject(new Error('google-maps-load-failed'))};
       document.head.appendChild(s);
@@ -39,26 +39,62 @@
     return loaderPromise;
   }
   async function nearby(type,center,radius){
-    await loadPlaces(); const {Place,SearchNearbyRankPreference}=await google.maps.importLibrary('places');
+    await loadPlaces();
+    const {Place,SearchNearbyRankPreference}=await google.maps.importLibrary('places');
     const types=TYPE_MAP[type]; if(!types)throw new Error('unsupported-google-place-type');
-    const batches=[];
-    for(let i=0;i<types.length;i+=5){
-      const includedPrimaryTypes=types.slice(i,i+5);
-      try{const {places}=await Place.searchNearby({fields:['id','displayName','location','formattedAddress','primaryType'],locationRestriction:{center,radius},includedPrimaryTypes,maxResultCount:20,rankPreference:SearchNearbyRankPreference.DISTANCE});batches.push(...(places||[]))}catch(err){console.warn('Google Places type batch failed',includedPrimaryTypes,err)}
+    const raw=[];
+    for(const primaryType of types){
+      try{
+        const {places}=await Place.searchNearby({
+          fields:['id','displayName','location','formattedAddress','primaryType'],
+          locationRestriction:{center,radius},
+          includedPrimaryTypes:[primaryType],
+          maxResultCount:20,
+          rankPreference:SearchNearbyRankPreference.DISTANCE
+        });
+        raw.push(...(places||[]));
+      }catch(err){console.warn('Google Places type failed',primaryType,err)}
     }
-    const seen=new Map();
-    for(const p of batches){const lat=typeof p.location?.lat==='function'?p.location.lat():p.location?.lat,lng=typeof p.location?.lng==='function'?p.location.lng():p.location?.lng;if(!Number.isFinite(lat)||!Number.isFinite(lng))continue;const point={lat,lng},name=p.displayName||'Χωρίς όνομα',address=p.formattedAddress||'',d=dist(center,point);const key=p.id||`${norm(name)}|${Math.round(lat*10000)}|${Math.round(lng*10000)}`;const nameKey=norm(name);let duplicate=false;for(const x of seen.values()){if(nameKey&&norm(x.name)===nameKey&&dist(point,x.p)<120){duplicate=true;break}}if(!duplicate&&!seen.has(key))seen.set(key,{p:point,d,name,address,source:'google'})}
-    return [...seen.values()].sort((a,b)=>a.d-b.d);
+    const seen=[];
+    for(const p of raw){
+      const lat=typeof p.location?.lat==='function'?p.location.lat():p.location?.lat;
+      const lng=typeof p.location?.lng==='function'?p.location.lng():p.location?.lng;
+      if(!Number.isFinite(lat)||!Number.isFinite(lng))continue;
+      const point={lat,lng},name=p.displayName||'Χωρίς όνομα',address=p.formattedAddress||'',d=dist(center,point),nameKey=norm(name);
+      const duplicate=seen.some(x=>(p.id&&x.id===p.id)||(nameKey&&norm(x.name)===nameKey&&dist(point,x.p)<120));
+      if(!duplicate)seen.push({id:p.id||'',p:point,d,name,address,source:'google'});
+    }
+    return seen.sort((a,b)=>a.d-b.d);
   }
-  function render(arr,radius){const results=document.querySelector('#poiResults');if(!results)return;const note=`<div class="poi-loading">Google Places · ${arr.length} σημεία · από το κοντινότερο · ακτίνα ${radius<1000?radius+' m':radius/1000+' km'}</div>`;results.innerHTML=note+arr.slice(0,60).map(x=>`<article class="poi-result"><div><strong>${esc(x.name)}</strong><span>${fd(x.d)}${x.address?' · '+esc(x.address):''}</span></div><button class="poi-route" data-lat="${x.p.lat}" data-lng="${x.p.lng}" data-name="${esc(x.name)}">Οδηγίες</button></article>`).join('')}
-  async function runGoogle(item){setStatus('Google Places: σαρώνω όλα τα κοντινά σημεία…');const center=await getPos();let best=[],bestRadius=RADII[0];for(const radius of RADII){const arr=await nearby(item.dataset.poiType,center,radius);if(arr.length>best.length){best=arr;bestRadius=radius}if(arr.length>=20)break}if(best.length){render(best,bestRadius);return true}return false}
+  function render(arr,radius){
+    const results=document.querySelector('#poiResults');if(!results)return;
+    const note=`<div class="poi-loading">Google Places · ${arr.length} σημεία · από το κοντινότερο · ακτίνα ${radius<1000?radius+' m':radius/1000+' km'}</div>`;
+    results.innerHTML=note+arr.slice(0,60).map(x=>`<article class="poi-result"><div><strong>${esc(x.name)}</strong><span>${fd(x.d)}${x.address?' · '+esc(x.address):''}</span></div><button class="poi-route" data-lat="${x.p.lat}" data-lng="${x.p.lng}" data-name="${esc(x.name)}">Οδηγίες</button></article>`).join('');
+  }
+  async function runGoogle(item){
+    setStatus('Google Places: σαρώνω όλα τα κοντινά σημεία…');
+    const center=await getPos(); let best=[],bestRadius=RADII[0];
+    for(const radius of RADII){
+      const arr=await nearby(item.dataset.poiType,center,radius);
+      if(arr.length>best.length){best=arr;bestRadius=radius}
+      if(arr.length>=20)break;
+    }
+    if(best.length){render(best,bestRadius);return true}
+    return false;
+  }
   document.querySelector('#poiCategories')?.addEventListener('click',async e=>{
     const item=e.target.closest('[data-poi-type]');
     if(!item||bypass.has(item)){if(item)bypass.delete(item);return}
     if(!window.__LUMINA_CONFIG__?.googleMapsApiKey)return;
     e.preventDefault();e.stopImmediatePropagation();
-    try{const ok=await runGoogle(item);if(ok)return;if(window.google?.maps?.importLibrary){setStatus('Google Places δεν επέστρεψε αποτελέσματα για αυτή την κατηγορία.');return}}
-    catch(err){console.warn('LUMINA Google Places:',err);const msg=String(err?.message||err);if(/auth|maps-load|timeout/i.test(msg)){setStatus('Google Places authorization απέτυχε. Έλεγξε billing και website restriction του API key.');return}}
+    try{
+      const ok=await runGoogle(item);if(ok)return;
+      if(window.google?.maps?.importLibrary){setStatus('Google Places δεν επέστρεψε αποτελέσματα για αυτή την κατηγορία.');return}
+    }catch(err){
+      console.warn('LUMINA Google Places:',err);
+      const msg=String(err?.message||err);
+      if(/auth|maps-load|timeout/i.test(msg)){setStatus('Google Places authorization απέτυχε. Έλεγξε billing και website restriction του API key.');return}
+    }
     bypass.add(item);item.click();
   },true);
 })();
