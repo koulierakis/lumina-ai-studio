@@ -9,6 +9,7 @@
     services:{label:'Υπηρεσίες',items:[['bank','🏦 Τράπεζες','amenity','bank'],['atm','💶 ATM','amenity','atm'],['police','👮 Αστυνομία','amenity','police'],['post','📮 Ταχυδρομεία','amenity','post_office']]},
     leisure:{label:'Αναψυχή',items:[['gym','🏋️ Γυμναστήρια','leisure','fitness_centre'],['beach','🏖️ Παραλίες','natural','beach'],['museum','🏛️ Μουσεία','tourism','museum'],['attraction','📸 Αξιοθέατα','tourism','attraction'],['playground','🛝 Παιδικές χαρές','leisure','playground']]}
   };
+  const KEYWORDS={pharmacy:'pharmacy',hospital:'hospital',clinic:'clinic',dentist:'dentist',fuel:'fuel station',parking:'parking',charging:'charging station',taxi:'taxi',bus:'bus stop',restaurant:'restaurant',fast_food:'fast food',cafe:'cafe',bar:'bar',ice_cream:'ice cream',hotel:'hotel',motel:'motel',guest_house:'guest house',camp_site:'camping',supermarket:'supermarket',convenience:'mini market',bakery:'bakery',mall:'shopping mall',bank:'bank',atm:'atm',police:'police',post:'post office',gym:'gym',beach:'beach',museum:'museum',attraction:'attraction',playground:'playground'};
   const OVERPASS_ENDPOINTS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
   const drawer=$('#poiDrawer'),cats=$('#poiCategories'),results=$('#poiResults'),title=$('#poiTitle'),back=$('#poiBackBtn');
   function open(){drawer.classList.remove('hidden');renderCategories()}
@@ -16,52 +17,20 @@
   function renderCategories(){title.textContent='Σημεία ενδιαφέροντος';back.classList.add('hidden');results.innerHTML='';cats.innerHTML=Object.entries(CATEGORIES).map(([k,v])=>`<button class="poi-category" data-poi-group="${k}"><strong>${v.label}</strong><span>${v.items.length} κατηγορίες</span></button>`).join('');}
   function renderGroup(key){const g=CATEGORIES[key];if(!g)return;title.textContent=g.label;back.classList.remove('hidden');cats.innerHTML=g.items.map(i=>`<button class="poi-item" data-poi-type="${i[0]}" data-k="${i[2]}" data-v="${i[3]}">${i[1]}</button>`).join('');results.innerHTML='';}
   function getPos(){return new Promise((res,rej)=>navigator.geolocation?navigator.geolocation.getCurrentPosition(p=>res({lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy}),rej,{enableHighAccuracy:true,maximumAge:4000,timeout:15000}):rej(new Error('geolocation-unavailable')))}
-  const esc=s=>String(s||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  const esc=s=>String(s||'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
   const rad=v=>v*Math.PI/180;function distance(a,b){const R=6371e3,p1=rad(a.lat),p2=rad(b.lat),dp=rad(b.lat-a.lat),dl=rad(b.lng-a.lng),x=Math.sin(dp/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dl/2)**2;return 2*R*Math.atan2(Math.sqrt(x),Math.sqrt(1-x))}
   const fd=m=>m<1000?`${Math.round(m)} m`:`${(m/1000).toFixed(1)} km`;
 
-  async function fetchOverpass(query){
-    let lastError=null;
-    for(const endpoint of OVERPASS_ENDPOINTS){
-      const controller=new AbortController();
-      const timer=setTimeout(()=>controller.abort(),9000);
-      try{
-        const body=`data=${encodeURIComponent(query)}`;
-        const r=await fetch(endpoint,{method:'POST',body,signal:controller.signal,headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8','Accept':'application/json'}});
-        if(!r.ok)throw new Error(`overpass-${r.status}`);
-        return await r.json();
-      }catch(e){lastError=e;}finally{clearTimeout(timer)}
-    }
-    throw lastError||new Error('overpass-unavailable');
-  }
-
-  function makeQuery(c,k,v,radius){return `[out:json][timeout:12];(node(around:${radius},${c.lat},${c.lng})["${k}"="${v}"];way(around:${radius},${c.lat},${c.lng})["${k}"="${v}"];relation(around:${radius},${c.lat},${c.lng})["${k}"="${v}"];);out center tags 80;`;}
-
-  async function search(k,v){
-    results.innerHTML='<div class="poi-loading">Αναζήτηση κοντά σου…</div>';
-    try{
-      const c=await getPos();
-      let j=await fetchOverpass(makeQuery(c,k,v,5000));
-      if(!(j.elements||[]).length)j=await fetchOverpass(makeQuery(c,k,v,12000));
-      const arr=[],seen=new Set();
-      for(const x of (j.elements||[])){
-        const p=Number.isFinite(x.lat)?{lat:x.lat,lng:x.lon}:x.center&&Number.isFinite(x.center.lat)?{lat:x.center.lat,lng:x.center.lon}:null;
-        if(!p)continue;
-        const id=`${x.type}:${x.id}`;if(seen.has(id))continue;seen.add(id);
-        const tags=x.tags||{};
-        const name=tags.name||tags.brand||tags.operator||'Χωρίς καταχωρημένο όνομα';
-        const address=[tags['addr:street'],tags['addr:housenumber'],tags['addr:city']].filter(Boolean).join(' ');
-        arr.push({p,d:distance(c,p),name,address});
-      }
-      arr.sort((a,b)=>a.d-b.d);
-      results.innerHTML=arr.length?arr.slice(0,30).map(x=>`<article class="poi-result"><div><strong>${esc(x.name)}</strong><span>${fd(x.d)}${x.address?' · '+esc(x.address):''}</span></div><button class="poi-route" data-lat="${x.p.lat}" data-lng="${x.p.lng}" data-name="${esc(x.name)}">Οδηγίες</button></article>`).join(''):'<div class="poi-loading">Δεν βρέθηκαν καταχωρημένα αποτελέσματα σε ακτίνα 12 km.</div>';
-    }catch(e){
-      const gpsProblem=e&&(/geolocation|position|permission/i.test(String(e.message||e))||e.code);
-      results.innerHTML=`<div class="poi-loading">${gpsProblem?'Δεν ήταν διαθέσιμη η ακριβής θέση GPS.':'Η υπηρεσία κοντινών σημείων δεν απάντησε. Δοκίμασε ξανά σε λίγα δευτερόλεπτα.'}</div>`;
-    }
-  }
-
+  async function fetchJson(url,opts={},timeout=8000){const c=new AbortController();const t=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(url,{...opts,signal:c.signal,headers:{Accept:'application/json',...(opts.headers||{})}});if(!r.ok)throw new Error(`http-${r.status}`);return await r.json()}finally{clearTimeout(t)}}
+  async function fetchOverpass(query){let lastError=null;for(const endpoint of OVERPASS_ENDPOINTS){try{const body=`data=${encodeURIComponent(query)}`;return await fetchJson(endpoint,{method:'POST',body,headers:{'Content-Type':'application/x-www-form-urlencoded;charset=UTF-8'}},8500)}catch(e){lastError=e}}throw lastError||new Error('overpass-unavailable')}
+  function makeQuery(c,k,v,radius){return `[out:json][timeout:10];(node(around:${radius},${c.lat},${c.lng})[\"${k}\"=\"${v}\"];way(around:${radius},${c.lat},${c.lng})[\"${k}\"=\"${v}\"];relation(around:${radius},${c.lat},${c.lng})[\"${k}\"=\"${v}\"];);out center tags 80;`;}
+  function fromOverpass(j,c){const arr=[];for(const x of (j.elements||[])){const p=Number.isFinite(x.lat)?{lat:x.lat,lng:x.lon}:x.center&&Number.isFinite(x.center.lat)?{lat:x.center.lat,lng:x.center.lon}:null;if(!p)continue;const tags=x.tags||{};arr.push({p,d:distance(c,p),name:tags.name||tags.brand||tags.operator||'Χωρίς καταχωρημένο όνομα',address:[tags['addr:street'],tags['addr:housenumber'],tags['addr:city']].filter(Boolean).join(' '),source:'osm'})}return arr}
+  async function searchNominatim(type,c){const term=KEYWORDS[type]||type;const d=0.12;const viewbox=`${c.lng-d},${c.lat+d},${c.lng+d},${c.lat-d}`;const u=new URL('https://nominatim.openstreetmap.org/search');u.searchParams.set('format','jsonv2');u.searchParams.set('q',term);u.searchParams.set('countrycodes','gr');u.searchParams.set('limit','30');u.searchParams.set('addressdetails','1');u.searchParams.set('bounded','1');u.searchParams.set('viewbox',viewbox);const j=await fetchJson(u.toString(),{},8000);return(j||[]).map(x=>{const p={lat:+x.lat,lng:+x.lon};return{p,d:distance(c,p),name:x.namedetails?.name||x.name||x.display_name?.split(',')[0]||term,address:[x.address?.road,x.address?.house_number,x.address?.city||x.address?.town||x.address?.village].filter(Boolean).join(' '),source:'nominatim'}}).filter(x=>Number.isFinite(x.p.lat)&&Number.isFinite(x.p.lng))}
+  async function searchPhoton(type,c){const term=KEYWORDS[type]||type;const u=new URL('https://photon.komoot.io/api/');u.searchParams.set('q',term);u.searchParams.set('lat',String(c.lat));u.searchParams.set('lon',String(c.lng));u.searchParams.set('limit','30');u.searchParams.set('lang','el');const j=await fetchJson(u.toString(),{},8000);return(j.features||[]).map(f=>{const p=f.properties||{},co=f.geometry?.coordinates||[];const pos={lat:+co[1],lng:+co[0]};return{p:pos,d:distance(c,pos),name:p.name||p.street||p.city||term,address:[p.street,p.housenumber,p.city||p.town||p.village].filter(Boolean).join(' '),source:'photon'}}).filter(x=>Number.isFinite(x.p.lat)&&Number.isFinite(x.p.lng)&&x.d<=15000)}
+  function merge(items){const seen=new Set(),out=[];for(const x of items.sort((a,b)=>a.d-b.d)){const key=`${Math.round(x.p.lat*1e5)}:${Math.round(x.p.lng*1e5)}:${String(x.name).toLowerCase()}`;if(seen.has(key))continue;seen.add(key);out.push(x)}return out}
+  function renderResults(arr){results.innerHTML=arr.length?arr.slice(0,30).map(x=>`<article class="poi-result"><div><strong>${esc(x.name)}</strong><span>${fd(x.d)}${x.address?' · '+esc(x.address):''}</span></div><button class="poi-route" data-lat="${x.p.lat}" data-lng="${x.p.lng}" data-name="${esc(x.name)}">Οδηγίες</button></article>`).join(''):'<div class="poi-loading">Δεν βρέθηκαν αποτελέσματα κοντά σου.</div>'}
+  async function search(type,k,v){results.innerHTML='<div class="poi-loading">Αναζήτηση κοντά σου…</div>';try{const c=await getPos();let all=[];try{let j=await fetchOverpass(makeQuery(c,k,v,5000));all.push(...fromOverpass(j,c));if(all.length<5){j=await fetchOverpass(makeQuery(c,k,v,12000));all.push(...fromOverpass(j,c))}}catch{}if(all.length<8){const [n,p]=await Promise.allSettled([searchNominatim(type,c),searchPhoton(type,c)]);if(n.status==='fulfilled')all.push(...n.value);if(p.status==='fulfilled')all.push(...p.value)}all=merge(all).filter(x=>x.d<=15000);renderResults(all)}catch(e){const gpsProblem=e&&(/geolocation|position|permission/i.test(String(e.message||e))||e.code);results.innerHTML=`<div class="poi-loading">${gpsProblem?'Δεν ήταν διαθέσιμη η ακριβής θέση GPS.':'Δεν ήταν δυνατή η αναζήτηση κοντινών σημείων. Δοκίμασε ξανά.'}</div>`}}
   $('#poiOpenBtn')?.addEventListener('click',open);$('#poiCloseBtn')?.addEventListener('click',close);back?.addEventListener('click',renderCategories);
-  cats?.addEventListener('click',e=>{const g=e.target.closest('[data-poi-group]');if(g)return renderGroup(g.dataset.poiGroup);const i=e.target.closest('[data-k]');if(i)search(i.dataset.k,i.dataset.v)});
+  cats?.addEventListener('click',e=>{const g=e.target.closest('[data-poi-group]');if(g)return renderGroup(g.dataset.poiGroup);const i=e.target.closest('[data-k]');if(i)search(i.dataset.poiType,i.dataset.k,i.dataset.v)});
   results?.addEventListener('click',e=>{if(e.target.closest('.poi-route'))close()});
 })();
