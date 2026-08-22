@@ -3,25 +3,35 @@
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
+  const SESSION_KEY = 'lumina-drive-session-v1';
   const safeClick = el => { if (el) el.click(); };
+  let arrivalHandled = false;
 
   function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
 
+  function persistFreeDrive(on) {
+    try {
+      const raw = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}');
+      raw.freeDrive = !!on;
+      localStorage.setItem(SESSION_KEY, JSON.stringify(raw));
+    } catch {}
+  }
+
   function enterFreeDriveUI() {
     document.body.classList.add('free-drive-active');
-    const cockpit = $('#navCockpit');
-    const dock = $('#navVoiceDock');
-    cockpit?.classList.remove('hidden');
-    dock?.classList.remove('hidden');
+    $('#navCockpit')?.classList.remove('hidden');
+    $('#navVoiceDock')?.classList.remove('hidden');
     setText('#navDestination', 'Free Drive');
     setText('#navRoad', $('#roadName')?.textContent || 'Τρέχουσα θέση');
     setText('#navSpeed', $('#speed')?.textContent || '0');
     setText('#navSpeedLimit', $('#speedLimit')?.textContent || '—');
+    persistFreeDrive(true);
     setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
   }
 
   function leaveFreeDriveUI() {
     document.body.classList.remove('free-drive-active');
+    persistFreeDrive(false);
     if (!document.body.classList.contains('navigation-active')) {
       $('#navCockpit')?.classList.add('hidden');
       $('#navVoiceDock')?.classList.add('hidden');
@@ -44,7 +54,8 @@
     if (!('speechSynthesis' in window)) return;
     speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(`Τρέχουσα ταχύτητα ${speed} χιλιόμετρα την ώρα. Όριο ${limit}. Βρίσκεσαι σε ${road}.`);
-    u.lang = 'el-GR'; u.rate = 0.96;
+    u.lang = 'el-GR';
+    u.rate = 0.96;
     speechSynthesis.speak(u);
   }
 
@@ -54,17 +65,34 @@
     if ('vibrate' in navigator) navigator.vibrate([180,100,180]);
   }
 
+  function observeArrival() {
+    const maneuver = $('#maneuverText');
+    if (!maneuver || !window.MutationObserver) return;
+    const check = () => {
+      const arrived = maneuver.textContent.trim() === 'Άφιξη';
+      if (!arrived) {
+        arrivalHandled = false;
+        return;
+      }
+      if (arrivalHandled) return;
+      arrivalHandled = true;
+      setTimeout(() => {
+        if (maneuver.textContent.trim() === 'Άφιξη') safeClick($('#stopRouteBtn'));
+      }, 2500);
+    };
+    new MutationObserver(check).observe(maneuver, {childList:true, characterData:true, subtree:true});
+    check();
+  }
+
   function bind() {
     const free = $('#freeDriveBtn');
     free?.addEventListener('click', () => setTimeout(syncFreeDrive, 0));
 
-    // Make the cockpit stop control also leave Free Drive when no route is active.
     $('#navStopBtn')?.addEventListener('click', () => {
       if (freeDriveIsOn()) safeClick(free);
       setTimeout(leaveFreeDriveUI, 0);
     });
 
-    // Fast, dependable status action in the navigation cockpit.
     const statusBtn = document.createElement('button');
     statusBtn.type = 'button';
     statusBtn.id = 'navStatusBtn';
@@ -75,13 +103,13 @@
     const dock = $('#navVoiceDock');
     if (dock && !$('#navStatusBtn')) dock.appendChild(statusBtn);
 
-    // Long press on LUMINA mic is an immediate danger marker; normal tap remains voice input.
     const mic = $('#navVoiceBtn');
     let timer = null;
     mic?.addEventListener('pointerdown', () => { timer = setTimeout(reportDanger, 900); });
     ['pointerup','pointercancel','pointerleave'].forEach(ev => mic?.addEventListener(ev, () => { if (timer) clearTimeout(timer); timer = null; }));
 
     syncFreeDrive();
+    observeArrival();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind, {once:true});
