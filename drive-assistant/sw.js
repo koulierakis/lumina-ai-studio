@@ -1,5 +1,5 @@
-const CACHE='lumina-drive-v21';
-const CORE=['./styles.css?v=21','./poi.css?v=21','./ui-fixes.css?v=21','./address-autocomplete.css?v=21','./app-v2.js?v=21','./walking-router.js?v=21','./poi-catalog.js?v=21','./address-autocomplete.js?v=21','./map-labels.js?v=21','./map-fallback.js?v=21','./user-marker-hook.js?v=21','./reverse-geocode-fallback.js?v=21','./session-bootstrap.js?v=21','./manifest.webmanifest?v=21'];
+const CACHE='lumina-drive-v22';
+const CORE=['./styles.css?v=22','./poi.css?v=22','./ui-fixes.css?v=22','./address-autocomplete.css?v=22','./app-v2.js?v=22','./walking-router.js?v=22','./poi-catalog.js?v=22','./address-autocomplete.js?v=22','./map-labels.js?v=22','./map-fallback.js?v=22','./user-marker-hook.js?v=22','./reverse-geocode-fallback.js?v=22','./session-bootstrap.js?v=22','./manifest.webmanifest?v=22'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
