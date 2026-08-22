@@ -36,6 +36,7 @@ jobs:
           test -s drive-assistant/styles.css
           test -s drive-assistant/app-v2.js
           test -s drive-assistant/drive-completion.js
+          test -s drive-assistant/road-safety.js
           test -s drive-assistant/walking-router.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
@@ -43,6 +44,7 @@ jobs:
         run: |
           node --check drive-assistant/app-v2.js
           node --check drive-assistant/drive-completion.js
+          node --check drive-assistant/road-safety.js
           node --check drive-assistant/walking-router.js
           node --check drive-assistant/poi-catalog.js
           node --check drive-assistant/address-autocomplete.js
@@ -63,9 +65,15 @@ jobs:
           grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
           grep -q 'autoReroute' drive-assistant/app-v2.js
           grep -q 'wakeLock' drive-assistant/app-v2.js
+          grep -q 'highway=construction' drive-assistant/road-safety.js
+          grep -q 'railway=level_crossing' drive-assistant/road-safety.js
+          grep -q '\[hazard\]' drive-assistant/road-safety.js
+          grep -q 'Routing / OSRM' drive-assistant/road-safety.js
+          grep -q 'road-safety.js?v=26' drive-assistant/index.html
           grep -q 'drive-completion.js?v=26' drive-assistant/index.html
           grep -q "lumina-drive-v26" drive-assistant/sw.js
           grep -q "./index.html" drive-assistant/sw.js
+          grep -q "road-safety.js?v=26" drive-assistant/sw.js
           grep -q "drive-completion.js?v=26" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
 
