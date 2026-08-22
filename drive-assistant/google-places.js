@@ -31,7 +31,8 @@
       window[cb]=()=>{clearTimeout(timer);delete window[cb];if(authFailed)reject(new Error('google-auth-failed'));else resolve()};
       const s=document.createElement('script');
       s.async=true;s.defer=true;
-      s.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&libraries=places&language=el&region=GR&callback=${cb}`;
+      s.referrerPolicy='strict-origin-when-cross-origin';
+      s.src=`https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&loading=async&libraries=places&language=el&region=GR&auth_referrer_policy=origin&callback=${cb}`;
       s.onerror=()=>{clearTimeout(timer);reject(new Error('google-maps-load-failed'))};
       document.head.appendChild(s);
     }).catch(err=>{loaderPromise=null;throw err});
@@ -57,11 +58,7 @@
     if(!window.__LUMINA_CONFIG__?.googleMapsApiKey)return;
     e.preventDefault();e.stopImmediatePropagation();
     try{const ok=await runGoogle(item);if(ok)return;if(window.google?.maps?.importLibrary){setStatus('Google Places δεν επέστρεψε αποτελέσματα για αυτή την κατηγορία.');return}}
-    catch(err){
-      console.warn('LUMINA Google Places:',err);
-      const msg=String(err?.message||err);
-      if(/auth|maps-load|timeout/i.test(msg)){setStatus('Το Google Places δεν είναι ακόμη ενεργό στο Google Cloud. Ενεργοποίησε Maps JavaScript API και Places API (New).');return}
-    }
+    catch(err){console.warn('LUMINA Google Places:',err);const msg=String(err?.message||err);if(/auth|maps-load|timeout/i.test(msg)){setStatus('Google Places authorization απέτυχε. Έλεγξε billing και website restriction του API key.');return}}
     bypass.add(item);item.click();
   },true);
 })();
