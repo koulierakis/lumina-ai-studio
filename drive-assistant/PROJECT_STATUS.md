@@ -2,71 +2,34 @@
 
 Source of truth: `feature/lumina-drive-assistant`
 
-## Implemented
-- Browser-only mobile-first UI; no APK, Expo or native installation required.
-- Live browser GPS with high-accuracy watch mode and GPS error handling.
-- Live speed, trip distance, elapsed time and average-speed tracking.
-- OpenStreetMap map via Leaflet.
-- Destination geocoding in Greece via Nominatim.
-- Route calculation and route steps via OSRM.
-- Two-stage navigation flow: **Οδηγίες → route preview → Έναρξη**.
-- Route preview shows destination, distance, estimated duration and full route geometry before navigation starts.
-- Active turn-by-turn navigation with Greek maneuver phrasing.
-- Automatic rerouting when the vehicle deviates materially from the active route.
-- Destination arrival detection and explicit **Τέλος διαδρομής** control.
-- Greek text-to-speech guidance via Web Speech API.
-- One-shot Greek voice commands plus optional hands-free mode when supported by the mobile browser.
-- Hands-free command protection with wake word **LUMINA** so ordinary in-car conversation is not intentionally treated as a command.
-- Voice-test control before a trip.
-- Nearby POI search for pharmacies, fuel, restaurants, gyms, parking, hospitals, EV charging, supermarkets, cafes, police and banks using OpenStreetMap/Overpass.
-- Nearby mapped speed-camera lookup via OpenStreetMap/Overpass.
-- Nearby mapped `maxspeed` lookup with overspeed warning.
-- Mapped road-work, pedestrian-crossing, railway-crossing and traffic-calming awareness.
-- Weather-driving alerts via Open-Meteo.
-- Route-geometry sharp-turn heuristic.
-- Free Drive mode.
-- Screen Wake Lock while navigation or Free Drive is active, with re-request after returning to the page.
-- Navigation session persistence in local storage so an active destination/trip can be reconstructed if the browser page is recreated after interruption.
-- Visibility/pageshow recovery hooks for returning from a phone call or temporary Android background state: GPS is ensured, Wake Lock is re-requested and hands-free listening is restarted when allowed by the browser.
-- Day/night visual mode.
-- Persistent user alert settings.
-- Runtime System Monitor showing real browser capability state.
-- Driver-safe responsive UI with portrait/landscape adaptation and safe-area support.
-- Mobile virtual-keyboard viewport handling via `interactive-widget=resizes-content`.
-- Search-field mobile keyboard optimization via `inputmode=search` and `enterkeyhint=go`.
-- PWA scope/id hardening and unrestricted orientation so portrait/landscape responsive layouts can both operate.
-- Browser manifest and service-worker application shell for degraded/offline reopening of core UI assets.
-- Service-worker shell cache upgraded to `lumina-drive-v5` for the road-test build.
-- Online/offline state handling without fabricated live feeds.
+## Current autonomous completion state
 
-## Validation
-- Dedicated LUMINA Drive GitHub Actions validation includes JavaScript syntax checks for `app-v2.js` and `sw.js`.
-- Automated smoke gates cover GPS, Greek browser voice, routing, geocoding, OSM safety/POI data, weather, automatic rerouting, Wake Lock, route preview/start, hands-free state, session persistence, call/background recovery hooks, manifest, service worker, mobile viewport integration and PWA orientation/scope.
-- Browser deployment is performed from branch pushes through GitHub Pages Actions.
+Implemented and code-validated surfaces include browser GPS/watch mode, live browser speed, Free Drive, Leaflet/OpenStreetMap map, Greek destination search/autocomplete, route preview, navigation start/stop, OSRM driving routes, Valhalla pedestrian routes, turn-by-turn maneuver rendering, Greek TTS, one-shot voice commands, optional browser hands-free recognition, rerouting, mapped OSM speed limits/cameras, POIs, Open-Meteo weather alerts, trip computer, day/night UI, Wake Lock, persisted navigation session, mobile visibility/pageshow recovery, PWA/service-worker shell, offline/degraded reopening, and System Monitor.
 
-## Deployment
-- Repository visibility permits GitHub Pages on the current GitHub plan.
-- GitHub Pages source is **GitHub Actions**.
-- The `github-pages` environment branch-protection blocker has been removed.
-- LUMINA Drive Assistant workflow run **#64** completed successfully after the environment fix.
-- The road-test build automatically triggers the same validate → deploy pipeline.
+## Latest hardening pass
 
-## Data-source constraints
-- A phone browser cannot physically detect radio radar without dedicated hardware; enforcement warnings are map/database based.
-- Public OSM/Nominatim/Overpass/OSRM services are suitable for prototype use but are rate-limited and should later be proxied or replaced for production reliability.
-- Live traffic/community incidents require a real provider/API and are intentionally not fabricated.
-- Road speed limits depend on OSM coverage and may be missing or stale.
-- Android/browser background execution and Web Speech recognition can be suspended by the operating system; LUMINA can restore state when the page returns but cannot force itself to the foreground after a call.
-- Floating-window / split-screen behavior is controlled by Android/browser capabilities, not by the web page itself.
-- Offline shell caching does not make online routing/map/data APIs available without connectivity.
+- Service-worker cache and HTML asset version are aligned on build `v26`.
+- The service worker caches the application shell including `index.html`, `drive-completion.js`, and `road-safety.js`, while keeping app assets network-first/no-store with cached fallback.
+- Navigation reload persistence is no longer erased on every page load. Legacy state is cleared once when upgrading to build 26; normal reloads preserve the active session.
+- Free Drive on/off state is persisted coherently.
+- Arrival now transitions out of active navigation after the arrival state is reached.
+- Restored walking mode has a direct `LuminaWalkingRouter` path and cannot silently fall back to driving solely because the helper mode store was stale.
+- Added verified road-safety awareness using live OpenStreetMap/Overpass data for mapped road works, railway level crossings, generic mapped hazards, and traffic-calming points. These are explicitly map/database observations, not radar detection or fabricated live incidents.
+- System Monitor now actively probes routing (OSRM), geocoding (Nominatim), weather (Open-Meteo), and OSM/Overpass availability instead of hard-coding remote services as READY.
+- The default/legacy repository branch can no longer deploy Drive Pages and overwrite the canonical Drive build. GitHub Pages deployment ownership is restricted to `feature/lumina-drive-assistant`.
+- The Drive Pages workflow syntax-checks all major JavaScript modules and smoke-gates GPS, voice APIs, routing/data providers, rerouting, Wake Lock, session migration, walking router, verified safety layer, service-worker cache coherence, and required deployed assets before Pages deployment.
 
-## Tomorrow's road-test gates
-1. Confirm the latest GitHub Pages road-test deployment is green.
-2. Verify real Android Chrome GPS permission and accuracy.
-3. Test **Οδηγίες → preview → Έναρξη** with a real destination.
-4. Test Greek speech instructions and timing of maneuver alerts.
-5. Test Hands-free ON with wake word **LUMINA** and normal passenger conversation.
-6. Test incoming phone call → return to browser → route/GPS/Wake Lock recovery.
-7. Test screen staying awake during active navigation and Free Drive.
-8. Review every visible control, map zoom, portrait/landscape appearance and driving ergonomics.
-9. Record any route/POI/safety-data gaps observed on the road.
+## Data-source boundaries
+
+- No mock road-safety feed is used as real data.
+- Browser GPS speed depends on phone/browser GPS availability and quality.
+- Speed limits, fixed cameras, road works and hazards depend on OpenStreetMap/Overpass coverage and may be absent or stale.
+- Public OSRM/Nominatim/Overpass/Valhalla/Open-Meteo endpoints are suitable for the current browser prototype but are public services with availability/rate-limit constraints.
+- A browser cannot physically detect police radar without dedicated hardware or a legitimate provider feed.
+- Live community traffic/police reports are not fabricated when no real provider is connected.
+- Offline shell support keeps the core UI available; live routing, map tiles not already cached, POIs, safety updates and weather still require connectivity.
+- Web Speech recognition, Wake Lock and background execution remain browser/Android capability dependent.
+
+## Remaining real-device acceptance gates
+
+Only a physical mobile road test can conclusively verify: GPS accuracy and live speed while moving, real maneuver timing, rerouting after an actual deviation, Greek TTS audibility, microphone permission and recognition quality, hands-free behavior in the target browser, Wake Lock/background-return behavior, actual local OSM speed-limit/camera/safety coverage, and Android Chrome stability during a real trip.
