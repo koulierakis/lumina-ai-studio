@@ -5,11 +5,11 @@
   const BUILD = '26';
   try {
     const previous = localStorage.getItem(BUILD_KEY);
-    if (!previous) {
-      // First run after the legacy builds: discard only unknown pre-versioned state once.
+    if (previous !== BUILD) {
+      // Clear incompatible legacy state once on upgrade, then preserve sessions on normal reloads.
       localStorage.removeItem(SESSION_KEY);
       sessionStorage.removeItem(SESSION_KEY);
+      localStorage.setItem(BUILD_KEY, BUILD);
     }
-    localStorage.setItem(BUILD_KEY, BUILD);
   } catch {}
 })();
