@@ -43,7 +43,6 @@
         shift += 5;
       } while (byte >= 0x20 && index <= encoded.length);
       lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-
       shift = 0; result = 0;
       do {
         byte = encoded.charCodeAt(index++) - 63;
@@ -77,8 +76,37 @@
         type,
         modifier,
         location: coords[idx] || coords[0] || [0, 0],
-        ...(exitMatch ? { exit: Number(exitMatch[1]) } : {})
+        ...(exitMatch ? {exit:Number(exitMatch[1])} : {})
       }
+    };
+  }
+
+  async function pedestrianRoute(points) {
+    if (points.length < 2 || points.some(p => !Number.isFinite(p.lat) || !Number.isFinite(p.lon))) throw new Error('walking-route-points');
+    const payload = {
+      locations: points,
+      costing: 'pedestrian',
+      units: 'kilometers',
+      language: 'el-GR',
+      directions_options: {units:'kilometers', language:'el-GR'}
+    };
+    const url = `https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(payload))}`;
+    const response = await originalFetch(url, {headers:{Accept:'application/json'}, cache:'no-store'});
+    if (!response.ok) throw new Error(`walking-route-${response.status}`);
+    const data = await response.json();
+    const trip = data.trip;
+    const leg = trip?.legs?.[0];
+    if (!trip || !leg?.shape) throw new Error('walking-route-empty');
+    const coords = decodePolyline6(leg.shape);
+    const summary = trip.summary || leg.summary || {};
+    const distanceM = Number(summary.length || 0) * 1000;
+    const durationS = Number(summary.time || 0);
+    const steps = (leg.maneuvers || []).map(m => osrmStepFromValhalla(m, coords));
+    return {
+      distance: distanceM,
+      duration: durationS,
+      geometry: {type:'LineString', coordinates:coords},
+      legs: [{distance:distanceM, duration:durationS, steps}]
     };
   }
 
@@ -87,47 +115,21 @@
     if (!match) throw new Error('walking-route-parse');
     const points = match[1].split(';').map(pair => {
       const [lon, lat] = pair.split(',').map(Number);
-      return { lat, lon };
+      return {lat, lon};
     });
-    if (points.length < 2 || points.some(p => !Number.isFinite(p.lat) || !Number.isFinite(p.lon))) {
-      throw new Error('walking-route-points');
-    }
-
-    const payload = {
-      locations: points,
-      costing: 'pedestrian',
-      units: 'kilometers',
-      language: 'el-GR',
-      directions_options: { units: 'kilometers', language: 'el-GR' }
-    };
-    const url = `https://valhalla1.openstreetmap.de/route?json=${encodeURIComponent(JSON.stringify(payload))}`;
-    const response = await originalFetch(url, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(`walking-route-${response.status}`);
-    const data = await response.json();
-    const trip = data.trip;
-    const leg = trip?.legs?.[0];
-    if (!trip || !leg?.shape) throw new Error('walking-route-empty');
-
-    const coords = decodePolyline6(leg.shape);
-    const summary = trip.summary || leg.summary || {};
-    const distanceM = Number(summary.length || 0) * 1000;
-    const durationS = Number(summary.time || 0);
-    const steps = (leg.maneuvers || []).map(m => osrmStepFromValhalla(m, coords));
-    const osrm = {
-      code: 'Ok',
-      routes: [{
-        distance: distanceM,
-        duration: durationS,
-        geometry: { type: 'LineString', coordinates: coords },
-        legs: [{ distance: distanceM, duration: durationS, steps }]
-      }],
-      waypoints: points.map(p => ({ location: [p.lon, p.lat] }))
-    };
-    return new Response(JSON.stringify(osrm), {
+    const route = await pedestrianRoute(points);
+    return new Response(JSON.stringify({code:'Ok', routes:[route], waypoints:points.map(p => ({location:[p.lon,p.lat]}))}), {
       status: 200,
-      headers: { 'Content-Type': 'application/json' }
+      headers: {'Content-Type':'application/json'}
     });
   }
+
+  window.LuminaWalkingRouter = {
+    route: (origin, destination) => pedestrianRoute([
+      {lat:Number(origin.lat), lon:Number(origin.lng)},
+      {lat:Number(destination.lat), lon:Number(destination.lng)}
+    ])
+  };
 
   window.__luminaTravelMode = getMode();
   window.fetch = async (input, init) => {
@@ -137,17 +139,15 @@
         return await pedestrianOsrmResponse(url);
       } catch (error) {
         console.warn('LUMINA pedestrian routing failed', error);
-        return new Response(JSON.stringify({ code: 'NoRoute', message: 'Pedestrian route unavailable' }), {
+        return new Response(JSON.stringify({code:'NoRoute', message:'Pedestrian route unavailable'}), {
           status: 503,
-          headers: { 'Content-Type': 'application/json' }
+          headers: {'Content-Type':'application/json'}
         });
       }
     }
     return originalFetch(input, init);
   };
 
-  document.querySelectorAll('[data-travel-mode]').forEach(btn => {
-    btn.addEventListener('click', () => setMode(btn.dataset.travelMode));
-  });
+  document.querySelectorAll('[data-travel-mode]').forEach(btn => btn.addEventListener('click', () => setMode(btn.dataset.travelMode)));
   setMode(getMode());
 })();
