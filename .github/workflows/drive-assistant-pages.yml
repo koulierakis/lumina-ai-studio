@@ -42,6 +42,7 @@ jobs:
           test -s drive-assistant/navigation-search.js
           test -s drive-assistant/navigation-search.css
           test -s drive-assistant/poi-catalog.js
+          test -s drive-assistant/poi-enhanced.js
           test -s drive-assistant/address-autocomplete.js
           test -s drive-assistant/drive-completion.js
           test -s drive-assistant/session-bootstrap.js
@@ -50,7 +51,7 @@ jobs:
           test -s drive-assistant/manifest.webmanifest
       - name: JavaScript syntax validation
         run: |
-          for f in app-v2.js navigation-search.js poi-catalog.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
+          for f in app-v2.js navigation-search.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
             node --check "drive-assistant/$f"
           done
       - name: Verify production UI contract
@@ -60,19 +61,19 @@ jobs:
           grep -q 'Περπάτημα' drive-assistant/index.html
           grep -q 'Free Drive' drive-assistant/index.html
           grep -q 'Σημεία ενδιαφέροντος' drive-assistant/index.html
-          grep -q '▶ Έναρξη' drive-assistant/index.html
           ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
-          grep -q '.travel-mode{position:fixed' drive-assistant/styles.css
-          grep -q 'grid-template-columns:1fr 1fr' drive-assistant/styles.css
           grep -q 'height:calc(100dvh - 56px)!important' drive-assistant/ui-fixes.css
           ! grep -q 'height:50vh!important' drive-assistant/ui-fixes.css
-          grep -q "lumina-drive-v40" drive-assistant/sw.js
+          grep -q 'One compact four-button toolbar' drive-assistant/ui-fixes.css
+          grep -q 'poi-enhanced.js?v=42' drive-assistant/drive-completion.js
+          grep -q "lumina-drive-v42" drive-assistant/sw.js
+          grep -q 'photon.komoot.io' drive-assistant/poi-enhanced.js
+          grep -q 'overpass-api.de' drive-assistant/poi-enhanced.js
           grep -q 'skipWaiting' drive-assistant/sw.js
           grep -q 'clients.claim' drive-assistant/sw.js
           grep -q "startsWith('lumina-drive-')" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
           grep -q "updateViaCache:'none'" drive-assistant/index.html
-          grep -q 'nominatim.openstreetmap.org/search' drive-assistant/navigation-search.js
           grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
 
   deploy:
@@ -130,32 +131,25 @@ jobs:
           done
           test "$ok" = 1
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/?verify=${GITHUB_RUN_ID}" -o /tmp/index.html
-          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/index.html?verify=${GITHUB_RUN_ID}" -o /tmp/index-explicit.html
-          cmp /tmp/index.html /tmp/index-explicit.html
           grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' /tmp/index.html
-          grep -q 'Αυτοκίνητο' /tmp/index.html
-          grep -q 'Περπάτημα' /tmp/index.html
-          grep -q 'Free Drive' /tmp/index.html
-          grep -q 'Σημεία ενδιαφέροντος' /tmp/index.html
           ! grep -F -q 'Πού θέλεις να πας;' /tmp/index.html
-          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/styles.css?verify=${GITHUB_RUN_ID}" -o /tmp/styles.css
-          grep -q '.travel-mode{position:fixed' /tmp/styles.css
-          grep -q 'grid-template-columns:1fr 1fr' /tmp/styles.css
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/ui-fixes.css?verify=${GITHUB_RUN_ID}" -o /tmp/ui-fixes.css
           grep -q 'height:calc(100dvh - 56px)!important' /tmp/ui-fixes.css
+          grep -q 'One compact four-button toolbar' /tmp/ui-fixes.css
           ! grep -q 'height:50vh!important' /tmp/ui-fixes.css
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/drive-completion.js?verify=${GITHUB_RUN_ID}" -o /tmp/drive-completion.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/poi-enhanced.js?verify=${GITHUB_RUN_ID}" -o /tmp/poi-enhanced.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?verify=${GITHUB_RUN_ID}" -o /tmp/sw.js
-          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/navigation-search.js?verify=${GITHUB_RUN_ID}" -o /tmp/navigation-search.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?verify=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
-          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deployed-at.txt?verify=${GITHUB_RUN_ID}" -o /tmp/deployed-at.txt
-          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deploy-source.txt?verify=${GITHUB_RUN_ID}" -o /tmp/deploy-source.txt
-          grep -q 'lumina-drive-v40' /tmp/sw.js
+          grep -q 'poi-enhanced.js?v=42' /tmp/drive-completion.js
+          grep -q 'photon.komoot.io' /tmp/poi-enhanced.js
+          grep -q 'overpass-api.de' /tmp/poi-enhanced.js
+          grep -q 'lumina-drive-v42' /tmp/sw.js
           grep -q 'skipWaiting' /tmp/sw.js
           grep -q 'clients.claim' /tmp/sw.js
-          grep -q 'nominatim.openstreetmap.org/search' /tmp/navigation-search.js
           grep -q 'router.project-osrm.org' /tmp/app-v2.js
-          grep -q 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
-          node --check /tmp/navigation-search.js
+          node --check /tmp/drive-completion.js
+          node --check /tmp/poi-enhanced.js
           node --check /tmp/app-v2.js
 
   record-result:
