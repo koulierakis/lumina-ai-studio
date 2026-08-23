@@ -1,0 +1,3 @@
+validate=failure
+deploy=skipped
+verify=skipped
