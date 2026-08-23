@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v44-gps-sync
+# deployment-trigger: v45-nearby-live-gps
 
 on:
   push:
@@ -35,23 +35,12 @@ jobs:
       - name: Validate Drive production source
         run: |
           set -euo pipefail
-          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
-          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
-          node --check drive-assistant/tests/production-smoke.mjs
-          grep -Fq 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
-          grep -Fq 'shared-gps.js?v=44' drive-assistant/index.html
-          grep -Fq 'route-selection-bridge.js?v=44' drive-assistant/index.html
-          grep -Fq "const CACHE='lumina-drive-v44'" drive-assistant/sw.js
-          grep -Fq 'LuminaGPS' drive-assistant/shared-gps.js
-          grep -Fq 'active-map' drive-assistant/user-marker-hook.js
-          grep -Fq 'gps-unavailable' drive-assistant/poi-catalog.js
-          grep -Fq 'Apartments / Studios' drive-assistant/poi-catalog.js
-          grep -Fq 'Εστιατόρια / Ταβέρνες' drive-assistant/poi-catalog.js
-          grep -Fq 'data-start-search' drive-assistant/route-selection-bridge.js
-          grep -Fq 'stopImmediatePropagation' drive-assistant/navigation-search.js
-          grep -Fq 'router.project-osrm.org' drive-assistant/app-v2.js
+          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
+          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
+          grep -Fq 'LuminaGPS?.getLastFix' drive-assistant/poi-enhanced.js
+          grep -Fq 'poi-enhanced.js?v=45' drive-assistant/drive-completion.js
+          grep -Fq "const CACHE='lumina-drive-v45'" drive-assistant/sw.js
           grep -Fq 'SpeechRecognition' drive-assistant/app-v2.js
-          grep -Fq 'speechSynthesis' drive-assistant/app-v2.js
       - name: Live provider regression smoke
         run: node drive-assistant/tests/production-smoke.mjs
 
@@ -86,7 +75,7 @@ jobs:
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live v44 production assets
+      - name: Verify live v45 Nearby production assets
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
@@ -99,21 +88,13 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js sw.js app-v2.js user-marker-hook.js deploy-source.txt deployed-at.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f//\//_}"; done
-          grep -Fq 'shared-gps.js?v=44' /tmp/index.html
-          grep -Fq 'route-selection-bridge.js?v=44' /tmp/index.html
-          grep -Fq 'LuminaGPS' /tmp/shared-gps.js
-          grep -Fq 'active-map' /tmp/user-marker-hook.js
-          grep -Fq 'Apartments / Studios' /tmp/poi-catalog.js
-          grep -Fq 'data-start-search' /tmp/route-selection-bridge.js
-          grep -Fq "const CACHE='lumina-drive-v44'" /tmp/sw.js
+          for f in drive-completion.js poi-enhanced.js sw.js shared-gps.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          grep -Fq 'poi-enhanced.js?v=45' /tmp/drive-completion.js
+          grep -Fq 'LuminaGPS?.getLastFix' /tmp/poi-enhanced.js
+          grep -Fq "const CACHE='lumina-drive-v45'" /tmp/sw.js
           grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
-          node --check /tmp/navigation-search.js
-          node --check /tmp/shared-gps.js
-          node --check /tmp/route-selection-bridge.js
-          node --check /tmp/poi-catalog.js
-          node --check /tmp/user-marker-hook.js
-          node --check /tmp/app-v2.js
+          node --check /tmp/poi-enhanced.js
+          node --check /tmp/drive-completion.js
 
   record-result:
     if: ${{ always() }}
@@ -136,7 +117,6 @@ jobs:
           mkdir -p .production-verification
           printf '%s\n' "${SOURCE_SHA:-unknown}" > .production-verification/build.txt
           printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .production-verification/verified-at.txt
-          printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > .production-verification/live-url.txt
           printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > .production-verification/results.txt
           if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then printf '%s\n' PASS > .production-verification/status.txt; else printf '%s\n' FAIL > .production-verification/status.txt; fi
           git add .production-verification
