@@ -48,6 +48,23 @@
 
   const select=i=>{const x=results[i];if(!x)return;input.value=[x.road||x.name,x.city].filter(Boolean).join(', ');input.dataset.selectedLat=String(x.lat);input.dataset.selectedLng=String(x.lng);input.dataset.selectedName=x.display||input.value;input.dispatchEvent(new Event('change',{bubbles:true}));hide();input.focus();};
 
+  function routeSelectedDestination(){
+    const lat=Number(input.dataset.selectedLat),lng=Number(input.dataset.selectedLng);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng))return false;
+    const bridge=document.createElement('button');
+    bridge.type='button';
+    bridge.className='poi-route';
+    bridge.dataset.lat=String(lat);
+    bridge.dataset.lng=String(lng);
+    bridge.dataset.name=input.dataset.selectedName||input.value||'Προορισμός';
+    bridge.hidden=true;
+    document.body.appendChild(bridge);
+    bridge.click();
+    bridge.remove();
+    hide();
+    return true;
+  }
+
   async function photon(q,signal){
     const u=new URL('https://photon.komoot.io/api/');u.searchParams.set('q',q);u.searchParams.set('lang','el');u.searchParams.set('limit','30');
     const r=await fetch(u,{signal,headers:{Accept:'application/json'}});if(!r.ok)throw new Error('photon');
@@ -78,6 +95,8 @@
 
   input.addEventListener('input',()=>{delete input.dataset.selectedLat;delete input.dataset.selectedLng;delete input.dataset.selectedName;clearTimeout(timer);const v=input.value;if(v.trim().length<3)return hide();timer=setTimeout(()=>query(v),700);});
   input.addEventListener('keydown',e=>{if(menu.classList.contains('hidden')||!results.length)return;if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();active=e.key==='ArrowDown'?Math.min(results.length-1,active+1):Math.max(0,active-1);[...menu.querySelectorAll('.destination-suggestion')].forEach((b,i)=>{const on=i===active;b.classList.toggle('active',on);b.setAttribute('aria-selected',String(on));if(on)b.scrollIntoView({block:'nearest'});});}else if(e.key==='Enter'&&active>=0){e.preventDefault();e.stopPropagation();select(active);}else if(e.key==='Escape')hide();});
+  input.addEventListener('keydown',e=>{if(e.key==='Enter'&&Number.isFinite(Number(input.dataset.selectedLat))&&Number.isFinite(Number(input.dataset.selectedLng))){e.preventDefault();e.stopImmediatePropagation();routeSelectedDestination();}},true);
+  document.getElementById('routeBtn')?.addEventListener('click',e=>{if(Number.isFinite(Number(input.dataset.selectedLat))&&Number.isFinite(Number(input.dataset.selectedLng))){e.preventDefault();e.stopImmediatePropagation();routeSelectedDestination();}},true);
   menu.addEventListener('pointerdown',e=>{const b=e.target.closest('.destination-suggestion');if(!b)return;e.preventDefault();select(+b.dataset.index);});
   document.addEventListener('pointerdown',e=>{if(!wrap.contains(e.target))hide();});
 })();
