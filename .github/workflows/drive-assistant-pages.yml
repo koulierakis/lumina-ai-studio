@@ -1,4 +1,5 @@
 name: LUMINA Drive Production
+# deployment-trigger: v44-gps-sync
 
 on:
   push:
@@ -42,6 +43,7 @@ jobs:
           grep -Fq 'route-selection-bridge.js?v=44' drive-assistant/index.html
           grep -Fq "const CACHE='lumina-drive-v44'" drive-assistant/sw.js
           grep -Fq 'LuminaGPS' drive-assistant/shared-gps.js
+          grep -Fq 'active-map' drive-assistant/user-marker-hook.js
           grep -Fq 'gps-unavailable' drive-assistant/poi-catalog.js
           grep -Fq 'Apartments / Studios' drive-assistant/poi-catalog.js
           grep -Fq 'Εστιατόρια / Ταβέρνες' drive-assistant/poi-catalog.js
@@ -97,10 +99,11 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js sw.js app-v2.js deploy-source.txt deployed-at.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f//\//_}"; done
+          for f in index.html navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js sw.js app-v2.js user-marker-hook.js deploy-source.txt deployed-at.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f//\//_}"; done
           grep -Fq 'shared-gps.js?v=44' /tmp/index.html
           grep -Fq 'route-selection-bridge.js?v=44' /tmp/index.html
           grep -Fq 'LuminaGPS' /tmp/shared-gps.js
+          grep -Fq 'active-map' /tmp/user-marker-hook.js
           grep -Fq 'Apartments / Studios' /tmp/poi-catalog.js
           grep -Fq 'data-start-search' /tmp/route-selection-bridge.js
           grep -Fq "const CACHE='lumina-drive-v44'" /tmp/sw.js
@@ -109,6 +112,7 @@ jobs:
           node --check /tmp/shared-gps.js
           node --check /tmp/route-selection-bridge.js
           node --check /tmp/poi-catalog.js
+          node --check /tmp/user-marker-hook.js
           node --check /tmp/app-v2.js
 
   record-result:
