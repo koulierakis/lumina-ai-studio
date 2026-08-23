@@ -42,6 +42,33 @@
     return best;
   }
 
+  function parseSpeedLimit(value) {
+    const raw = String(value || '').trim().toLowerCase();
+    if (!raw || /^(none|signals|variable|walk|national|urban|rural)$/.test(raw)) return null;
+    const match = raw.match(/(\d{1,3})(?:\s*(mph|km\/h|kph))?/);
+    if (!match) return null;
+    let n = Number(match[1]);
+    if (!Number.isFinite(n) || n <= 0 || n > 160) return null;
+    if (match[2] === 'mph') n = Math.round(n * 1.609344);
+    return n;
+  }
+
+  function applyConfidentSpeedLimit(elements) {
+    const limits = elements
+      .filter(x => x.type === 'way' && x.tags?.highway && x.tags?.maxspeed)
+      .map(x => parseSpeedLimit(x.tags.maxspeed))
+      .filter(Number.isFinite);
+    if (!limits.length) return;
+    const unique = [...new Set(limits)];
+    // At junctions/parallel roads different nearby limits can legitimately coexist.
+    // In that case do not overwrite the UI with a potentially false limit.
+    if (unique.length !== 1) return;
+    const value = String(unique[0]);
+    const a = $('#speedLimit'), b = $('#navSpeedLimit');
+    if (a) a.textContent = value;
+    if (b) b.textContent = value;
+  }
+
   function speakOnce(key, text, ttl = 90000) {
     if (!text || !('speechSynthesis' in window)) return;
     const voiceToggle = $('#voiceAlertsToggle');
@@ -105,12 +132,15 @@
       node(around:700,${c.lat},${c.lng})[hazard];
       way(around:700,${c.lat},${c.lng})[hazard];
       node(around:500,${c.lat},${c.lng})[traffic_calming];
+      way(around:35,${c.lat},${c.lng})[highway][maxspeed];
     );out tags center;`;
 
     try {
       const data = await fetchJson(CFG.overpass, {method: 'POST', body: q}, 12000);
       const elements = Array.isArray(data.elements) ? data.elements : [];
       const items = [];
+
+      applyConfidentSpeedLimit(elements);
 
       const works = nearest(elements.filter(x => x.tags?.highway === 'construction'), c);
       if (works && works.d < 850) {
@@ -127,8 +157,13 @@
       const hazard = nearest(elements.filter(x => x.tags?.hazard), c);
       if (hazard && hazard.d < 650) {
         const raw = String(hazard.x.tags.hazard || '').replace(/_/g, ' ');
-        items.push({icon: '⚠️', title: 'Χαρτογραφημένος οδικός κίνδυνος', detail: `${fmtDistance(hazard.d)} · ${raw} · OpenStreetMap`});
-        if (hazard.d < 350) speakOnce(`hazard:${raw}`, 'Προσοχή. Υπάρχει χαρτογραφημένος οδικός κίνδυνος μπροστά.');
+        const curve = /curve|bend|turn|serpentine|winding/i.test(raw);
+        items.push({
+          icon: curve ? '↪️' : '⚠️',
+          title: curve ? 'Χαρτογραφημένη επικίνδυνη στροφή' : 'Χαρτογραφημένος οδικός κίνδυνος',
+          detail: `${fmtDistance(hazard.d)} · ${raw} · OpenStreetMap`
+        });
+        if (hazard.d < 350) speakOnce(`hazard:${raw}`, curve ? 'Προσοχή. Υπάρχει χαρτογραφημένη επικίνδυνη στροφή μπροστά.' : 'Προσοχή. Υπάρχει χαρτογραφημένος οδικός κίνδυνος μπροστά.');
       }
 
       const calming = nearest(elements.filter(x => x.tags?.traffic_calming), c);
