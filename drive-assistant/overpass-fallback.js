@@ -7,28 +7,18 @@
     'https://overpass.nchc.org.tw/api/interpreter'
   ];
 
-  function requestUrl(input) {
-    return typeof input === 'string' ? input : input?.url || '';
-  }
-
-  async function tryEndpoint(url, input, init) {
-    if (typeof input === 'string') return originalFetch(url, init);
-    const request = new Request(input, init);
-    return originalFetch(new Request(url, request));
-  }
-
   window.fetch = async (input, init) => {
-    const url = requestUrl(input);
-    if (!url.startsWith(PRIMARY)) return originalFetch(input, init);
+    if (typeof input !== 'string' || !input.startsWith(PRIMARY)) {
+      return originalFetch(input, init);
+    }
 
+    const suffix = input.slice(PRIMARY.length);
     let lastResponse = null;
     let lastError = null;
-    const candidates = [PRIMARY, ...FALLBACKS];
-    const suffix = url.slice(PRIMARY.length);
 
-    for (const endpoint of candidates) {
+    for (const endpoint of [PRIMARY, ...FALLBACKS]) {
       try {
-        const response = await tryEndpoint(endpoint + suffix, input, init);
+        const response = await originalFetch(endpoint + suffix, init);
         lastResponse = response;
         if (response.ok) return response;
         if (![408, 429, 500, 502, 503, 504].includes(response.status)) return response;
