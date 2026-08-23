@@ -1,6 +1,6 @@
-const CACHE='lumina-drive-v43';
+const CACHE='lumina-drive-v44';
 const CORE=[
-  './index.html','./styles.css?v=43','./poi.css?v=43','./ui-fixes.css?v=43','./address-autocomplete.css?v=43','./navigation-search.css?v=43','./navigation-search.js?v=43','./app-v2.js?v=43','./walking-router.js?v=43','./poi-catalog.js?v=43','./poi-enhanced.js?v=43','./address-autocomplete.js?v=43','./map-labels.js?v=43','./map-fallback.js?v=43','./user-marker-hook.js?v=43','./reverse-geocode-fallback.js?v=43','./overpass-fallback.js?v=43','./session-bootstrap.js?v=43','./drive-completion.js?v=43','./road-safety.js?v=43','./manifest.webmanifest?v=43'
+  './index.html','./styles.css?v=44','./poi.css?v=44','./ui-fixes.css?v=44','./address-autocomplete.css?v=44','./navigation-search.css?v=44','./shared-gps.js?v=44','./navigation-search.js?v=44','./app-v2.js?v=44','./walking-router.js?v=44','./poi-catalog.js?v=44','./address-autocomplete.js?v=44','./map-labels.js?v=44','./map-fallback.js?v=44','./user-marker-hook.js?v=44','./reverse-geocode-fallback.js?v=44','./overpass-fallback.js?v=44','./session-bootstrap.js?v=44','./drive-completion.js?v=44','./road-safety.js?v=44','./manifest.webmanifest?v=44'
 ];
 self.addEventListener('install',event=>{self.skipWaiting();event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)));});
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('lumina-drive-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
