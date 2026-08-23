@@ -50,6 +50,9 @@ jobs:
           grep -q '\[hazard\]' drive-assistant/road-safety.js
           grep -q 'applyConfidentSpeedLimit' drive-assistant/road-safety.js
           grep -q 'Χαρτογραφημένη επικίνδυνη στροφή' drive-assistant/road-safety.js
+          grep -q 'routeSelectedDestination' drive-assistant/address-autocomplete.js
+          grep -q 'selectedLat' drive-assistant/address-autocomplete.js
+          grep -q 'normalizeFreeDriveButton' drive-assistant/drive-completion.js
           grep -q 'roadLike' drive-assistant/poi-catalog.js
           grep -q 'validTags' drive-assistant/poi-catalog.js
           grep -q 'poi-catalog.js?v=28' drive-assistant/index.html
