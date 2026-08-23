@@ -60,6 +60,8 @@ jobs:
           grep -q "PRIMARY_OVERPASS='https://overpass-api.de/api/interpreter'" drive-assistant/poi-catalog.js
           grep -q 'around:${RADIUS_M},${origin.lat},${origin.lng}' drive-assistant/poi-catalog.js
           grep -q 'attempt<=2' drive-assistant/poi-catalog.js
+          grep -q "NOMINATIM='https://nominatim.openstreetmap.org/search'" drive-assistant/poi-catalog.js
+          grep -q 'fetchNominatimFallback' drive-assistant/poi-catalog.js
           grep -q 'seenOsmIds' drive-assistant/poi-catalog.js
           grep -q 'distanceMeters(existing.point,item.point)<120' drive-assistant/poi-catalog.js
           grep -q 'https://www.google.com/maps/dir/' drive-assistant/poi-catalog.js
@@ -70,14 +72,14 @@ jobs:
           grep -q 'id="navHandsFreeBtn"' drive-assistant/index.html
           grep -q 'id="navSettingsBtn"' drive-assistant/index.html
           grep -q 'body.navigation-active .nav-toolbar{display:grid!important}' drive-assistant/styles.css
-          grep -q 'styles.css?v=34' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=34' drive-assistant/index.html
-          grep -q 'road-safety.js?v=34' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=34' drive-assistant/index.html
-          grep -q "lumina-drive-v34" drive-assistant/sw.js
-          grep -q "styles.css?v=34" drive-assistant/sw.js
-          grep -q "poi-catalog.js?v=34" drive-assistant/sw.js
-          grep -q "road-safety.js?v=34" drive-assistant/sw.js
+          grep -q 'styles.css?v=35' drive-assistant/index.html
+          grep -q 'poi-catalog.js?v=35' drive-assistant/index.html
+          grep -q 'road-safety.js?v=35' drive-assistant/index.html
+          grep -q 'drive-completion.js?v=35' drive-assistant/index.html
+          grep -q "lumina-drive-v35" drive-assistant/sw.js
+          grep -q "styles.css?v=35" drive-assistant/sw.js
+          grep -q "poi-catalog.js?v=35" drive-assistant/sw.js
+          grep -q "road-safety.js?v=35" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
