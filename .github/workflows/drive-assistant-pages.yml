@@ -62,6 +62,8 @@ jobs:
           grep -q 'Σημεία ενδιαφέροντος' drive-assistant/index.html
           grep -q '▶ Έναρξη' drive-assistant/index.html
           ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
+          grep -q '.travel-mode{position:fixed' drive-assistant/styles.css
+          grep -q 'grid-template-columns:1fr 1fr' drive-assistant/styles.css
           grep -q "lumina-drive-v40" drive-assistant/sw.js
           grep -q 'skipWaiting' drive-assistant/sw.js
           grep -q 'clients.claim' drive-assistant/sw.js
@@ -109,7 +111,7 @@ jobs:
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live build, HTML, JS and service worker
+      - name: Verify live build, HTML, CSS, JS and service worker
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
@@ -134,6 +136,9 @@ jobs:
           grep -q 'Free Drive' /tmp/index.html
           grep -q 'Σημεία ενδιαφέροντος' /tmp/index.html
           ! grep -F -q 'Πού θέλεις να πας;' /tmp/index.html
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/styles.css?verify=${GITHUB_RUN_ID}" -o /tmp/styles.css
+          grep -q '.travel-mode{position:fixed' /tmp/styles.css
+          grep -q 'grid-template-columns:1fr 1fr' /tmp/styles.css
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?verify=${GITHUB_RUN_ID}" -o /tmp/sw.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/navigation-search.js?verify=${GITHUB_RUN_ID}" -o /tmp/navigation-search.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?verify=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
