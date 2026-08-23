@@ -1,16 +1,77 @@
-name: LUMINA Drive Assistant Legacy Guard
+name: LUMINA Drive Assistant Production Deploy
 
 on:
+  push:
+    branches: [feature/milestone1-pdf-docx-engine]
+    paths: [".github/workflows/drive-assistant-pages.yml"]
   workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: lumina-drive-pages
+  cancel-in-progress: true
 
 jobs:
-  legacy-disabled:
+  validate:
+    name: Validate canonical LUMINA Drive branch
     runs-on: ubuntu-latest
     steps:
-      - name: Confirm canonical deployment branch
+      - name: Checkout canonical Drive branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/lumina-drive-assistant
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify required files
         run: |
-          echo "Drive Pages deployment is owned exclusively by feature/lumina-drive-assistant."
-          echo "This legacy/default branch workflow cannot deploy GitHub Pages."
+          test -s drive-assistant/index.html
+          test -s drive-assistant/app-v2.js
+          test -s drive-assistant/navigation-search.js
+          test -s drive-assistant/navigation-search.css
+          test -s drive-assistant/poi-catalog.js
+          test -s drive-assistant/address-autocomplete.js
+          test -s drive-assistant/sw.js
+      - name: JavaScript syntax check
+        run: |
+          for f in app-v2.js navigation-search.js poi-catalog.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
+            node --check "drive-assistant/$f"
+          done
+      - name: Production smoke checks
+        run: |
+          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
+          grep -q 'navigation-search.js?v=38' drive-assistant/index.html
+          grep -q 'navigation-search.css?v=38' drive-assistant/index.html
+          grep -q '▶ Έναρξη' drive-assistant/index.html
+          grep -q 'nominatim.openstreetmap.org/search' drive-assistant/navigation-search.js
+          grep -q 'router.project-osrm.org/route/v1/driving' drive-assistant/navigation-search.js
+          grep -q 'distanceTextFor' drive-assistant/navigation-search.js
+          grep -q "lumina-drive-v38" drive-assistant/sw.js
+          grep -q "cache:'no-store'" drive-assistant/sw.js
+
+  deploy:
+    name: Deploy canonical LUMINA Drive to GitHub Pages
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout canonical Drive branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/lumina-drive-assistant
+      - name: Stamp deployed build
+        run: |
+          printf '%s\n' "$(git rev-parse HEAD)" > drive-assistant/build.txt
+          printf '%s\n' "production-default-workflow" > drive-assistant/deploy-source.txt
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: drive-assistant
+      - id: deployment
+        uses: actions/deploy-pages@v4
