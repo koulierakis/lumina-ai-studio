@@ -65,8 +65,8 @@ jobs:
           grep -q 'seenOsmIds' drive-assistant/poi-catalog.js
           grep -q 'distanceMeters(existing.point,item.point)<120' drive-assistant/poi-catalog.js
           grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
-          grep -q 'navigation-search.css?v=37' drive-assistant/index.html
-          grep -q 'navigation-search.js?v=37' drive-assistant/index.html
+          grep -q 'navigation-search.css?v=38' drive-assistant/index.html
+          grep -q 'navigation-search.js?v=38' drive-assistant/index.html
           grep -q 'name-search-start' drive-assistant/navigation-search.js
           grep -q 'Απόσταση:' drive-assistant/navigation-search.js
           grep -q '▶ Έναρξη' drive-assistant/navigation-search.js
