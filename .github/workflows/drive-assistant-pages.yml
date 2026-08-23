@@ -1,16 +1,182 @@
-name: LUMINA Drive Legacy Guard
+name: LUMINA Drive Production
 
 on:
+  push:
+    branches:
+      - feature/milestone1-pdf-docx-engine
+    paths:
+      - ".github/workflows/drive-assistant-pages.yml"
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: lumina-drive-pages
+  cancel-in-progress: true
 
 jobs:
-  legacy-disabled:
+  validate:
+    name: Validate canonical Drive source
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Checkout canonical Drive source
+        uses: actions/checkout@v4
+        with:
+          ref: feature/lumina-drive-assistant
+      - name: Capture exact source SHA
+        id: source
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify required files
+        run: |
+          test -s drive-assistant/index.html
+          test -s drive-assistant/app-v2.js
+          test -s drive-assistant/navigation-search.js
+          test -s drive-assistant/navigation-search.css
+          test -s drive-assistant/poi-catalog.js
+          test -s drive-assistant/address-autocomplete.js
+          test -s drive-assistant/drive-completion.js
+          test -s drive-assistant/session-bootstrap.js
+          test -s drive-assistant/road-safety.js
+          test -s drive-assistant/sw.js
+          test -s drive-assistant/manifest.webmanifest
+      - name: JavaScript syntax validation
+        run: |
+          for f in app-v2.js navigation-search.js poi-catalog.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
+            node --check "drive-assistant/$f"
+          done
+      - name: Verify production UI contract
+        run: |
+          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
+          grep -q 'Αυτοκίνητο' drive-assistant/index.html
+          grep -q 'Περπάτημα' drive-assistant/index.html
+          grep -q 'Free Drive' drive-assistant/index.html
+          grep -q 'Σημεία ενδιαφέροντος' drive-assistant/index.html
+          grep -q '▶ Έναρξη' drive-assistant/index.html
+          ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
+          grep -q "lumina-drive-v40" drive-assistant/sw.js
+          grep -q 'skipWaiting' drive-assistant/sw.js
+          grep -q 'clients.claim' drive-assistant/sw.js
+          grep -q "startsWith('lumina-drive-')" drive-assistant/sw.js
+          grep -q "cache:'no-store'" drive-assistant/sw.js
+          grep -q "updateViaCache:'none'" drive-assistant/index.html
+          grep -q 'nominatim.openstreetmap.org/search' drive-assistant/navigation-search.js
+          grep -q 'router.project-osrm.org/route/v1/driving' drive-assistant/navigation-search.js
+
+  deploy:
+    name: Deploy canonical Drive to GitHub Pages
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.stamp.outputs.source_sha }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout canonical Drive source
+        uses: actions/checkout@v4
+        with:
+          ref: feature/lumina-drive-assistant
+      - name: Stamp exact deployed source
+        id: stamp
+        run: |
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          test "$SOURCE_SHA" = "${{ needs.validate.outputs.source_sha }}"
+          printf '%s\n' "$SOURCE_SHA" > drive-assistant/build.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > drive-assistant/deployed-at.txt
+          printf '%s\n' "feature/lumina-drive-assistant/drive-assistant" > drive-assistant/deploy-source.txt
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Drive directory as Pages root
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: drive-assistant
+      - name: Deploy Pages artifact
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-production:
+    name: Verify public production files
+    needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Canonical deployment notice
+      - name: Verify live build, HTML, JS and service worker
+        env:
+          EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
+          BASE_URL: https://koulierakis.github.io/lumina-ai-studio
         run: |
-          echo "GitHub Pages deployment is owned exclusively by feature/lumina-drive-assistant."
-          echo "This default-branch workflow intentionally cannot deploy Pages."
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 36); do
+            LIVE_SHA="$(curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/build.txt?verify=${GITHUB_RUN_ID}-${i}" 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" = 1
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/?verify=${GITHUB_RUN_ID}" -o /tmp/index.html
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/index.html?verify=${GITHUB_RUN_ID}" -o /tmp/index-explicit.html
+          cmp /tmp/index.html /tmp/index-explicit.html
+          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' /tmp/index.html
+          grep -q 'Αυτοκίνητο' /tmp/index.html
+          grep -q 'Περπάτημα' /tmp/index.html
+          grep -q 'Free Drive' /tmp/index.html
+          grep -q 'Σημεία ενδιαφέροντος' /tmp/index.html
+          ! grep -F -q 'Πού θέλεις να πας;' /tmp/index.html
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?verify=${GITHUB_RUN_ID}" -o /tmp/sw.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/navigation-search.js?verify=${GITHUB_RUN_ID}" -o /tmp/navigation-search.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?verify=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deployed-at.txt?verify=${GITHUB_RUN_ID}" -o /tmp/deployed-at.txt
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deploy-source.txt?verify=${GITHUB_RUN_ID}" -o /tmp/deploy-source.txt
+          grep -q 'lumina-drive-v40' /tmp/sw.js
+          grep -q 'skipWaiting' /tmp/sw.js
+          grep -q 'clients.claim' /tmp/sw.js
+          grep -q 'nominatim.openstreetmap.org/search' /tmp/navigation-search.js
+          grep -q 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
+          node --check /tmp/navigation-search.js
+          node --check /tmp/app-v2.js
+
+  record-result:
+    name: Record production verification result
+    if: ${{ always() }}
+    needs: [validate, deploy, verify-production]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout default branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/milestone1-pdf-docx-engine
+      - name: Write verification receipt
+        env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          VERIFY_RESULT: ${{ needs.verify-production.result }}
+          SOURCE_SHA: ${{ needs.deploy.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "LUMINA Production Verifier"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p .production-verification
+          printf '%s\n' "${SOURCE_SHA:-unknown}" > .production-verification/build.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .production-verification/verified-at.txt
+          printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > .production-verification/live-url.txt
+          printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > .production-verification/results.txt
+          if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then
+            printf '%s\n' PASS > .production-verification/status.txt
+          else
+            printf '%s\n' FAIL > .production-verification/status.txt
+          fi
+          git add .production-verification
+          git commit -m "chore(drive): record production verification [skip ci]" || exit 0
+          git push origin HEAD:feature/milestone1-pdf-docx-engine
