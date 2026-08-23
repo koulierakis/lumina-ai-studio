@@ -48,14 +48,16 @@ jobs:
           grep -q 'highway=construction' drive-assistant/road-safety.js
           grep -q 'railway=level_crossing' drive-assistant/road-safety.js
           grep -q '\[hazard\]' drive-assistant/road-safety.js
+          grep -q 'applyConfidentSpeedLimit' drive-assistant/road-safety.js
+          grep -q 'Χαρτογραφημένη επικίνδυνη στροφή' drive-assistant/road-safety.js
           grep -q 'roadLike' drive-assistant/poi-catalog.js
           grep -q 'validTags' drive-assistant/poi-catalog.js
-          grep -q 'poi-catalog.js?v=27' drive-assistant/index.html
-          grep -q 'road-safety.js?v=27' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=27' drive-assistant/index.html
-          grep -q "lumina-drive-v27" drive-assistant/sw.js
-          grep -q "poi-catalog.js?v=27" drive-assistant/sw.js
-          grep -q "road-safety.js?v=27" drive-assistant/sw.js
+          grep -q 'poi-catalog.js?v=28' drive-assistant/index.html
+          grep -q 'road-safety.js?v=28' drive-assistant/index.html
+          grep -q 'drive-completion.js?v=28' drive-assistant/index.html
+          grep -q "lumina-drive-v28" drive-assistant/sw.js
+          grep -q "poi-catalog.js?v=28" drive-assistant/sw.js
+          grep -q "road-safety.js?v=28" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
