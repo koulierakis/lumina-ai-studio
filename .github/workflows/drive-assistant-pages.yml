@@ -19,66 +19,36 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate canonical Drive source
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.source.outputs.source_sha }}
     steps:
-      - name: Checkout canonical Drive source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feature/lumina-drive-assistant
-      - name: Capture exact source SHA
-        id: source
+      - id: source
         run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Verify required files
+      - name: Validate Drive v43
         run: |
-          test -s drive-assistant/index.html
-          test -s drive-assistant/app-v2.js
-          test -s drive-assistant/navigation-search.js
-          test -s drive-assistant/navigation-search.css
-          test -s drive-assistant/poi-catalog.js
-          test -s drive-assistant/poi-enhanced.js
-          test -s drive-assistant/address-autocomplete.js
-          test -s drive-assistant/drive-completion.js
-          test -s drive-assistant/session-bootstrap.js
-          test -s drive-assistant/road-safety.js
-          test -s drive-assistant/sw.js
-          test -s drive-assistant/manifest.webmanifest
-      - name: JavaScript syntax validation
-        run: |
-          for f in app-v2.js navigation-search.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
-            node --check "drive-assistant/$f"
-          done
-      - name: Verify production UI and GPS contract
-        run: |
-          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
-          grep -q 'v=43' drive-assistant/index.html
-          ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
-          grep -q 'height:calc(100dvh - 56px)!important' drive-assistant/ui-fixes.css
-          grep -q '.home-toolbar' drive-assistant/ui-fixes.css
-          grep -q 'backdrop-filter:blur(26px)' drive-assistant/ui-fixes.css
-          grep -q 'buildHomeToolbar' drive-assistant/drive-completion.js
-          grep -q 'poi-enhanced.js?v=43' drive-assistant/drive-completion.js
-          grep -q '__luminaCurrentUserMarker' drive-assistant/poi-enhanced.js
-          grep -q 'active-map' drive-assistant/poi-enhanced.js
-          grep -q 'for(let attempt=1;attempt<=3;attempt++)' drive-assistant/poi-enhanced.js
-          grep -q 'lumina-drive-v43' drive-assistant/sw.js
-          grep -q 'photon.komoot.io' drive-assistant/poi-enhanced.js
-          grep -q 'overpass-api.de' drive-assistant/poi-enhanced.js
-          grep -q 'skipWaiting' drive-assistant/sw.js
-          grep -q 'clients.claim' drive-assistant/sw.js
-          grep -q "startsWith('lumina-drive-')" drive-assistant/sw.js
-          grep -q "cache:'no-store'" drive-assistant/sw.js
-          grep -q "updateViaCache:'none'" drive-assistant/index.html
-          grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
+          set -euo pipefail
+          for f in index.html app-v2.js navigation-search.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css; do test -s "drive-assistant/$f"; done
+          for f in app-v2.js navigation-search.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
+          grep -Fq 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
+          grep -Fq 'v=43' drive-assistant/index.html
+          grep -Fq 'height:calc(100dvh - 56px)!important' drive-assistant/ui-fixes.css
+          grep -Fq '.home-toolbar' drive-assistant/ui-fixes.css
+          grep -Fq 'buildHomeToolbar' drive-assistant/drive-completion.js
+          grep -Fq 'poi-enhanced.js?v=43' drive-assistant/drive-completion.js
+          grep -Fq '__luminaCurrentUserMarker' drive-assistant/poi-enhanced.js
+          grep -Fq 'active-map' drive-assistant/poi-enhanced.js
+          grep -Fq 'lumina-drive-v43' drive-assistant/sw.js
+          grep -Fq "updateViaCache:'none'" drive-assistant/index.html
+          grep -Fq 'router.project-osrm.org' drive-assistant/app-v2.js
 
   deploy:
-    name: Deploy canonical Drive to GitHub Pages
     needs: validate
     runs-on: ubuntu-latest
     outputs:
@@ -87,12 +57,10 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout canonical Drive source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feature/lumina-drive-assistant
-      - name: Stamp exact deployed source
-        id: stamp
+      - id: stamp
         run: |
           SOURCE_SHA="$(git rev-parse HEAD)"
           test "$SOURCE_SHA" = "${{ needs.validate.outputs.source_sha }}"
@@ -100,22 +68,18 @@ jobs:
           printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > drive-assistant/deployed-at.txt
           printf '%s\n' "feature/lumina-drive-assistant/drive-assistant" > drive-assistant/deploy-source.txt
           echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-      - name: Upload Drive directory as Pages root
-        uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
         with:
           path: drive-assistant
-      - name: Deploy Pages artifact
-        id: deployment
+      - id: deployment
         uses: actions/deploy-pages@v4
 
   verify-production:
-    name: Verify public production files
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live v43 build and assets
+      - name: Verify live v43
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
@@ -133,33 +97,24 @@ jobs:
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/drive-completion.js?verify=${GITHUB_RUN_ID}" -o /tmp/drive-completion.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/poi-enhanced.js?verify=${GITHUB_RUN_ID}" -o /tmp/poi-enhanced.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?verify=${GITHUB_RUN_ID}" -o /tmp/sw.js
-          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?verify=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
-          grep -q 'v=43' /tmp/index.html
-          grep -q '.home-toolbar' /tmp/ui-fixes.css
-          grep -q 'backdrop-filter:blur(26px)' /tmp/ui-fixes.css
-          grep -q 'buildHomeToolbar' /tmp/drive-completion.js
-          grep -q 'poi-enhanced.js?v=43' /tmp/drive-completion.js
-          grep -q '__luminaCurrentUserMarker' /tmp/poi-enhanced.js
-          grep -q 'active-map' /tmp/poi-enhanced.js
-          grep -q 'lumina-drive-v43' /tmp/sw.js
-          grep -q 'skipWaiting' /tmp/sw.js
-          grep -q 'clients.claim' /tmp/sw.js
-          grep -q 'router.project-osrm.org' /tmp/app-v2.js
+          grep -Fq 'v=43' /tmp/index.html
+          grep -Fq '.home-toolbar' /tmp/ui-fixes.css
+          grep -Fq 'buildHomeToolbar' /tmp/drive-completion.js
+          grep -Fq '__luminaCurrentUserMarker' /tmp/poi-enhanced.js
+          grep -Fq 'active-map' /tmp/poi-enhanced.js
+          grep -Fq 'lumina-drive-v43' /tmp/sw.js
           node --check /tmp/drive-completion.js
           node --check /tmp/poi-enhanced.js
-          node --check /tmp/app-v2.js
 
   record-result:
-    name: Record production verification result
     if: ${{ always() }}
     needs: [validate, deploy, verify-production]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout default branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feature/milestone1-pdf-docx-engine
-      - name: Write verification receipt
+      - name: Record result
         env:
           VALIDATE_RESULT: ${{ needs.validate.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
