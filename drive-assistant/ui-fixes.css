@@ -1,4 +1,4 @@
-/* LUMINA Drive v15 mobile UI corrections */
+/* LUMINA Drive mobile UI corrections */
 .monitor-card{display:none!important}
 .secondary-ui.alerts-panel{margin-top:10px;padding:12px 14px}
 .secondary-ui.alerts-panel .section-title h2{font-size:15px;margin:0}
@@ -18,7 +18,7 @@
 .leaflet-container{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
 .leaflet-control-attribution{font-size:9px!important;max-width:72%;white-space:normal;text-align:right}
 @media(max-width:640px){
-  main{padding-left:12px!important;padding-right:12px!important}
+  main{padding:0!important}
   .hero-card{grid-template-columns:86px 1fr 62px!important;gap:10px!important;padding:14px!important}
   .status-block span:first-child{font-size:11px!important}
   .status-block span:last-child{font-size:15px!important}
@@ -28,7 +28,8 @@
   .travel-mode button{font-size:15px}
   .home-actions{grid-template-columns:1fr!important}
   .home-action{padding:11px 13px!important}
-  #map{height:50vh!important;min-height:360px!important}
+  #map{width:100vw!important;height:calc(100dvh - 56px)!important;min-height:0!important}
+  .map-shell{top:56px!important;bottom:0!important;height:auto!important}
   .trip-grid{grid-template-columns:repeat(3,minmax(0,1fr))!important}
   .trip-grid article{padding:11px 9px!important}
   .trip-grid article strong{font-size:15px!important}
