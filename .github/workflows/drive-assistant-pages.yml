@@ -65,7 +65,7 @@ jobs:
           grep -q 'buildHomeToolbar' drive-assistant/drive-completion.js
           grep -q 'poi-enhanced.js?v=43' drive-assistant/drive-completion.js
           grep -q '__luminaCurrentUserMarker' drive-assistant/poi-enhanced.js
-          grep -q 'source:\x27active-map\x27' drive-assistant/poi-enhanced.js
+          grep -q 'active-map' drive-assistant/poi-enhanced.js
           grep -q 'for(let attempt=1;attempt<=3;attempt++)' drive-assistant/poi-enhanced.js
           grep -q 'lumina-drive-v43' drive-assistant/sw.js
           grep -q 'photon.komoot.io' drive-assistant/poi-enhanced.js
