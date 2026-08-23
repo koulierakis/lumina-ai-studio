@@ -74,7 +74,7 @@ jobs:
           grep -q "cache:'no-store'" drive-assistant/sw.js
           grep -q "updateViaCache:'none'" drive-assistant/index.html
           grep -q 'nominatim.openstreetmap.org/search' drive-assistant/navigation-search.js
-          grep -q 'router.project-osrm.org/route/v1/driving' drive-assistant/navigation-search.js
+          grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
 
   deploy:
     name: Deploy canonical Drive to GitHub Pages
@@ -148,6 +148,7 @@ jobs:
           grep -q 'skipWaiting' /tmp/sw.js
           grep -q 'clients.claim' /tmp/sw.js
           grep -q 'nominatim.openstreetmap.org/search' /tmp/navigation-search.js
+          grep -q 'router.project-osrm.org' /tmp/app-v2.js
           grep -q 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
           node --check /tmp/navigation-search.js
           node --check /tmp/app-v2.js
