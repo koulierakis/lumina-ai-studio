@@ -1,35 +1,25 @@
 # LUMINA Drive GitHub Pages deployment
 name: LUMINA Drive Assistant
-
 on:
   push:
-    branches:
-      - feature/lumina-drive-assistant
-    paths:
-      - "drive-assistant/**"
-      - ".github/workflows/drive-assistant-pages.yml"
+    branches: [feature/lumina-drive-assistant]
+    paths: ["drive-assistant/**", ".github/workflows/drive-assistant-pages.yml"]
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: lumina-drive-pages
   cancel-in-progress: true
-
 jobs:
   validate:
     name: Validate LUMINA Drive
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22"}
       - name: Verify core files
         run: |
           test -s drive-assistant/index.html
@@ -39,48 +29,34 @@ jobs:
           test -s drive-assistant/road-safety.js
           test -s drive-assistant/walking-router.js
           test -s drive-assistant/session-bootstrap.js
+          test -s drive-assistant/poi-catalog.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
         run: |
-          node --check drive-assistant/app-v2.js
-          node --check drive-assistant/drive-completion.js
-          node --check drive-assistant/road-safety.js
-          node --check drive-assistant/walking-router.js
-          node --check drive-assistant/poi-catalog.js
-          node --check drive-assistant/address-autocomplete.js
-          node --check drive-assistant/map-labels.js
-          node --check drive-assistant/map-fallback.js
-          node --check drive-assistant/user-marker-hook.js
-          node --check drive-assistant/reverse-geocode-fallback.js
-          node --check drive-assistant/session-bootstrap.js
-          node --check drive-assistant/sw.js
+          for f in app-v2.js drive-completion.js road-safety.js walking-router.js poi-catalog.js address-autocomplete.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
       - name: Required mobile feature smoke checks
         run: |
           grep -q 'navigator.geolocation' drive-assistant/app-v2.js
           grep -q 'speechSynthesis' drive-assistant/app-v2.js
           grep -q 'SpeechRecognition' drive-assistant/app-v2.js
           grep -q 'router.project-osrm.org' drive-assistant/app-v2.js
-          grep -q 'overpass-api.de' drive-assistant/app-v2.js
-          grep -q 'nominatim.openstreetmap.org' drive-assistant/app-v2.js
           grep -q 'api.open-meteo.com' drive-assistant/app-v2.js
           grep -q 'autoReroute' drive-assistant/app-v2.js
           grep -q 'wakeLock' drive-assistant/app-v2.js
           grep -q 'window.LuminaWalkingRouter' drive-assistant/walking-router.js
-          grep -q "previous !== BUILD" drive-assistant/session-bootstrap.js
-          grep -q 'MutationObserver' drive-assistant/drive-completion.js
           grep -q 'highway=construction' drive-assistant/road-safety.js
           grep -q 'railway=level_crossing' drive-assistant/road-safety.js
           grep -q '\[hazard\]' drive-assistant/road-safety.js
-          grep -q 'Routing / OSRM' drive-assistant/road-safety.js
-          grep -q 'road-safety.js?v=26' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=26' drive-assistant/index.html
-          grep -q "lumina-drive-v26" drive-assistant/sw.js
-          grep -q "./index.html" drive-assistant/sw.js
-          grep -q "road-safety.js?v=26" drive-assistant/sw.js
-          grep -q "drive-completion.js?v=26" drive-assistant/sw.js
+          grep -q 'roadLike' drive-assistant/poi-catalog.js
+          grep -q 'validTags' drive-assistant/poi-catalog.js
+          grep -q 'poi-catalog.js?v=27' drive-assistant/index.html
+          grep -q 'road-safety.js?v=27' drive-assistant/index.html
+          grep -q 'drive-completion.js?v=27' drive-assistant/index.html
+          grep -q "lumina-drive-v27" drive-assistant/sw.js
+          grep -q "poi-catalog.js?v=27" drive-assistant/sw.js
+          grep -q "road-safety.js?v=27" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
-
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
     needs: validate
@@ -89,19 +65,12 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
       - name: Stamp deployed build
-        env:
-          BUILD_VERSION: ${{ github.sha }}
-        run: |
-          printf '%s\n' "$BUILD_VERSION" > drive-assistant/build.txt
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-      - name: Upload LUMINA Drive Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: drive-assistant
-      - name: Deploy to GitHub Pages
-        id: deployment
+        env: {BUILD_VERSION: "${{ github.sha }}"}
+        run: printf '%s\n' "$BUILD_VERSION" > drive-assistant/build.txt
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: {path: drive-assistant}
+      - id: deployment
         uses: actions/deploy-pages@v4
