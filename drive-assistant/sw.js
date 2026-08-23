@@ -1,6 +1,6 @@
-const CACHE='lumina-drive-v33';
+const CACHE='lumina-drive-v34';
 const CORE=[
-  './index.html','./styles.css?v=33','./poi.css?v=33','./ui-fixes.css?v=33','./address-autocomplete.css?v=33','./app-v2.js?v=33','./walking-router.js?v=33','./poi-catalog.js?v=33','./address-autocomplete.js?v=33','./map-labels.js?v=33','./map-fallback.js?v=33','./user-marker-hook.js?v=33','./reverse-geocode-fallback.js?v=33','./overpass-fallback.js?v=33','./session-bootstrap.js?v=33','./drive-completion.js?v=33','./road-safety.js?v=33','./manifest.webmanifest?v=33'
+  './index.html','./styles.css?v=34','./poi.css?v=34','./ui-fixes.css?v=34','./address-autocomplete.css?v=34','./app-v2.js?v=34','./walking-router.js?v=34','./poi-catalog.js?v=34','./address-autocomplete.js?v=34','./map-labels.js?v=34','./map-fallback.js?v=34','./user-marker-hook.js?v=34','./reverse-geocode-fallback.js?v=34','./overpass-fallback.js?v=34','./session-bootstrap.js?v=34','./drive-completion.js?v=34','./road-safety.js?v=34','./manifest.webmanifest?v=34'
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
