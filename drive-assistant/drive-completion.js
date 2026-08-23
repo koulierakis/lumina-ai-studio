@@ -7,6 +7,15 @@
   const safeClick = el => { if (el) el.click(); };
   let arrivalHandled = false;
 
+  function loadEnhancedPoi() {
+    if (document.querySelector('script[data-lumina-poi-enhanced]')) return;
+    const script = document.createElement('script');
+    script.src = './poi-enhanced.js?v=42';
+    script.async = true;
+    script.dataset.luminaPoiEnhanced = '1';
+    document.head.appendChild(script);
+  }
+
   function setText(id, value) { const el = $(id); if (el) el.textContent = value; }
 
   function persistFreeDrive(on) {
@@ -97,6 +106,7 @@
   }
 
   function bind() {
+    loadEnhancedPoi();
     const free = $('#freeDriveBtn');
     free?.addEventListener('click', () => setTimeout(syncFreeDrive, 0));
 
