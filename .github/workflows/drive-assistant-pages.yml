@@ -55,12 +55,15 @@ jobs:
           grep -q 'normalizeFreeDriveButton' drive-assistant/drive-completion.js
           grep -q 'roadLike' drive-assistant/poi-catalog.js
           grep -q 'validTags' drive-assistant/poi-catalog.js
-          grep -q 'poi-catalog.js?v=28' drive-assistant/index.html
-          grep -q 'road-safety.js?v=28' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=28' drive-assistant/index.html
-          grep -q "lumina-drive-v28" drive-assistant/sw.js
-          grep -q "poi-catalog.js?v=28" drive-assistant/sw.js
-          grep -q "road-safety.js?v=28" drive-assistant/sw.js
+          grep -q 'x.category||x.class' drive-assistant/poi-catalog.js
+          grep -q 'currentMarkerPos' drive-assistant/poi-catalog.js
+          grep -q 'overpass.kumi.systems' drive-assistant/poi-catalog.js
+          grep -q 'poi-catalog.js?v=29' drive-assistant/index.html
+          grep -q 'road-safety.js?v=29' drive-assistant/index.html
+          grep -q 'drive-completion.js?v=29' drive-assistant/index.html
+          grep -q "lumina-drive-v29" drive-assistant/sw.js
+          grep -q "poi-catalog.js?v=29" drive-assistant/sw.js
+          grep -q "road-safety.js?v=29" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
