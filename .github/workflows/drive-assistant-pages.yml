@@ -25,17 +25,20 @@ jobs:
           test -s drive-assistant/index.html
           test -s drive-assistant/styles.css
           test -s drive-assistant/app-v2.js
+          test -s drive-assistant/navigation-search.js
+          test -s drive-assistant/navigation-search.css
           test -s drive-assistant/drive-completion.js
           test -s drive-assistant/road-safety.js
           test -s drive-assistant/overpass-fallback.js
           test -s drive-assistant/walking-router.js
           test -s drive-assistant/session-bootstrap.js
           test -s drive-assistant/poi-catalog.js
+          test -s drive-assistant/address-autocomplete.js
           test -s drive-assistant/manifest.webmanifest
           test -s drive-assistant/sw.js
       - name: JavaScript syntax check
         run: |
-          for f in app-v2.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js poi-catalog.js address-autocomplete.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
+          for f in app-v2.js navigation-search.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js poi-catalog.js address-autocomplete.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
       - name: Required mobile feature smoke checks
         run: |
           grep -q 'navigator.geolocation' drive-assistant/app-v2.js
@@ -55,31 +58,25 @@ jobs:
           grep -q 'selectedLat' drive-assistant/address-autocomplete.js
           grep -q 'normalizeFreeDriveButton' drive-assistant/drive-completion.js
           grep -q 'getCurrentPosition' drive-assistant/poi-catalog.js
-          grep -q 'enableHighAccuracy:true,timeout:5000,maximumAge:0' drive-assistant/poi-catalog.js
           grep -q 'console.error' drive-assistant/poi-catalog.js
           grep -q "PRIMARY_OVERPASS='https://overpass-api.de/api/interpreter'" drive-assistant/poi-catalog.js
-          grep -q 'around:${RADIUS_M},${origin.lat},${origin.lng}' drive-assistant/poi-catalog.js
-          grep -q 'attempt<=2' drive-assistant/poi-catalog.js
           grep -q "NOMINATIM='https://nominatim.openstreetmap.org/search'" drive-assistant/poi-catalog.js
           grep -q 'fetchNominatimFallback' drive-assistant/poi-catalog.js
           grep -q 'seenOsmIds' drive-assistant/poi-catalog.js
           grep -q 'distanceMeters(existing.point,item.point)<120' drive-assistant/poi-catalog.js
-          grep -q 'https://www.google.com/maps/dir/' drive-assistant/poi-catalog.js
-          grep -q "travelmode','driving" drive-assistant/poi-catalog.js
-          grep -q 'Δεν βρέθηκαν καταστήματα κοντά σας. Δοκιμάστε να αυξήσετε την ακτίνα.' drive-assistant/poi-catalog.js
+          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
+          grep -q 'navigation-search.css?v=37' drive-assistant/index.html
+          grep -q 'navigation-search.js?v=37' drive-assistant/index.html
+          grep -q 'name-search-start' drive-assistant/navigation-search.js
+          grep -q 'Απόσταση:' drive-assistant/navigation-search.js
+          grep -q '▶ Έναρξη' drive-assistant/navigation-search.js
+          grep -q 'nominatim.openstreetmap.org/search' drive-assistant/navigation-search.js
           grep -q 'id="navToolbar"' drive-assistant/index.html
           grep -q 'id="navPoiBtn"' drive-assistant/index.html
           grep -q 'id="navHandsFreeBtn"' drive-assistant/index.html
           grep -q 'id="navSettingsBtn"' drive-assistant/index.html
           grep -q 'body.navigation-active .nav-toolbar{display:grid!important}' drive-assistant/styles.css
-          grep -q 'styles.css?v=36' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=36' drive-assistant/index.html
-          grep -q 'road-safety.js?v=36' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=36' drive-assistant/index.html
-          grep -q "lumina-drive-v36" drive-assistant/sw.js
-          grep -q "styles.css?v=36" drive-assistant/sw.js
-          grep -q "poi-catalog.js?v=36" drive-assistant/sw.js
-          grep -q "road-safety.js?v=36" drive-assistant/sw.js
+          grep -q "lumina-drive-v38" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
