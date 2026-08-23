@@ -133,11 +133,11 @@ jobs:
     needs: [validate, deploy, verify-production]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout canonical branch
         uses: actions/checkout@v4
         with:
           ref: feature/lumina-drive-assistant
-      - name: Publish verification diagnostics
+      - name: Publish verification diagnostics on canonical branch
         env:
           VALIDATE_RESULT: ${{ needs.validate.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
@@ -147,18 +147,16 @@ jobs:
           set -euo pipefail
           git config user.name "LUMINA Production Verifier"
           git config user.email "actions@users.noreply.github.com"
-          git switch --orphan production-verification-receipt
-          git rm -rf .
-          mkdir -p verification
-          printf '%s\n' "${EXPECTED_SHA:-unknown}" > verification/build.txt
-          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > verification/verified-at.txt
-          printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > verification/live-url.txt
-          printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > verification/results.txt
+          mkdir -p .production-verification
+          printf '%s\n' "${EXPECTED_SHA:-unknown}" > .production-verification/build.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .production-verification/verified-at.txt
+          printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > .production-verification/live-url.txt
+          printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > .production-verification/results.txt
           if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then
-            printf '%s\n' "PASS" > verification/status.txt
+            printf '%s\n' "PASS" > .production-verification/status.txt
           else
-            printf '%s\n' "FAIL" > verification/status.txt
+            printf '%s\n' "FAIL" > .production-verification/status.txt
           fi
-          git add verification
-          git commit -m "chore(drive): record production result ${EXPECTED_SHA:-unknown}"
-          git push --force origin HEAD:refs/heads/verification/lumina-drive-production
+          git add .production-verification
+          git commit -m "chore(drive): record production result [skip ci]" || exit 0
+          git push origin HEAD:feature/lumina-drive-assistant
