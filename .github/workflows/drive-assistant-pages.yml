@@ -64,6 +64,8 @@ jobs:
           ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
           grep -q '.travel-mode{position:fixed' drive-assistant/styles.css
           grep -q 'grid-template-columns:1fr 1fr' drive-assistant/styles.css
+          grep -q 'height:calc(100dvh - 56px)!important' drive-assistant/ui-fixes.css
+          ! grep -q 'height:50vh!important' drive-assistant/ui-fixes.css
           grep -q "lumina-drive-v40" drive-assistant/sw.js
           grep -q 'skipWaiting' drive-assistant/sw.js
           grep -q 'clients.claim' drive-assistant/sw.js
@@ -139,6 +141,9 @@ jobs:
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/styles.css?verify=${GITHUB_RUN_ID}" -o /tmp/styles.css
           grep -q '.travel-mode{position:fixed' /tmp/styles.css
           grep -q 'grid-template-columns:1fr 1fr' /tmp/styles.css
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/ui-fixes.css?verify=${GITHUB_RUN_ID}" -o /tmp/ui-fixes.css
+          grep -q 'height:calc(100dvh - 56px)!important' /tmp/ui-fixes.css
+          ! grep -q 'height:50vh!important' /tmp/ui-fixes.css
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?verify=${GITHUB_RUN_ID}" -o /tmp/sw.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/navigation-search.js?verify=${GITHUB_RUN_ID}" -o /tmp/navigation-search.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?verify=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
