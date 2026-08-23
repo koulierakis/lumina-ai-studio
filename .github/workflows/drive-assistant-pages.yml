@@ -55,31 +55,29 @@ jobs:
           grep -q 'selectedLat' drive-assistant/address-autocomplete.js
           grep -q 'normalizeFreeDriveButton' drive-assistant/drive-completion.js
           grep -q 'getCurrentPosition' drive-assistant/poi-catalog.js
-          grep -q 'RADIUS_M=6000' drive-assistant/poi-catalog.js
+          grep -q 'enableHighAccuracy:true,timeout:5000,maximumAge:0' drive-assistant/poi-catalog.js
+          grep -q 'console.error' drive-assistant/poi-catalog.js
+          grep -q "PRIMARY_OVERPASS='https://overpass-api.de/api/interpreter'" drive-assistant/poi-catalog.js
+          grep -q 'around:${RADIUS_M},${origin.lat},${origin.lng}' drive-assistant/poi-catalog.js
+          grep -q 'attempt<=2' drive-assistant/poi-catalog.js
           grep -q 'seenOsmIds' drive-assistant/poi-catalog.js
           grep -q 'distanceMeters(existing.point,item.point)<120' drive-assistant/poi-catalog.js
           grep -q 'https://www.google.com/maps/dir/' drive-assistant/poi-catalog.js
           grep -q "travelmode','driving" drive-assistant/poi-catalog.js
           grep -q 'Δεν βρέθηκαν καταστήματα κοντά σας. Δοκιμάστε να αυξήσετε την ακτίνα.' drive-assistant/poi-catalog.js
-          grep -q 'overpass.kumi.systems' drive-assistant/poi-catalog.js
-          grep -q 'overpass.nchc.org.tw' drive-assistant/poi-catalog.js
-          grep -q 'overpass.kumi.systems' drive-assistant/overpass-fallback.js
-          grep -q 'overpass.nchc.org.tw' drive-assistant/overpass-fallback.js
           grep -q 'id="navToolbar"' drive-assistant/index.html
           grep -q 'id="navPoiBtn"' drive-assistant/index.html
           grep -q 'id="navHandsFreeBtn"' drive-assistant/index.html
           grep -q 'id="navSettingsBtn"' drive-assistant/index.html
           grep -q 'body.navigation-active .nav-toolbar{display:grid!important}' drive-assistant/styles.css
-          grep -q 'body.navigation-active .map-shell{position:fixed;top:54px' drive-assistant/styles.css
-          grep -q 'body.navigation-active #map{width:100vw;height:calc(100dvh - 54px)' drive-assistant/styles.css
-          grep -q 'styles.css?v=33' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=33' drive-assistant/index.html
-          grep -q 'road-safety.js?v=33' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=33' drive-assistant/index.html
-          grep -q "lumina-drive-v33" drive-assistant/sw.js
-          grep -q "styles.css?v=33" drive-assistant/sw.js
-          grep -q "poi-catalog.js?v=33" drive-assistant/sw.js
-          grep -q "road-safety.js?v=33" drive-assistant/sw.js
+          grep -q 'styles.css?v=34' drive-assistant/index.html
+          grep -q 'poi-catalog.js?v=34' drive-assistant/index.html
+          grep -q 'road-safety.js?v=34' drive-assistant/index.html
+          grep -q 'drive-completion.js?v=34' drive-assistant/index.html
+          grep -q "lumina-drive-v34" drive-assistant/sw.js
+          grep -q "styles.css?v=34" drive-assistant/sw.js
+          grep -q "poi-catalog.js?v=34" drive-assistant/sw.js
+          grep -q "road-safety.js?v=34" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
