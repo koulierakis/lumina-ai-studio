@@ -60,8 +60,6 @@
       .filter(Number.isFinite);
     if (!limits.length) return;
     const unique = [...new Set(limits)];
-    // At junctions/parallel roads different nearby limits can legitimately coexist.
-    // In that case do not overwrite the UI with a potentially false limit.
     if (unique.length !== 1) return;
     const value = String(unique[0]);
     const a = $('#speedLimit'), b = $('#navSpeedLimit');
@@ -240,23 +238,32 @@
     else ready.textContent = localCritical && remoteValues.every(Boolean) ? 'OPERATIONAL' : 'LIMITED';
   }
 
-  function onPosition(p) {
-    const c = {lat:p.coords.latitude, lng:p.coords.longitude};
+  function onPosition(c) {
     lastPos = c;
     refreshRoadSafety(c);
     refreshServices(c);
   }
 
+  function tickPosition() {
+    if (document.visibilityState === 'hidden') return;
+    const marker = window.__luminaCurrentUserMarker;
+    const p = marker?.getLatLng?.();
+    if (!p || !Number.isFinite(p.lat) || !Number.isFinite(p.lng)) return;
+    onPosition({lat:p.lat, lng:p.lng});
+  }
+
   function start() {
     lastRemoteState = {routing:navigator.onLine?null:false, osm:navigator.onLine?null:false, geocode:navigator.onLine?null:false, weather:navigator.onLine?null:false};
     renderMonitor(lastRemoteState);
-    if (!navigator.geolocation) return;
-    navigator.geolocation.watchPosition(onPosition, () => {}, {enableHighAccuracy:true, maximumAge:5000, timeout:15000});
+    setInterval(tickPosition, 5000);
+    window.addEventListener('pageshow', tickPosition);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') tickPosition(); });
     window.addEventListener('online', () => {
       lastServiceAt = 0;
       lastIntelAt = 0;
       osmHealth = null;
       if (lastPos) { refreshRoadSafety(lastPos); refreshServices(lastPos); }
+      else tickPosition();
     });
     window.addEventListener('offline', () => {
       lastRemoteState = {routing:false, osm:false, geocode:false, weather:false};
