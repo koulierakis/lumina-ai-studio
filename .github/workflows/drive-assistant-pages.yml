@@ -45,20 +45,25 @@ jobs:
           for f in app-v2.js navigation-search.js poi-catalog.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
             node --check "drive-assistant/$f"
           done
-      - name: Verify new Drive interface
+      - name: Verify new Drive interface and runtime ownership
         run: |
           grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
           grep -q 'Αυτοκίνητο' drive-assistant/index.html
           grep -q 'Περπάτημα' drive-assistant/index.html
           grep -q 'Free Drive' drive-assistant/index.html
           grep -q 'Σημεία ενδιαφέροντος' drive-assistant/index.html
-          grep -q "lumina-drive-v39" drive-assistant/sw.js
-          grep -q "updateViaCache: 'none'" drive-assistant/index.html
+          ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
+          grep -q "lumina-drive-v40" drive-assistant/sw.js
+          grep -q "updateViaCache:'none'" drive-assistant/index.html
+          grep -q 'nominatim.openstreetmap.org/search' drive-assistant/navigation-search.js
+          grep -q 'router.project-osrm.org/route/v1/driving' drive-assistant/navigation-search.js
 
   deploy:
     name: Deploy Drive
     needs: validate
     runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.stamp.outputs.source_sha }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -67,10 +72,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: feature/lumina-drive-assistant
-      - name: Stamp build
+      - name: Stamp exact deployed source
+        id: stamp
         run: |
-          printf '%s\n' "${GITHUB_SHA}" > drive-assistant/build.txt
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          printf '%s\n' "$SOURCE_SHA" > drive-assistant/build.txt
           printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > drive-assistant/deployed-at.txt
+          printf '%s\n' "feature/lumina-drive-assistant/drive-assistant" > drive-assistant/deploy-source.txt
+          echo "source_sha=$SOURCE_SHA" >> "$GITHUB_OUTPUT"
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload Drive only
@@ -80,3 +89,40 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+
+  verify-production:
+    name: Verify live GitHub Pages
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify public build and assets
+        env:
+          EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
+          BASE_URL: https://koulierakis.github.io/lumina-ai-studio
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 24); do
+            LIVE_SHA="$(curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/build.txt?run=${GITHUB_RUN_ID}-${i}" 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" = 1
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/?run=${GITHUB_RUN_ID}" -o /tmp/index.html
+          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' /tmp/index.html
+          grep -q 'Αυτοκίνητο' /tmp/index.html
+          grep -q 'Περπάτημα' /tmp/index.html
+          grep -q 'Free Drive' /tmp/index.html
+          grep -q 'Σημεία ενδιαφέροντος' /tmp/index.html
+          ! grep -F -q 'Πού θέλεις να πας;' /tmp/index.html
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?run=${GITHUB_RUN_ID}" -o /tmp/sw.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/navigation-search.js?run=${GITHUB_RUN_ID}" -o /tmp/navigation-search.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?run=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
+          grep -q 'lumina-drive-v40' /tmp/sw.js
+          grep -q 'nominatim.openstreetmap.org/search' /tmp/navigation-search.js
+          node --check /tmp/navigation-search.js
+          node --check /tmp/app-v2.js
+          curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deployed-at.txt?run=${GITHUB_RUN_ID}" >/dev/null
