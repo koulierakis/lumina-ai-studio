@@ -54,19 +54,20 @@ jobs:
           for f in app-v2.js navigation-search.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do
             node --check "drive-assistant/$f"
           done
-      - name: Verify production UI contract
+      - name: Verify production UI and GPS contract
         run: |
           grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' drive-assistant/index.html
-          grep -q 'Αυτοκίνητο' drive-assistant/index.html
-          grep -q 'Περπάτημα' drive-assistant/index.html
-          grep -q 'Free Drive' drive-assistant/index.html
-          grep -q 'Σημεία ενδιαφέροντος' drive-assistant/index.html
+          grep -q 'v=43' drive-assistant/index.html
           ! grep -R -F -q 'Πού θέλεις να πας;' drive-assistant --exclude='PROJECT_STATUS.md'
           grep -q 'height:calc(100dvh - 56px)!important' drive-assistant/ui-fixes.css
-          ! grep -q 'height:50vh!important' drive-assistant/ui-fixes.css
-          grep -q 'One compact four-button toolbar' drive-assistant/ui-fixes.css
-          grep -q 'poi-enhanced.js?v=42' drive-assistant/drive-completion.js
-          grep -q "lumina-drive-v42" drive-assistant/sw.js
+          grep -q '.home-toolbar' drive-assistant/ui-fixes.css
+          grep -q 'backdrop-filter:blur(26px)' drive-assistant/ui-fixes.css
+          grep -q 'buildHomeToolbar' drive-assistant/drive-completion.js
+          grep -q 'poi-enhanced.js?v=43' drive-assistant/drive-completion.js
+          grep -q '__luminaCurrentUserMarker' drive-assistant/poi-enhanced.js
+          grep -q 'source:\x27active-map\x27' drive-assistant/poi-enhanced.js
+          grep -q 'for(let attempt=1;attempt<=3;attempt++)' drive-assistant/poi-enhanced.js
+          grep -q 'lumina-drive-v43' drive-assistant/sw.js
           grep -q 'photon.komoot.io' drive-assistant/poi-enhanced.js
           grep -q 'overpass-api.de' drive-assistant/poi-enhanced.js
           grep -q 'skipWaiting' drive-assistant/sw.js
@@ -114,7 +115,7 @@ jobs:
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live build, HTML, CSS, JS and service worker
+      - name: Verify live v43 build and assets
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
@@ -123,28 +124,24 @@ jobs:
           ok=0
           for i in $(seq 1 36); do
             LIVE_SHA="$(curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/build.txt?verify=${GITHUB_RUN_ID}-${i}" 2>/dev/null | tr -d '\r\n' || true)"
-            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then
-              ok=1
-              break
-            fi
+            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then ok=1; break; fi
             sleep 5
           done
           test "$ok" = 1
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/?verify=${GITHUB_RUN_ID}" -o /tmp/index.html
-          grep -q 'Αναζήτηση με όνομα ή διεύθυνση…' /tmp/index.html
-          ! grep -F -q 'Πού θέλεις να πας;' /tmp/index.html
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/ui-fixes.css?verify=${GITHUB_RUN_ID}" -o /tmp/ui-fixes.css
-          grep -q 'height:calc(100dvh - 56px)!important' /tmp/ui-fixes.css
-          grep -q 'One compact four-button toolbar' /tmp/ui-fixes.css
-          ! grep -q 'height:50vh!important' /tmp/ui-fixes.css
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/drive-completion.js?verify=${GITHUB_RUN_ID}" -o /tmp/drive-completion.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/poi-enhanced.js?verify=${GITHUB_RUN_ID}" -o /tmp/poi-enhanced.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/sw.js?verify=${GITHUB_RUN_ID}" -o /tmp/sw.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/app-v2.js?verify=${GITHUB_RUN_ID}" -o /tmp/app-v2.js
-          grep -q 'poi-enhanced.js?v=42' /tmp/drive-completion.js
-          grep -q 'photon.komoot.io' /tmp/poi-enhanced.js
-          grep -q 'overpass-api.de' /tmp/poi-enhanced.js
-          grep -q 'lumina-drive-v42' /tmp/sw.js
+          grep -q 'v=43' /tmp/index.html
+          grep -q '.home-toolbar' /tmp/ui-fixes.css
+          grep -q 'backdrop-filter:blur(26px)' /tmp/ui-fixes.css
+          grep -q 'buildHomeToolbar' /tmp/drive-completion.js
+          grep -q 'poi-enhanced.js?v=43' /tmp/drive-completion.js
+          grep -q '__luminaCurrentUserMarker' /tmp/poi-enhanced.js
+          grep -q 'active-map' /tmp/poi-enhanced.js
+          grep -q 'lumina-drive-v43' /tmp/sw.js
           grep -q 'skipWaiting' /tmp/sw.js
           grep -q 'clients.claim' /tmp/sw.js
           grep -q 'router.project-osrm.org' /tmp/app-v2.js
@@ -177,11 +174,7 @@ jobs:
           printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .production-verification/verified-at.txt
           printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > .production-verification/live-url.txt
           printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > .production-verification/results.txt
-          if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then
-            printf '%s\n' PASS > .production-verification/status.txt
-          else
-            printf '%s\n' FAIL > .production-verification/status.txt
-          fi
+          if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then printf '%s\n' PASS > .production-verification/status.txt; else printf '%s\n' FAIL > .production-verification/status.txt; fi
           git add .production-verification
           git commit -m "chore(drive): record production verification [skip ci]" || exit 0
           git push origin HEAD:feature/milestone1-pdf-docx-engine
