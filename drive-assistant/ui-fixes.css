@@ -1,57 +1,38 @@
-/* LUMINA Drive fullscreen mobile UI */
-.monitor-card,.secondary-ui,.voice-card{display:none!important}
-#map{background:#dbeaf0;width:100vw!important;height:calc(100dvh - 56px)!important;min-height:0!important}
+/* LUMINA Drive premium mobile UI */
+:root{--accent:#4c9eff;--accent-soft:rgba(76,158,255,.18);--glass:rgba(12,16,22,.66);--glass-strong:rgba(12,16,22,.84);--glass-border:rgba(255,255,255,.08);--text:#f5f7fa;--muted:#a8b0bc;--shadow:0 16px 48px rgba(0,0,0,.28)}
+*{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+html,body,#app{width:100%;height:100%;overflow:hidden}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#080b10}
+main{padding:0!important;inset:0!important}
 .map-shell{position:fixed!important;top:56px!important;left:0!important;right:0!important;bottom:0!important;height:auto!important;border:0!important;border-radius:0!important;z-index:100!important}
-.leaflet-container{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-.leaflet-control-attribution{font-size:9px!important;max-width:72%;white-space:normal;text-align:right}
-
-/* One compact four-button toolbar: drive, walk, POI, free drive. */
-.travel-mode{position:fixed!important;left:6px!important;right:50%!important;bottom:max(6px,env(safe-area-inset-bottom))!important;top:auto!important;z-index:1560!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:4px!important;padding:5px 2px 5px 5px!important;background:rgba(5,14,26,.94)!important;border:1px solid rgba(255,255,255,.10)!important;border-right:0!important;border-radius:17px 0 0 17px!important;backdrop-filter:blur(16px)}
-.home-actions{position:fixed!important;left:50%!important;right:6px!important;bottom:max(6px,env(safe-area-inset-bottom))!important;z-index:1560!important;display:grid!important;grid-template-columns:1fr 1fr!important;gap:4px!important;padding:5px 5px 5px 2px!important;background:rgba(5,14,26,.94)!important;border:1px solid rgba(255,255,255,.10)!important;border-left:0!important;border-radius:0 17px 17px 0!important;backdrop-filter:blur(16px)}
-.travel-mode button,.home-action{height:54px!important;min-height:54px!important;min-width:0!important;margin:0!important;padding:3px 2px!important;border:1px solid rgba(255,255,255,.09)!important;border-radius:12px!important;background:rgba(14,31,50,.90)!important;color:#fff!important;display:grid!important;place-items:center!important;align-content:center!important;gap:2px!important;text-align:center!important;box-shadow:none!important}
-.travel-mode button{font-size:0!important;font-weight:800!important}
-.travel-mode button[data-travel-mode="drive"]::before{content:'🚗';font-size:19px;line-height:1}
-.travel-mode button[data-travel-mode="drive"]::after{content:'Αυτοκ.';font-size:8px;line-height:1}
-.travel-mode button[data-travel-mode="walk"]::before{content:'🚶';font-size:19px;line-height:1}
-.travel-mode button[data-travel-mode="walk"]::after{content:'Περπ.';font-size:8px;line-height:1}
-.travel-mode button[aria-pressed="true"]{background:rgba(87,221,209,.22)!important;color:#fff!important;border-color:rgba(87,221,209,.65)!important}
-.home-action{grid-template-columns:1fr!important}
-.home-action-icon{display:block!important;width:auto!important;height:auto!important;background:none!important;border-radius:0!important;font-size:19px!important;line-height:1!important;overflow:visible!important}
-.home-action div{display:block!important}
-.home-action strong{display:block!important;font-size:8px!important;line-height:1!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
-.home-action small,.home-action>b{display:none!important}
-#poiOpenBtn strong{font-size:0!important}
-#poiOpenBtn strong::after{content:'Κοντά μου';font-size:8px}
-#freeDriveBtn .home-action-icon{font-size:0!important}
-#freeDriveBtn .home-action-icon::after{content:'◎';font-size:21px;color:var(--accent);font-weight:800}
-#freeDriveBtn strong{font-size:0!important}
-#freeDriveBtn strong::after{content:'Free Drive';font-size:8px}
-
-/* Keep overlays above map without consuming layout height. */
-.hero-card{z-index:700!important}
-.search-row{z-index:710!important}
-.route-preview{z-index:720!important}
-.leaflet-bottom.leaflet-right{bottom:70px!important;right:4px!important}
-
-/* POI panel remains hidden until icon is pressed and then slides over the map. */
-.poi-drawer,.drawer{width:min(92vw,420px)!important;height:100dvh!important;max-height:100dvh!important;background:rgba(5,14,26,.97)!important;backdrop-filter:blur(18px)!important}
-.poi-categories{grid-template-columns:repeat(2,minmax(0,1fr))!important}
-.poi-category,.poi-item{min-height:54px!important}
-.poi-result{padding:10px!important}
-.poi-route{min-height:42px!important;border-radius:12px!important;background:linear-gradient(135deg,var(--accent),#46c9c0)!important;color:#041311!important;border:0!important}
-
-body.navigation-active .travel-mode,body.navigation-active .home-actions{display:none!important}
-body.navigation-active .nav-toolbar{display:grid!important}
-body.navigation-active .monitor-card,body.navigation-active .alerts-panel,body.navigation-active .trip-grid{display:none!important}
-
-@media(max-width:640px){
-  main{padding:0!important}
-  .hero-card{grid-template-columns:86px 1fr 62px!important;gap:10px!important;padding:12px!important}
-  .status-block span:first-child{font-size:11px!important}
-  .status-block span:last-child{font-size:15px!important}
-  .search-row{grid-template-columns:minmax(0,1fr) auto!important}
-  .search-row input{min-width:0!important;font-size:16px!important}
-  .search-row .primary{padding:0 14px!important}
-  #map{width:100vw!important;height:calc(100dvh - 56px)!important;min-height:0!important}
-  .map-shell{top:56px!important;bottom:0!important;height:auto!important}
-}
+#map{width:100vw!important;height:calc(100dvh - 56px)!important;min-height:0!important;background:#dbeaf0}
+.topbar{background:rgba(8,11,16,.78)!important;backdrop-filter:blur(24px) saturate(145%);-webkit-backdrop-filter:blur(24px) saturate(145%);border-bottom:1px solid var(--glass-border)!important;box-shadow:0 8px 30px rgba(0,0,0,.16)}
+.brand h1{font-weight:700!important;letter-spacing:-.03em!important}.brand h1 span{color:rgba(245,247,250,.72)!important;font-weight:500!important}
+.icon-btn{background:rgba(255,255,255,.055)!important;border:0!important;border-radius:15px!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 8px 22px rgba(0,0,0,.14)!important}
+.hero-card,.search-row input,.route-preview{background:var(--glass)!important;backdrop-filter:blur(22px) saturate(145%);-webkit-backdrop-filter:blur(22px) saturate(145%);border:1px solid var(--glass-border)!important;box-shadow:var(--shadow)!important}
+.hero-card{border-radius:20px!important}.search-row input{border-radius:16px!important;color:var(--text)!important}.search-row input::placeholder{color:rgba(245,247,250,.48)!important}
+.primary{background:var(--accent)!important;color:white!important;border:0!important;border-radius:16px!important;box-shadow:0 10px 28px rgba(76,158,255,.28)!important}
+.limit-block{border-color:rgba(255,255,255,.9)!important;box-shadow:0 8px 28px rgba(0,0,0,.2)!important}.limit-block span,.limit-block strong{color:#111827!important}
+.travel-mode.toolbar-source-hidden,.home-actions.toolbar-source-hidden{display:none!important}
+.home-toolbar{position:fixed;left:10px;right:10px;bottom:max(10px,env(safe-area-inset-bottom));z-index:1580;height:72px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:5px;background:rgba(10,14,20,.72);backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%);border:1px solid var(--glass-border);border-radius:22px;box-shadow:0 18px 50px rgba(0,0,0,.32)}
+.home-tool{min-width:0;height:60px;border:0!important;background:transparent!important;color:var(--muted)!important;border-radius:17px!important;display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:4px!important;box-shadow:none!important;text-align:center!important}
+.home-tool>span{font-size:21px!important;line-height:1!important;width:auto!important;height:auto!important;background:transparent!important;display:block!important;overflow:visible!important}
+.home-tool>small{display:block!important;font-size:10px!important;font-weight:700!important;line-height:1.1!important;white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important;max-width:100%!important;color:inherit!important}
+.home-tool[aria-pressed="true"],.home-tool.active{background:var(--accent-soft)!important;color:var(--text)!important}
+.home-tool:active{transform:scale(.96)}
+.drawer,.poi-drawer{background:rgba(9,13,19,.76)!important;backdrop-filter:blur(30px) saturate(150%);-webkit-backdrop-filter:blur(30px) saturate(150%);border-left:1px solid var(--glass-border)!important;box-shadow:-24px 0 70px rgba(0,0,0,.35)!important}
+.poi-category,.poi-item,.poi-result{background:rgba(255,255,255,.055)!important;border:0!important;border-radius:17px!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.035)!important;color:var(--text)!important}
+.poi-category:active,.poi-item:active{transform:scale(.985)}
+.poi-result{padding:14px!important}.poi-result strong{font-size:15px!important}.poi-result span{color:var(--muted)!important;font-size:11px!important}
+.poi-route{background:var(--accent)!important;color:white!important;border:0!important;border-radius:14px!important;min-height:44px!important;box-shadow:0 8px 22px rgba(76,158,255,.22)!important}
+.poi-loading{color:var(--muted)!important;background:rgba(255,255,255,.035)!important;border:1px dashed rgba(255,255,255,.08)!important;border-radius:18px!important;padding:20px!important;text-align:center!important}
+.poi-loading.busy{display:grid!important;justify-items:center;gap:8px}.poi-loading.busy strong{color:var(--text)!important}.poi-loading.busy small{color:var(--muted)!important}.poi-loading.error{color:#d6d9df!important}
+.poi-spinner{width:28px;height:28px;border-radius:50%;border:3px solid rgba(255,255,255,.12);border-top-color:var(--accent);animation:lumina-spin .75s linear infinite}@keyframes lumina-spin{to{transform:rotate(360deg)}}
+.monitor-card,.secondary-ui,.voice-card{display:none!important}
+.leaflet-control-attribution{font-size:9px!important;max-width:72%;white-space:normal;text-align:right}.leaflet-top.leaflet-right{top:190px}.leaflet-bottom.leaflet-right{bottom:88px;right:4px}
+body.navigation-active .home-toolbar,body.free-drive-active .home-toolbar{display:none!important}
+body.navigation-active .nav-toolbar,body.free-drive-active .nav-toolbar{display:grid!important}
+body.navigation-active .hero-card,body.navigation-active .search-row,body.navigation-active .route-preview,body.navigation-active .secondary-ui,body.free-drive-active .hero-card,body.free-drive-active .search-row,body.free-drive-active .route-preview,body.free-drive-active .secondary-ui{display:none!important}
+body.navigation-active .nav-cockpit,body.free-drive-active .nav-cockpit{display:grid!important;position:fixed;top:64px;left:8px;right:8px;z-index:1550;background:var(--glass)!important;backdrop-filter:blur(22px) saturate(145%);-webkit-backdrop-filter:blur(22px) saturate(145%);border:1px solid var(--glass-border)!important;box-shadow:var(--shadow)!important}
+@media(max-width:640px){.hero-card{grid-template-columns:86px 1fr 62px!important;gap:10px!important;padding:13px!important}.search-row{grid-template-columns:minmax(0,1fr) auto!important}.search-row input{min-width:0!important;font-size:16px!important}.search-row .primary{padding:0 16px!important}.drawer,.poi-drawer{top:auto!important;left:8px!important;right:8px!important;bottom:8px!important;width:auto!important;height:auto!important;max-height:74dvh!important;border-radius:26px!important;border:1px solid var(--glass-border)!important;padding:18px!important;box-shadow:0 24px 80px rgba(0,0,0,.38)!important}.poi-categories{grid-template-columns:repeat(2,minmax(0,1fr))!important}.poi-results{padding-bottom:8px!important}}
+@media(max-width:380px){.home-toolbar{left:6px;right:6px}.home-tool>small{font-size:9px!important}.hero-card{grid-template-columns:78px 1fr 54px!important}}
