@@ -1,4 +1,5 @@
 # LUMINA Drive GitHub Pages deployment
+# Forced production redeploy: 2026-08-23 23:18 Europe/Athens
 name: LUMINA Drive Assistant
 on:
   push:
