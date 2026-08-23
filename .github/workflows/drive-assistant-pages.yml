@@ -126,12 +126,22 @@ jobs:
           node --check /tmp/navigation-search.js
           node --check /tmp/app-v2.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deployed-at.txt?run=${GITHUB_RUN_ID}" >/dev/null
-      - name: Checkout source for verification receipt
+
+  record-result:
+    name: Record production result
+    if: ${{ always() }}
+    needs: [validate, deploy, verify-production]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: feature/lumina-drive-assistant
-      - name: Publish production verification receipt
+      - name: Publish verification diagnostics
         env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          VERIFY_RESULT: ${{ needs.verify-production.result }}
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
         run: |
           set -euo pipefail
@@ -140,10 +150,15 @@ jobs:
           git switch --orphan production-verification-receipt
           git rm -rf .
           mkdir -p verification
-          printf '%s\n' "$EXPECTED_SHA" > verification/build.txt
+          printf '%s\n' "${EXPECTED_SHA:-unknown}" > verification/build.txt
           printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > verification/verified-at.txt
           printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > verification/live-url.txt
-          printf '%s\n' "PASS" > verification/status.txt
+          printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > verification/results.txt
+          if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then
+            printf '%s\n' "PASS" > verification/status.txt
+          else
+            printf '%s\n' "FAIL" > verification/status.txt
+          fi
           git add verification
-          git commit -m "chore(drive): record production verification ${EXPECTED_SHA}"
+          git commit -m "chore(drive): record production result ${EXPECTED_SHA:-unknown}"
           git push --force origin HEAD:refs/heads/verification/lumina-drive-production
