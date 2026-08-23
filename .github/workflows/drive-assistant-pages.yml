@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v45-nearby-live-gps
+# deployment-trigger: v46-map-poi-road-labels
 
 on:
   push:
@@ -35,11 +35,14 @@ jobs:
       - name: Validate Drive production source
         run: |
           set -euo pipefail
-          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
-          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-labels.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
+          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
+          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
+          grep -Fq 'map-poi-layer.js?v=46' drive-assistant/index.html
+          grep -Fq 'map-labels.js?v=46' drive-assistant/index.html
+          grep -Fq "const CACHE='lumina-drive-v46'" drive-assistant/sw.js
+          grep -Fq 'MIN_ZOOM=15' drive-assistant/map-poi-layer.js
+          grep -Fq "map.getZoom()<14" drive-assistant/map-labels.js
           grep -Fq 'LuminaGPS?.getLastFix' drive-assistant/poi-enhanced.js
-          grep -Fq 'poi-enhanced.js?v=45' drive-assistant/drive-completion.js
-          grep -Fq "const CACHE='lumina-drive-v45'" drive-assistant/sw.js
           grep -Fq 'SpeechRecognition' drive-assistant/app-v2.js
       - name: Live provider regression smoke
         run: node drive-assistant/tests/production-smoke.mjs
@@ -75,7 +78,7 @@ jobs:
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live v45 Nearby production assets
+      - name: Verify live v46 map assets
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
@@ -88,13 +91,16 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in drive-completion.js poi-enhanced.js sw.js shared-gps.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
-          grep -Fq 'poi-enhanced.js?v=45' /tmp/drive-completion.js
-          grep -Fq 'LuminaGPS?.getLastFix' /tmp/poi-enhanced.js
-          grep -Fq "const CACHE='lumina-drive-v45'" /tmp/sw.js
+          for f in index.html map-poi-layer.js map-labels.js poi-enhanced.js sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          grep -Fq 'map-poi-layer.js?v=46' /tmp/index.html
+          grep -Fq 'map-labels.js?v=46' /tmp/index.html
+          grep -Fq 'MIN_ZOOM=15' /tmp/map-poi-layer.js
+          grep -Fq "map.getZoom()<14" /tmp/map-labels.js
+          grep -Fq "const CACHE='lumina-drive-v46'" /tmp/sw.js
           grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
+          node --check /tmp/map-poi-layer.js
+          node --check /tmp/map-labels.js
           node --check /tmp/poi-enhanced.js
-          node --check /tmp/drive-completion.js
 
   record-result:
     if: ${{ always() }}
