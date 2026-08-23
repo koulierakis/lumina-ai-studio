@@ -65,14 +65,19 @@ jobs:
           grep -q 'overpass.nchc.org.tw' drive-assistant/poi-catalog.js
           grep -q 'overpass.kumi.systems' drive-assistant/overpass-fallback.js
           grep -q 'overpass.nchc.org.tw' drive-assistant/overpass-fallback.js
-          grep -q 'overpass-fallback.js?v=31' drive-assistant/index.html
-          grep -q 'poi-catalog.js?v=31' drive-assistant/index.html
-          grep -q 'road-safety.js?v=31' drive-assistant/index.html
-          grep -q 'drive-completion.js?v=31' drive-assistant/index.html
-          grep -q "lumina-drive-v31" drive-assistant/sw.js
-          grep -q "overpass-fallback.js?v=31" drive-assistant/sw.js
-          grep -q "poi-catalog.js?v=31" drive-assistant/sw.js
-          grep -q "road-safety.js?v=31" drive-assistant/sw.js
+          grep -q 'body.navigation-active .map-shell{position:fixed;inset:0' drive-assistant/styles.css
+          grep -q 'body.navigation-active #map{width:100vw;height:100dvh' drive-assistant/styles.css
+          grep -q 'body.navigation-active .search-row{display:none!important}' drive-assistant/styles.css
+          grep -q 'styles.css?v=32' drive-assistant/index.html
+          grep -q 'overpass-fallback.js?v=32' drive-assistant/index.html
+          grep -q 'poi-catalog.js?v=32' drive-assistant/index.html
+          grep -q 'road-safety.js?v=32' drive-assistant/index.html
+          grep -q 'drive-completion.js?v=32' drive-assistant/index.html
+          grep -q "lumina-drive-v32" drive-assistant/sw.js
+          grep -q "styles.css?v=32" drive-assistant/sw.js
+          grep -q "overpass-fallback.js?v=32" drive-assistant/sw.js
+          grep -q "poi-catalog.js?v=32" drive-assistant/sw.js
+          grep -q "road-safety.js?v=32" drive-assistant/sw.js
           grep -q "cache:'no-store'" drive-assistant/sw.js
   deploy:
     name: Deploy LUMINA Drive to GitHub Pages
