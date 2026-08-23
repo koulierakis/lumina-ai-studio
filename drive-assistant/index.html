@@ -10,11 +10,11 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>LUMINA Drive Assistant</title>
-  <link rel="manifest" href="manifest.webmanifest?v=29" />
+  <link rel="manifest" href="manifest.webmanifest?v=30" />
   <link rel="preconnect" href="https://tile.openstreetmap.org" />
   <link rel="preconnect" href="https://a.basemaps.cartocdn.com" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <link rel="stylesheet" href="styles.css?v=29" /><link rel="stylesheet" href="poi.css?v=29" /><link rel="stylesheet" href="ui-fixes.css?v=29" /><link rel="stylesheet" href="address-autocomplete.css?v=29" />
+  <link rel="stylesheet" href="styles.css?v=30" /><link rel="stylesheet" href="poi.css?v=30" /><link rel="stylesheet" href="ui-fixes.css?v=30" /><link rel="stylesheet" href="address-autocomplete.css?v=30" />
 </head>
 <body>
 <div id="app">
@@ -32,5 +32,5 @@
 <section class="alerts-panel secondary-ui"><div class="section-title"><h2>Οδηγική επίγνωση</h2><span id="alertCount">0 ειδοποιήσεις</span></div><div id="alertsList" class="alerts-list"><div class="empty">Δεν υπάρχουν ενεργές ειδοποιήσεις.</div></div></section>
 <section class="trip-grid secondary-ui"><article><span>Απόσταση</span><strong id="tripDistance">0.0 km</strong></article><article><span>Χρόνος</span><strong id="tripTime">00:00</strong></article><article><span>Μ. ταχύτητα</span><strong id="avgSpeed">0 km/h</strong></article></section><section class="monitor-card secondary-ui" aria-hidden="true"><div class="section-title"><h2>System Monitor</h2><span id="readyState">CHECKING</span></div><div id="monitorGrid" class="monitor-grid"></div></section></main></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-<script src="map-fallback.js?v=29"></script><script src="session-bootstrap.js?v=29"></script><script src="map-labels.js?v=29"></script><script src="user-marker-hook.js?v=29"></script><script src="reverse-geocode-fallback.js?v=29"></script><script src="walking-router.js?v=29"></script><script type="module" src="app-v2.js?v=29"></script><script src="poi-catalog.js?v=29" defer></script><script src="address-autocomplete.js?v=29" defer></script><script src="drive-completion.js?v=29" defer></script><script src="road-safety.js?v=29" defer></script><script>if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=29');await r.update();}catch{}});}</script>
+<script src="map-fallback.js?v=30"></script><script src="session-bootstrap.js?v=30"></script><script src="map-labels.js?v=30"></script><script src="user-marker-hook.js?v=30"></script><script src="reverse-geocode-fallback.js?v=30"></script><script src="overpass-fallback.js?v=30"></script><script src="walking-router.js?v=30"></script><script type="module" src="app-v2.js?v=30"></script><script src="poi-catalog.js?v=30" defer></script><script src="address-autocomplete.js?v=30" defer></script><script src="drive-completion.js?v=30" defer></script><script src="road-safety.js?v=30" defer></script><script>if('serviceWorker' in navigator){window.addEventListener('load',async()=>{try{const r=await navigator.serviceWorker.register('./sw.js?v=30');await r.update();}catch{}});}</script>
 </body></html>
