@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -126,3 +126,24 @@ jobs:
           node --check /tmp/navigation-search.js
           node --check /tmp/app-v2.js
           curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/deployed-at.txt?run=${GITHUB_RUN_ID}" >/dev/null
+      - name: Checkout source for verification receipt
+        uses: actions/checkout@v4
+        with:
+          ref: feature/lumina-drive-assistant
+      - name: Publish production verification receipt
+        env:
+          EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "LUMINA Production Verifier"
+          git config user.email "actions@users.noreply.github.com"
+          git switch --orphan production-verification-receipt
+          git rm -rf .
+          mkdir -p verification
+          printf '%s\n' "$EXPECTED_SHA" > verification/build.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > verification/verified-at.txt
+          printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > verification/live-url.txt
+          printf '%s\n' "PASS" > verification/status.txt
+          git add verification
+          git commit -m "chore(drive): record production verification ${EXPECTED_SHA}"
+          git push --force origin HEAD:refs/heads/verification/lumina-drive-production
