@@ -17,6 +17,16 @@
     } catch {}
   }
 
+  function normalizeFreeDriveButton(on) {
+    const button = $('#freeDriveBtn');
+    if (!button) return;
+    const icon = button.querySelector('.home-action-icon');
+    const title = button.querySelector('strong');
+    if (icon) icon.textContent = '◎';
+    if (title) title.textContent = on ? 'Free Drive ON' : 'Free Drive';
+    button.setAttribute('aria-pressed', String(!!on));
+  }
+
   function enterFreeDriveUI() {
     document.body.classList.add('free-drive-active');
     $('#navCockpit')?.classList.remove('hidden');
@@ -25,12 +35,14 @@
     setText('#navRoad', $('#roadName')?.textContent || 'Τρέχουσα θέση');
     setText('#navSpeed', $('#speed')?.textContent || '0');
     setText('#navSpeedLimit', $('#speedLimit')?.textContent || '—');
+    normalizeFreeDriveButton(true);
     persistFreeDrive(true);
     setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
   }
 
   function leaveFreeDriveUI() {
     document.body.classList.remove('free-drive-active');
+    normalizeFreeDriveButton(false);
     persistFreeDrive(false);
     if (!document.body.classList.contains('navigation-active')) {
       $('#navCockpit')?.classList.add('hidden');
@@ -40,7 +52,7 @@
 
   function freeDriveIsOn() {
     const b = $('#freeDriveBtn');
-    return !!(b && /ON/i.test(b.textContent));
+    return !!(b && (/ON/i.test(b.querySelector('strong')?.textContent || '') || b.getAttribute('aria-pressed') === 'true'));
   }
 
   function syncFreeDrive() {
