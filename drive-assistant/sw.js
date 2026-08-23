@@ -1,6 +1,6 @@
-const CACHE='lumina-drive-v28';
+const CACHE='lumina-drive-v29';
 const CORE=[
-  './index.html','./styles.css?v=28','./poi.css?v=28','./ui-fixes.css?v=28','./address-autocomplete.css?v=28','./app-v2.js?v=28','./walking-router.js?v=28','./poi-catalog.js?v=28','./address-autocomplete.js?v=28','./map-labels.js?v=28','./map-fallback.js?v=28','./user-marker-hook.js?v=28','./reverse-geocode-fallback.js?v=28','./session-bootstrap.js?v=28','./drive-completion.js?v=28','./road-safety.js?v=28','./manifest.webmanifest?v=28'
+  './index.html','./styles.css?v=29','./poi.css?v=29','./ui-fixes.css?v=29','./address-autocomplete.css?v=29','./app-v2.js?v=29','./walking-router.js?v=29','./poi-catalog.js?v=29','./address-autocomplete.js?v=29','./map-labels.js?v=29','./map-fallback.js?v=29','./user-marker-hook.js?v=29','./reverse-geocode-fallback.js?v=29','./session-bootstrap.js?v=29','./drive-completion.js?v=29','./road-safety.js?v=29','./manifest.webmanifest?v=29'
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
