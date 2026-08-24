@@ -1,7 +1,7 @@
 (()=>{
   if(!window.L||!L.map||L.map.__luminaWrapped)return;
   const originalMap=L.map.bind(L);
-  const ENDPOINTS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  const ENDPOINTS=['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.openstreetmap.fr/api/interpreter','https://overpass.private.coffee/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
   const wrappedMap=function(...args){
     const map=originalMap(...args);window.__luminaDriveMap=map;
     map.createPane('roadNames');const pane=map.getPane('roadNames');pane.style.zIndex='470';pane.style.pointerEvents='none';
