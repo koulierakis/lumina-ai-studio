@@ -1,11 +1,11 @@
 # LUMINA Code Builder — Live Progress
 
-Last updated: 2026-08-24 18:43 EEST
+Last updated: 2026-08-24 18:47 EEST
 Branch: `work/code-builder-refresh`
 
 ## Current status
 
-**FINAL VERIFICATION — functional hardening complete; verifying tracker-only head**
+**FINAL VERIFIED — Code Builder hardening and regression verification complete**
 
 ## Verified
 
@@ -22,14 +22,14 @@ Branch: `work/code-builder-refresh`
 - [x] Rollback after cancellation/timeout uses an independent bounded cleanup token/time budget
 - [x] Unrelated existing repository work remains byte-for-byte unchanged on both success and rollback paths
 - [x] Approved file scope remains enforced
-- [x] Code Builder focused test suite on functional head `9b38cfc`
-- [x] Backend regression suite on functional head `9b38cfc`
-- [x] Frontend Code Builder UI regression on functional head `9b38cfc`
-- [x] Frontend production build on functional head `9b38cfc`
-- [x] Security checks (gitleaks + semgrep) on functional head `9b38cfc`
-- [x] `quality` workflow #849 SUCCESS on functional head `9b38cfc`
-- [x] `code-builder-hardening` workflow #205 SUCCESS on functional head `9b38cfc`
+- [x] Code Builder focused test suite
+- [x] Backend regression suite
+- [x] Frontend Code Builder UI regression
+- [x] Frontend production build
+- [x] Security checks (gitleaks + semgrep)
 - [x] Scope audit: final functional commits modify only Code Builder runtime/test files
+- [x] Final verified head `3d3f342`: `quality` workflow #851 SUCCESS
+- [x] Final verified head `3d3f342`: `code-builder-hardening` workflow #207 SUCCESS
 
 ## Repaired in this final pass
 
@@ -44,9 +44,14 @@ Branch: `work/code-builder-refresh`
 - `backend/tests/test_code_builder_repair_interruption.py`
 - `backend/tests/test_code_builder_unrelated_work_preservation.py`
 
-## Final head check
+## Final verification evidence
 
-The only change after the fully green functional head `9b38cfc` is this tracker update. GitHub Actions are being rechecked on the tracker-only head before declaring the branch final.
+Functional/tracker head `3d3f342c1b5f9afb60ce3c2ec60c5bdec501a8ad` completed both required workflows successfully:
+
+- `quality` #851 — SUCCESS: backend regression, ruff, frontend production build, gitleaks, semgrep.
+- `code-builder-hardening` #207 — SUCCESS: committed Code Builder compile, all Code Builder/planning tests, repeat-safe hardening guards, planning defaults, Code Builder UI regression, frontend production build.
+
+This document-only status commit records those already completed results; it does not alter Code Builder runtime behavior.
 
 ## Rule
 
