@@ -6,10 +6,15 @@
   const safeClick = el => { if (el) el.click(); };
   let arrivalHandled = false;
 
-  function loadEnhancedPoi() {
+  function loadScript(src, marker) {
+    if (document.querySelector(`script[${marker}]`)) return Promise.resolve();
+    return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.async=false;script.setAttribute(marker,'1');script.onload=resolve;script.onerror=reject;document.head.appendChild(script)});
+  }
+  async function loadGoogleAndPoi() {
+    try{await loadScript('./google-places.js?v=49','data-lumina-google-places');await loadScript('./google-key-settings.js?v=49','data-lumina-google-key-settings')}catch(e){console.warn('LUMINA Google bootstrap failed',e)}
     if (document.querySelector('script[data-lumina-poi-enhanced]')) return;
     const script = document.createElement('script');
-    script.src = './poi-enhanced.js?v=48';
+    script.src = './poi-enhanced.js?v=49';
     script.async = true;
     script.dataset.luminaPoiEnhanced = '1';
     document.head.appendChild(script);
@@ -39,6 +44,6 @@
   function speakStatus(){const speed=$('#speed')?.textContent||'0',limit=$('#speedLimit')?.textContent||'άγνωστο',road=$('#roadName')?.textContent||'την τρέχουσα θέση';if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(`Τρέχουσα ταχύτητα ${speed} χιλιόμετρα την ώρα. Όριο ${limit}. Βρίσκεσαι σε ${road}.`);u.lang='el-GR';u.rate=.96;speechSynthesis.speak(u)}
   function reportDanger(){const list=$('#alertsList');if(list)list.insertAdjacentHTML('afterbegin','<div class="alert manual-danger"><span>⚠️</span><div><b>Κίνδυνος</b><small>Χειροκίνητη οδηγική επισήμανση.</small></div></div>');if('vibrate'in navigator)navigator.vibrate([180,100,180])}
   function observeArrival(){const maneuver=$('#maneuverText');if(!maneuver||!window.MutationObserver)return;const check=()=>{const arrived=maneuver.textContent.trim()==='Άφιξη';if(!arrived){arrivalHandled=false;return}if(arrivalHandled)return;arrivalHandled=true;setTimeout(()=>{if(maneuver.textContent.trim()==='Άφιξη')safeClick($('#stopRouteBtn'))},2500)};new MutationObserver(check).observe(maneuver,{childList:true,characterData:true,subtree:true});check()}
-  function bind(){buildHomeToolbar();loadEnhancedPoi();const free=$('#freeDriveBtn');free?.addEventListener('click',()=>setTimeout(syncFreeDrive,0));$('#navStopBtn')?.addEventListener('click',()=>{if(freeDriveIsOn())safeClick(free);setTimeout(leaveFreeDriveUI,0)});const statusBtn=document.createElement('button');statusBtn.type='button';statusBtn.id='navStatusBtn';statusBtn.className='nav-mini';statusBtn.textContent='🔊';statusBtn.setAttribute('aria-label','Κατάσταση οδήγησης');statusBtn.addEventListener('click',speakStatus);const dock=$('#navVoiceDock');if(dock&&!$('#navStatusBtn'))dock.appendChild(statusBtn);const mic=$('#navVoiceBtn');let timer=null;mic?.addEventListener('pointerdown',()=>{timer=setTimeout(reportDanger,900)});['pointerup','pointercancel','pointerleave'].forEach(ev=>mic?.addEventListener(ev,()=>{if(timer)clearTimeout(timer);timer=null}));syncFreeDrive();observeArrival()}
+  function bind(){buildHomeToolbar();loadGoogleAndPoi();const free=$('#freeDriveBtn');free?.addEventListener('click',()=>setTimeout(syncFreeDrive,0));$('#navStopBtn')?.addEventListener('click',()=>{if(freeDriveIsOn())safeClick(free);setTimeout(leaveFreeDriveUI,0)});const statusBtn=document.createElement('button');statusBtn.type='button';statusBtn.id='navStatusBtn';statusBtn.className='nav-mini';statusBtn.textContent='🔊';statusBtn.setAttribute('aria-label','Κατάσταση οδήγησης');statusBtn.addEventListener('click',speakStatus);const dock=$('#navVoiceDock');if(dock&&!$('#navStatusBtn'))dock.appendChild(statusBtn);const mic=$('#navVoiceBtn');let timer=null;mic?.addEventListener('pointerdown',()=>{timer=setTimeout(reportDanger,900)});['pointerup','pointercancel','pointerleave'].forEach(ev=>mic?.addEventListener(ev,()=>{if(timer)clearTimeout(timer);timer=null}));syncFreeDrive();observeArrival()}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 })();
