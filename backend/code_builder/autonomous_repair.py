@@ -19,6 +19,7 @@ from typing import Any, Final
 from . import task_service as _task_service
 from .task_service import (
     TaskBuildError,
+    TaskCancellationError,
     TaskCancellationToken,
     TaskEventLevel,
     TaskExecutionContext,
@@ -26,6 +27,7 @@ from .task_service import (
     TaskServiceError,
     TaskStage,
     TaskStatus,
+    TaskTimeoutError,
     _EventRecorder,
     _extract_paths,
 )
@@ -195,7 +197,12 @@ def _execute_build_stage_with_repair(
             self._execute_patch_validation_stage(context, recorder)
             self._execute_patch_application_stage(context, recorder)
             _ORIGINAL_BUILD_STAGE(self, context, recorder)
-        except (TaskBuildError, TaskServiceError) as repair_failure:
+        except (TaskCancellationError, TaskTimeoutError):
+            # Interruption is a terminal control signal, not a repair failure.
+            # Never consume it as another repair attempt.
+            context.request = original_request
+            raise
+        except TaskServiceError as repair_failure:
             failure = repair_failure
             _record(
                 self,
