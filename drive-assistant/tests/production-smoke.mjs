@@ -19,7 +19,7 @@ const kanali=await get(k);assert.ok(kanali.length,'Kanali geocoding returned no 
 const lat=Number(kanali[0].lat),lon=Number(kanali[0].lon);assert.ok(Number.isFinite(lat)&&Number.isFinite(lon),'Kanali coordinates invalid');
 const q=`[out:json][timeout:20];(nwr(around:10000,${lat},${lon})[amenity=restaurant];nwr(around:10000,${lat},${lon})[amenity=cafe];nwr(around:10000,${lat},${lon})[tourism=hotel];nwr(around:10000,${lat},${lon})[tourism=apartment];nwr(around:10000,${lat},${lon})[amenity=pharmacy];nwr(around:10000,${lat},${lon})[amenity=fuel];);out center tags;`;
 let poi=null,last=null;
-for(const ep of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter']){try{poi=await get(`${ep}?data=${encodeURIComponent(q)}`,25000);break}catch(e){last=e}}
+for(const ep of ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter','https://overpass.openstreetmap.fr/api/interpreter','https://overpass.private.coffee/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter']){try{poi=await get(`${ep}?data=${encodeURIComponent(q)}`,25000);break}catch(e){last=e}}
 if(!poi)throw last||new Error('Overpass unavailable');
 const named=(poi.elements||[]).filter(e=>e.tags?.name||e.tags?.brand||e.tags?.operator);
 assert.ok(named.length>=5,`Kanali live POI smoke found only ${named.length} named places`);
