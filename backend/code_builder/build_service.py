@@ -1199,6 +1199,7 @@ def resolve_executable(
             candidate = repository_root / candidate
 
         resolved = _validate_resolved_executable_file(candidate)
+        execution_path = candidate.absolute()
 
         if _is_relative_to(resolved, repository_root):
             if (
@@ -1219,7 +1220,7 @@ def resolve_executable(
                 f"in the custom-command allowlist: {resolved}"
             )
 
-        return resolved
+        return execution_path
 
     environment = dict(search_environment or os.environ)
     path_value = environment.get("PATH") or environment.get("Path") or ""
@@ -1245,6 +1246,7 @@ def resolve_executable(
         )
 
     resolved = _validate_resolved_executable_file(Path(located))
+    execution_path = Path(located).absolute()
 
     if (
         _is_relative_to(resolved, repository_root)
@@ -1256,7 +1258,7 @@ def resolve_executable(
             f"not permitted: {resolved}"
         )
 
-    return resolved
+    return execution_path
 
 
 def _invoke_optional_security_hook(
