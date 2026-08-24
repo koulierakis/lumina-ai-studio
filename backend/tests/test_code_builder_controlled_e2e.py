@@ -133,8 +133,8 @@ def test_e2e_modifies_existing_file_and_verifies_result(tmp_path: Path) -> None:
                 {
                     "operation": "replace_text",
                     "path": path,
-                    "search": "VALUE = 'before'",
-                    "replacement": "VALUE = 'after'",
+                    "search_text": "VALUE = 'before'",
+                    "replacement_text": "VALUE = 'after'",
                     "description": "Controlled existing-file modification.",
                 }
             ]
@@ -170,14 +170,14 @@ def test_e2e_modifies_multiple_files_and_verifies_all_results(tmp_path: Path) ->
                 {
                     "operation": "replace_text",
                     "path": first_path,
-                    "search": "FIRST = 1",
-                    "replacement": "FIRST = 2",
+                    "search_text": "FIRST = 1",
+                    "replacement_text": "FIRST = 2",
                 },
                 {
                     "operation": "replace_text",
                     "path": second_path,
-                    "search": "SECOND = 1",
-                    "replacement": "SECOND = 2",
+                    "search_text": "SECOND = 1",
+                    "replacement_text": "SECOND = 2",
                 },
             ]
         },
