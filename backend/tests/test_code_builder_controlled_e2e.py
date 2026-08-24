@@ -11,7 +11,7 @@ from backend.code_builder.build_service import (
     BuildServiceConfiguration,
     BuildStatus,
 )
-from backend.code_builder.patch_service import PatchService
+from backend.code_builder.patch_service import PatchRequestPayload, PatchService
 from backend.code_builder.planning_service import (
     GeneratedChangePlan,
     GeneratedFileChange,
@@ -54,6 +54,29 @@ class _UnusedModelService:
     pass
 
 
+class _RepairingPatchService(PatchService):
+    def __init__(self, *, repository_root: Path, repair_path: str) -> None:
+        super().__init__(repository_root=repository_root)
+        self.repair_path = repair_path
+        self.generated_repairs = 0
+
+    def generate_patch(self, **_: object) -> PatchRequestPayload:
+        self.generated_repairs += 1
+        return PatchRequestPayload.model_validate(
+            {
+                "operations": [
+                    {
+                        "operation": "replace_file",
+                        "path": self.repair_path,
+                        "content": "def test_repair_target():\n    assert True\n",
+                        "description": "Controlled automatic repair after real pytest failure.",
+                    }
+                ],
+                "description": "Repair the controlled failing test.",
+            }
+        )
+
+
 def _plan(paths: tuple[str, ...]) -> GeneratedChangePlan:
     return GeneratedChangePlan(
         title="Controlled Code Builder E2E",
@@ -85,12 +108,17 @@ def _plan(paths: tuple[str, ...]) -> GeneratedChangePlan:
     )
 
 
-def _service(root: Path, paths: tuple[str, ...]) -> TaskService:
+def _service(
+    root: Path,
+    paths: tuple[str, ...],
+    *,
+    patch_service: PatchService | None = None,
+) -> TaskService:
     return TaskService(
         repository_service=_RepositoryService(root),
         planning_service=_PlanningService(_plan(paths)),
         backup_service=BackupService(root),
-        patch_service=PatchService(repository_root=root),
+        patch_service=patch_service or PatchService(repository_root=root),
         build_service=BuildService(
             BuildServiceConfiguration(
                 repository_root=root,
@@ -199,3 +227,58 @@ def test_e2e_modifies_multiple_files_and_verifies_all_results(tmp_path: Path) ->
     assert result.build_result.status is BuildStatus.SUCCEEDED
     assert all(command.status is BuildStatus.SUCCEEDED for command in result.build_result.commands)
     assert result.rollback_attempted is False
+
+
+def test_e2e_detects_pytest_failure_repairs_file_and_retests(tmp_path: Path) -> None:
+    path = "test_repair_target.py"
+    target = tmp_path / path
+    broken_content = "def test_repair_target():\n    assert False\n"
+    repaired_content = "def test_repair_target():\n    assert True\n"
+    repair_patch_service = _RepairingPatchService(
+        repository_root=tmp_path,
+        repair_path=path,
+    )
+
+    request = TaskRequest(
+        instruction="Create the controlled test and ensure it passes.",
+        target_paths=(path,),
+        metadata={
+            "max_automatic_repair_attempts": 2,
+            "patch_operations": [
+                {
+                    "operation": "create",
+                    "path": path,
+                    "content": broken_content,
+                    "description": "Controlled initial implementation that must fail pytest.",
+                }
+            ],
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="controlled-repair-pytest",
+                kind=BuildCommandKind.PYTEST,
+                arguments=(path,),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(
+        tmp_path,
+        (path,),
+        patch_service=repair_patch_service,
+    ).execute_internal(request)
+
+    assert result.status is TaskStatus.SUCCEEDED, result.error_message
+    assert target.read_text(encoding="utf-8") == repaired_content
+    assert repair_patch_service.generated_repairs == 1
+    assert result.metadata["automatic_repair_attempts"] == 1
+    assert result.metadata["automatic_repair_succeeded"] is True
+    assert result.build_result is not None
+    assert result.build_result.status is BuildStatus.SUCCEEDED
+    assert result.rollback_attempted is False
+    messages = [event.message for event in result.events]
+    assert any("Automatic repair attempt started" in message for message in messages)
+    assert any("Automatic repair completed" in message for message in messages)
