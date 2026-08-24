@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v47-kanali-poi-fallback
+# deployment-trigger: redeploy-latest-feature-source-2026-08-24
 
 on:
   push:
@@ -80,7 +80,7 @@ jobs:
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live v47 POI assets
+      - name: Verify live latest Drive assets
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
