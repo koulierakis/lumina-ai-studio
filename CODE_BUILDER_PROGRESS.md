@@ -1,11 +1,11 @@
 # LUMINA Code Builder — Live Progress
 
-Last updated: 2026-08-24
+Last updated: 2026-08-24 18:00 EEST
 Branch: `work/code-builder-refresh`
 
 ## Current status
 
-**IN PROGRESS — autonomous hardening and end-to-end verification**
+**IN PROGRESS — lifecycle/state audit**
 
 ## Verified
 
@@ -21,10 +21,12 @@ Branch: `work/code-builder-refresh`
 - [x] Frontend Code Builder UI regression
 - [x] Frontend production build
 - [x] Security checks
+- [x] Latest quality workflow SUCCESS
+- [x] Latest code-builder-hardening workflow SUCCESS
 
 ## Current work
 
-- [ ] Audit remaining task lifecycle/state observability gaps
+- [>] Audit remaining task lifecycle/state observability gaps
 - [ ] Strengthen failure/timeout/interruption handling where evidence requires it
 - [ ] Verify repository/Git safety and unrelated-work preservation
 - [ ] Run final Code Builder regression and E2E verification
