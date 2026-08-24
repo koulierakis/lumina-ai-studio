@@ -1,11 +1,14 @@
-"""Bounded automatic repair loop for LUMINA Code Builder.
+"""Bounded automatic repair and interruption-safe rollback for Code Builder.
 
-This module installs a narrow wrapper around TaskService's build-validation
-stage.  It does not replace the orchestrator.  When mandatory validation
-fails after a patch was applied, the wrapper feeds the real failure back into
-the existing analysis/planning/patch pipeline, applies a targeted corrective
-patch, and re-runs validation.  Repair is bounded, cancellation-aware, and
-restricted to the paths in the already-approved implementation plan.
+This module installs narrow wrappers around TaskService.  The build wrapper
+feeds mandatory validation failures back into the existing
+analysis/planning/patch pipeline, applies a targeted corrective patch, and
+re-runs validation.  Repair is bounded, cancellation-aware, and restricted to
+the paths in the already-approved implementation plan.
+
+The rollback wrapper isolates cleanup from the interruption that caused the
+failure.  Once task changes exist, cancellation or expiry of the main task
+must not prevent the bounded rollback stage from restoring the repository.
 """
 
 from __future__ import annotations
@@ -13,8 +16,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Final
 
+from . import task_service as _task_service
 from .task_service import (
     TaskBuildError,
+    TaskCancellationToken,
     TaskEventLevel,
     TaskExecutionContext,
     TaskService,
@@ -29,6 +34,8 @@ DEFAULT_MAX_AUTOMATIC_REPAIR_ATTEMPTS: Final[int] = 2
 MAX_AUTOMATIC_REPAIR_ATTEMPTS: Final[int] = 5
 
 _ORIGINAL_BUILD_STAGE = TaskService._execute_build_stage
+_ORIGINAL_ROLLBACK = _task_service._rollback
+_ORIGINAL_REMAINING_STAGE_TIMEOUT = _task_service._remaining_stage_timeout
 _INSTALLED = False
 
 
@@ -233,14 +240,57 @@ def _execute_build_stage_with_repair(
     raise TaskBuildError(str(failure))
 
 
+def _remaining_stage_timeout_with_cleanup(
+    context: TaskExecutionContext,
+    configured_timeout: float,
+) -> float:
+    """Give rollback its own bounded cleanup budget after interruption."""
+    if context.status is TaskStatus.ROLLING_BACK:
+        return configured_timeout
+    return _ORIGINAL_REMAINING_STAGE_TIMEOUT(context, configured_timeout)
+
+
+def _rollback_during_interruption(
+    context: TaskExecutionContext,
+    *,
+    backup_service: Any,
+    patch_service: Any,
+) -> Any:
+    """Run rollback with a fresh token while preserving the task token.
+
+    The main task token may already be cancelled and the overall task deadline
+    may already be exhausted.  Those are reasons to stop normal work, not
+    reasons to skip repository recovery.  Rollback remains bounded by the
+    configured rollback timeout passed to the underlying rollback service.
+    """
+    original_token = context.cancellation_token
+    cleanup_token = TaskCancellationToken(task_id=context.request.task_id)
+    context.cancellation_token = cleanup_token
+    try:
+        return _ORIGINAL_ROLLBACK(
+            context,
+            backup_service=backup_service,
+            patch_service=patch_service,
+        )
+    finally:
+        context.cancellation_token = original_token
+
+
 def install_automatic_repair() -> None:
-    """Install the repair wrapper exactly once for this Python process."""
+    """Install the repair and rollback wrappers exactly once per process."""
     global _INSTALLED
     if _INSTALLED:
         return
     TaskService._execute_build_stage = _execute_build_stage_with_repair
+    _task_service._remaining_stage_timeout = _remaining_stage_timeout_with_cleanup
+    _task_service._rollback = _rollback_during_interruption
     _INSTALLED = True
 
 
 def automatic_repair_installed() -> bool:
-    return bool(_INSTALLED and TaskService._execute_build_stage is _execute_build_stage_with_repair)
+    return bool(
+        _INSTALLED
+        and TaskService._execute_build_stage is _execute_build_stage_with_repair
+        and _task_service._remaining_stage_timeout is _remaining_stage_timeout_with_cleanup
+        and _task_service._rollback is _rollback_during_interruption
+    )
