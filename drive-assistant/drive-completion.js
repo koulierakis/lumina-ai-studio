@@ -9,7 +9,7 @@
   function loadEnhancedPoi() {
     if (document.querySelector('script[data-lumina-poi-enhanced]')) return;
     const script = document.createElement('script');
-    script.src = './poi-enhanced.js?v=45';
+    script.src = './poi-enhanced.js?v=48';
     script.async = true;
     script.dataset.luminaPoiEnhanced = '1';
     document.head.appendChild(script);
