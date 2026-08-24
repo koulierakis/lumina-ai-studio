@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: redeploy-latest-feature-source-2026-08-24
+# deployment-trigger: v48-nearby-current-gps
 
 on:
   push:
@@ -39,7 +39,9 @@ jobs:
           for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
           grep -Fq 'map-poi-layer.js?v=47' drive-assistant/index.html
           grep -Fq 'map-labels.js?v=47' drive-assistant/index.html
-          grep -Fq "const CACHE='lumina-drive-v47'" drive-assistant/sw.js
+          grep -Fq "const CACHE='lumina-drive-v48'" drive-assistant/sw.js
+          grep -Fq 'poi-enhanced.js?v=48' drive-assistant/drive-completion.js
+          grep -Fq 'RADII=[1200,2500,5000,10000]' drive-assistant/poi-enhanced.js
           grep -Fq 'overpass.openstreetmap.fr' drive-assistant/poi-enhanced.js
           grep -Fq 'overpass.private.coffee' drive-assistant/overpass-fallback.js
           grep -Fq 'maps.mail.ru/osm/tools/overpass' drive-assistant/poi-catalog.js
@@ -80,7 +82,7 @@ jobs:
     needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify live latest Drive assets
+      - name: Verify live v48 Drive assets
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
           BASE_URL: https://koulierakis.github.io/lumina-ai-studio
@@ -93,14 +95,17 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          for f in index.html drive-completion.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
           grep -Fq 'map-poi-layer.js?v=47' /tmp/index.html
           grep -Fq 'map-labels.js?v=47' /tmp/index.html
+          grep -Fq 'poi-enhanced.js?v=48' /tmp/drive-completion.js
+          grep -Fq 'RADII=[1200,2500,5000,10000]' /tmp/poi-enhanced.js
           grep -Fq 'overpass.openstreetmap.fr' /tmp/poi-enhanced.js
           grep -Fq 'overpass.private.coffee' /tmp/overpass-fallback.js
           grep -Fq 'maps.mail.ru/osm/tools/overpass' /tmp/poi-catalog.js
-          grep -Fq "const CACHE='lumina-drive-v47'" /tmp/sw.js
+          grep -Fq "const CACHE='lumina-drive-v48'" /tmp/sw.js
           grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
+          node --check /tmp/drive-completion.js
           node --check /tmp/map-poi-layer.js
           node --check /tmp/map-labels.js
           node --check /tmp/poi-catalog.js
