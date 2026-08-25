@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v53-full-street-labels-typography
+# deployment-trigger: v53-cache-bust-mobile-assets
 
 on:
   push:
@@ -37,10 +37,12 @@ jobs:
           set -euo pipefail
           for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css premium-v52.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
           for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
-          grep -Fq 'map-poi-layer.js?v=52' drive-assistant/index.html
-          grep -Fq 'map-labels.js?v=52' drive-assistant/index.html
-          grep -Fq 'premium-v52.css?v=52' drive-assistant/index.html
-          grep -Fq "const CACHE='lumina-drive-v52'" drive-assistant/sw.js
+          grep -Fq 'map-poi-layer.js?v=53' drive-assistant/index.html
+          grep -Fq 'map-labels.js?v=53' drive-assistant/index.html
+          grep -Fq 'navigation-search.js?v=53' drive-assistant/index.html
+          grep -Fq 'premium-v52.css?v=53' drive-assistant/index.html
+          grep -Fq 'lumina-drive-cache-reset-v53' drive-assistant/index.html
+          grep -Fq "const CACHE='lumina-drive-v53'" drive-assistant/sw.js
           grep -Fq 'Place.searchByText' drive-assistant/google-places.js
           grep -Fq 'Place.searchNearby' drive-assistant/google-places.js
           grep -Fq 'LuminaGooglePlaces.textSearch' drive-assistant/navigation-search.js
@@ -106,9 +108,11 @@ jobs:
           done
           test "$ok" = 1
           for f in index.html drive-completion.js navigation-search.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js premium-v52.css sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
-          grep -Fq 'map-poi-layer.js?v=52' /tmp/index.html
-          grep -Fq 'map-labels.js?v=52' /tmp/index.html
-          grep -Fq 'premium-v52.css?v=52' /tmp/index.html
+          grep -Fq 'map-poi-layer.js?v=53' /tmp/index.html
+          grep -Fq 'map-labels.js?v=53' /tmp/index.html
+          grep -Fq 'navigation-search.js?v=53' /tmp/index.html
+          grep -Fq 'premium-v52.css?v=53' /tmp/index.html
+          grep -Fq 'lumina-drive-cache-reset-v53' /tmp/index.html
           grep -Fq 'maneuver-symbol' /tmp/drive-completion.js
           grep -Fq 'slightRight' /tmp/drive-completion.js
           grep -Fq 'if(z<13' /tmp/map-labels.js
@@ -119,7 +123,7 @@ jobs:
           grep -Fq 'Place.searchNearby' /tmp/google-places.js
           grep -Fq 'LuminaGooglePlaces.textSearch' /tmp/navigation-search.js
           grep -Fq 'overpass.private.coffee' /tmp/overpass-fallback.js
-          grep -Fq "const CACHE='lumina-drive-v52'" /tmp/sw.js
+          grep -Fq "const CACHE='lumina-drive-v53'" /tmp/sw.js
           grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
           node --check /tmp/drive-completion.js
           node --check /tmp/navigation-search.js
