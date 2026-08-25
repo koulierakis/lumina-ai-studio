@@ -11,7 +11,7 @@
     return a.road||a.pedestrian||a.residential||a.footway||a.path||a.neighbourhood||a.suburb||j.name||j.display_name?.split(',')[0]||'';
   }
   async function photon(lat,lng){
-    const u=new URL('https://photon.komoot.io/reverse');u.searchParams.set('lat',lat);u.searchParams.set('lon',lng);u.searchParams.set('lang','el');
+    const u=new URL('https://photon.komoot.io/reverse');u.searchParams.set('lat',lat);u.searchParams.set('lon',lng);u.searchParams.set('lang','en');
     const r=await fetch(u,{headers:{Accept:'application/json'},cache:'no-store'});if(!r.ok)throw new Error('photon');
     const j=await r.json(),p=j.features?.[0]?.properties||{};
     return p.street||p.name||p.district||p.city||p.town||p.village||'';
