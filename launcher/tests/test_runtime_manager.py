@@ -1,7 +1,6 @@
 """Unit tests for LUMINA runtime manager (no live services required)."""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -17,7 +16,7 @@ from lumina import readiness  # noqa: E402
 from lumina import state as state_mod  # noqa: E402
 from lumina.config import ConfigError, load_config, save_config, validate_config  # noqa: E402
 from lumina.errors import AlreadyRunningError  # noqa: E402
-from lumina.services import is_lumina_running, start_all  # noqa: E402
+from lumina.services import start_all  # noqa: E402
 
 
 @pytest.fixture()

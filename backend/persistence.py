@@ -7,8 +7,9 @@ import os
 import sqlite3
 import threading
 from abc import ABC, abstractmethod
+from datetime import UTC
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 
 logger = logging.getLogger("lumina.persistence")
 
@@ -20,9 +21,9 @@ def runtime_database_path() -> Path:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _json_default(value: Any) -> str:
@@ -33,12 +34,12 @@ class PersistenceCursor:
     def __init__(self, rows: list[dict[str, Any]]):
         self.rows = rows
 
-    def sort(self, key: str, direction: int = 1) -> "PersistenceCursor":
+    def sort(self, key: str, direction: int = 1) -> PersistenceCursor:
         reverse = direction < 0
         self.rows.sort(key=lambda item: item.get(key) or "", reverse=reverse)
         return self
 
-    def limit(self, count: int) -> "PersistenceCursor":
+    def limit(self, count: int) -> PersistenceCursor:
         self.rows = self.rows[: max(0, int(count))]
         return self
 
@@ -69,7 +70,7 @@ class PersistenceProvider(ABC):
     async def insert_one(self, table: str, document: dict[str, Any]) -> None: ...
 
     @abstractmethod
-    async def find_one(self, table: str, query: dict[str, Any]) -> Optional[dict[str, Any]]: ...
+    async def find_one(self, table: str, query: dict[str, Any]) -> dict[str, Any] | None: ...
 
     @abstractmethod
     def find(self, table: str, query: dict[str, Any]) -> PersistenceCursor: ...
@@ -112,7 +113,7 @@ class MongoPersistenceProvider(PersistenceProvider):
     async def insert_one(self, table: str, document: dict[str, Any]) -> None:
         await self.db[table].insert_one(document)
 
-    async def find_one(self, table: str, query: dict[str, Any]) -> Optional[dict[str, Any]]:
+    async def find_one(self, table: str, query: dict[str, Any]) -> dict[str, Any] | None:
         return await self.db[table].find_one(query, {"_id": 0})
 
     def find(self, table: str, query: dict[str, Any]) -> Any:
@@ -210,7 +211,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         interrupted = {"status": "failed", "stage": "interrupted", "safe_error_message": "The backend restarted before this job finished.", "error": "The backend restarted before this job finished.", "updated_at": _now_iso(), "completed_at": _now_iso()}
         for table in ("talking_portrait_jobs", "talking_portrait_install_jobs"):
             for status in ACTIVE_JOB_STATUSES:
-                rows = list((await asyncio.to_thread(self._find_sync, table, {"status": status})))
+                rows = list(await asyncio.to_thread(self._find_sync, table, {"status": status}))
                 for row in rows:
                     await self.update_one(table, {"id": row["id"]}, {"$set": interrupted})
 
@@ -296,7 +297,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         docs = [json.loads(row["data_json"]) for row in rows]
         return [doc for doc in docs if self._matches(doc, query)]
 
-    async def find_one(self, table: str, query: dict[str, Any]) -> Optional[dict[str, Any]]:
+    async def find_one(self, table: str, query: dict[str, Any]) -> dict[str, Any] | None:
         rows = await asyncio.to_thread(self._find_sync, table, query)
         return rows[0] if rows else None
 
@@ -387,7 +388,7 @@ class TalkingPortraitCollection:
     async def insert_one(self, document: dict[str, Any]) -> None:
         await self.provider.insert_one(self.table, document)
 
-    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         del projection
         return await self.provider.find_one(self.table, query)
 
@@ -417,7 +418,7 @@ class LocalPersistenceCollection:
     async def insert_one(self, document: dict[str, Any]) -> None:
         await self.provider.insert_one(self.table, document)
 
-    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         doc = await self.provider.find_one(self.table, query)
         return _project_document(doc, projection)
 
@@ -449,7 +450,7 @@ class LocalPersistenceCollection:
         deleted = await self.provider.delete_many(self.table, query)
         return type("DeleteResult", (), {"deleted_count": deleted})()
 
-    async def find_one_and_update(self, query: dict[str, Any], update: dict[str, Any], return_document: Any = None, projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one_and_update(self, query: dict[str, Any], update: dict[str, Any], return_document: Any = None, projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         del return_document
         doc = await self.provider.find_one(self.table, query)
         if not doc:
@@ -458,7 +459,7 @@ class LocalPersistenceCollection:
         await self.provider.insert_one(self.table, new_doc)
         return _project_document(new_doc, projection)
 
-    async def find_one_and_delete(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one_and_delete(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         doc = await self.provider.find_one(self.table, query)
         if not doc:
             return None
@@ -469,7 +470,7 @@ class LocalPersistenceCollection:
         return await self.provider.count_documents(self.table, query)
 
 
-def _project_document(document: Optional[dict[str, Any]], projection: dict[str, Any] | None) -> Optional[dict[str, Any]]:
+def _project_document(document: dict[str, Any] | None, projection: dict[str, Any] | None) -> dict[str, Any] | None:
     if document is None or not projection:
         return document
     doc = dict(document)

@@ -6,13 +6,12 @@ import os
 import urllib.error
 import urllib.request
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
+from auth import require_owner
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
-
-from auth import require_owner
 
 router = APIRouter(prefix="/api/mentor", tags=["Mentor"])
 
@@ -22,7 +21,7 @@ _ollama_base_url = "http://127.0.0.1:11434"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _new_id() -> str:

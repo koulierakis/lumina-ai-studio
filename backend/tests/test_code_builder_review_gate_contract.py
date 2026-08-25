@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
-
 from code_builder.router import _validate_review_allows_approval
+from fastapi import HTTPException
 
 
 def test_completed_pass_review_allows_approval() -> None:

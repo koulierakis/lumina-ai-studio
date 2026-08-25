@@ -18,7 +18,6 @@ from .backup_service import (
     BackupService,
 )
 from .build_service import (
-    BuildCommandResult,
     BuildCommandSpec,
     BuildExecutionOptions,
     BuildSequenceResult,
@@ -28,14 +27,12 @@ from .build_service import (
     create_default_validation_sequence,
 )
 from .ollama_service import OllamaService
-from .patch_service import PatchService
-from .patch_service import PatchRequestPayload
+from .patch_service import PatchRequestPayload, PatchService
 from .planning_service import PlanningService
 from .repository_service import RepositoryService
 from .security import (
     SecurityError,
 )
-
 
 DEFAULT_TASK_TIMEOUT_SECONDS: Final[float] = 3600.0
 DEFAULT_ANALYSIS_TIMEOUT_SECONDS: Final[float] = 300.0
@@ -1227,7 +1224,8 @@ def _run_awaitable_sync(
 
     import asyncio
     import inspect
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeoutError
 
     if not inspect.isawaitable(awaitable):
         return awaitable
@@ -1258,7 +1256,7 @@ def _run_awaitable_sync(
     except RuntimeError:
         try:
             return asyncio.run(_runner())
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise TaskTimeoutError(
                 f"{operation_name} timed out.",
                 timeout_seconds=timeout_seconds,
@@ -3662,13 +3660,13 @@ class TaskService:
             )
 
             raise TaskRollbackError(
-                (
+
                     "Task failed and rollback also failed. "
                     f"Original error: "
                     f"{_safe_error_message(original_error)}. "
                     f"Rollback error: "
                     f"{_safe_error_message(rollback_error)}"
-                )
+
             ) from rollback_error
 
         context.rollback_succeeded = True

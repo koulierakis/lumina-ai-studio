@@ -7,11 +7,10 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Final, Protocol, cast
+from typing import Annotated, Any, Final, Protocol
 
 from fastapi import (
     APIRouter,
@@ -20,20 +19,16 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
-    Request,
     Response,
     status,
 )
-from fastapi.responses import JSONResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     field_validator,
-    model_validator,
 )
 
-from . import models as domain_models
 from .backup_service import BackupService
 from .build_service import (
     BuildCommandSpec,
@@ -51,20 +46,16 @@ from .task_service import (
     TaskCancellationToken,
     TaskExecutionResult,
     TaskRequest,
-    TaskResultMappingError,
     TaskService,
     TaskServiceConfiguration,
-    TaskServiceError,
     TaskStatus,
     TaskTimeoutError,
-    TaskValidationError,
+    _run_awaitable_sync,
     create_task_service,
     get_task_result_changed_paths,
     get_task_result_error,
     is_successful_task_result,
-    _run_awaitable_sync,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -398,7 +389,7 @@ class RepositoryNodeResponse(BaseModel):
     node_type: RepositoryNodeType
     size_bytes: int | None = None
     modified_at_epoch: float | None = None
-    children: tuple["RepositoryNodeResponse", ...] = Field(
+    children: tuple[RepositoryNodeResponse, ...] = Field(
         default_factory=tuple
     )
 

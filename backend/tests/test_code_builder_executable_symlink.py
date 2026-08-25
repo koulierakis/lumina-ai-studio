@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import pytest
-
 from code_builder.build_service import resolve_executable
 
 

@@ -7,7 +7,7 @@ import Login from './pages/Login';
 import IdentityPacks from './pages/IdentityPacks';
 import Generate from './pages/Generate';
 import Gallery from './pages/Gallery';
-import ComingSoon from './pages/ComingSoon';
+import ProductivityCenter from './pages/ProductivityCenter';
 import Editor from './pages/Editor';
 import EditorLanding from './pages/EditorLanding';
 import VideoStudio from './pages/VideoStudio';
@@ -72,9 +72,9 @@ export default function App() {
               <Route path="projects" element={<WorkspaceCenter mode="projects" />} />
               <Route path="projects/:projectId" element={<ProjectDetail />} />
               <Route path="documents" element={<DocumentStudio />} />
-              <Route path="finance" element={<Navigate to="/studio/advisor" replace />} />
-              <Route path="research" element={<ComingSoon title="Internet Research" />} />
-              <Route path="automations" element={<ComingSoon title="Automations" />} />
+              <Route path="finance" element={<ProductivityCenter mode="finance" />} />
+              <Route path="research" element={<ProductivityCenter mode="research" />} />
+              <Route path="automations" element={<ProductivityCenter mode="automations" />} />
               <Route path="settings" element={<WorkspaceCenter mode="settings" />} />
               <Route path="search" element={<WorkspaceCenter mode="search" />} />
             </Route>

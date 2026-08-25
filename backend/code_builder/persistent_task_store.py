@@ -18,7 +18,6 @@ from .router import (
 )
 from .task_service import TaskCancellationToken, TaskRequest, TaskStatus
 
-
 _DEFAULT_DB_PATH = (
     Path(__file__).resolve().parents[2]
     / ".lumina-runtime"
@@ -43,7 +42,7 @@ _UNSAFE_INTERRUPTED_PHASES = {
 # persistence model.  Keep persistence outside that dataclass and register the
 # owning store by task id.  The touch hook is installed once and makes every
 # existing router mutation durable without changing the orchestration API.
-_STORE_BY_TASK_ID: dict[str, "PersistentTaskStore"] = {}
+_STORE_BY_TASK_ID: dict[str, PersistentTaskStore] = {}
 _STORE_REGISTRY_LOCK = threading.RLock()
 _ORIGINAL_TOUCH = StoredTask.touch
 _TOUCH_INSTALLED = False

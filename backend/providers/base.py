@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any
 
 
 class ErrorKind(str, Enum):
@@ -190,14 +190,14 @@ class GenerationInput:
     aspect_ratio: str = "1:1"
     resolution: str = "1024"
     quality: str = "standard"
-    seed: Optional[int] = None
+    seed: int | None = None
     mode: str = "text-to-image"
     identity_lock: str = "high"
     metadata: dict[str, Any] = field(default_factory=dict)
     count: int = 1
-    model: Optional[str] = None
-    reference_images: List[bytes] = field(default_factory=list)
-    reference_mimes: List[str] = field(default_factory=list)
+    model: str | None = None
+    reference_images: list[bytes] = field(default_factory=list)
+    reference_mimes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -226,7 +226,7 @@ class ImageProvider:
             detail="ready" if configured else "credentials not configured",
         )
 
-    async def generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    async def generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         raise ProviderUnsupportedCapabilityError(self.name, "Generation is unsupported")
 
     async def edit(
@@ -234,8 +234,8 @@ class ImageProvider:
         source_bytes: bytes,
         source_mime: str,
         instruction: str,
-        mask_bytes: Optional[bytes] = None,
-        mask_mime: Optional[str] = None,
-        identity_refs: Optional[List[bytes]] = None,
+        mask_bytes: bytes | None = None,
+        mask_mime: str | None = None,
+        identity_refs: list[bytes] | None = None,
     ) -> GeneratedImage:
         raise ProviderUnsupportedCapabilityError(self.name, "Editing is unsupported")

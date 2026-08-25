@@ -17,7 +17,6 @@ import random
 import urllib.error
 import urllib.request
 import uuid
-from typing import List
 
 from PIL import Image
 
@@ -30,7 +29,6 @@ from .base import (
     ProviderError,
     ProviderInvalidResponseError,
 )
-
 
 DEFAULT_MODEL = "@cf/black-forest-labs/flux-2-klein-4b"
 DEFAULT_IDENTITY_MODEL = "@cf/black-forest-labs/flux-2-dev"
@@ -279,7 +277,7 @@ class CloudflareWorkersAIProvider(ImageProvider):
             raise ProviderInvalidResponseError(self.name)
         return GeneratedImage(data=image_bytes, mime_type="image/jpeg")
 
-    async def generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    async def generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         count = max(1, min(int(spec.count or 1), 4))
         tasks = [asyncio.to_thread(self._call_sync, spec) for _ in range(count)]
         results = await asyncio.gather(*tasks, return_exceptions=True)

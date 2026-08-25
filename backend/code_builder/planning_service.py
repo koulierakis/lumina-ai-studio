@@ -26,13 +26,11 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
 import time
-from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Final
@@ -52,15 +50,12 @@ from .ollama_service import (
     OllamaUnavailableError,
 )
 from .security import (
-    BlockedFileError,
-    UnsafePathError,
     evaluate_safe_path,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
-UTC = timezone.utc
+UTC = UTC
 
 DEFAULT_PLANNING_MODEL: Final[str] = "qwen2.5-coder:7b"
 DEFAULT_MAX_CONTEXT_FILES: Final[int] = 80
@@ -795,7 +790,7 @@ class PlanningContextFile:
         }
 
         for key, value in optional_values.items():
-            if value not in (None, "", [], ()): 
+            if value not in (None, "", [], ()):
                 result[key] = value
 
         return result

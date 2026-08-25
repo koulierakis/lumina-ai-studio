@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from backend.code_builder.backup_service import BackupService
 from backend.code_builder.build_service import (

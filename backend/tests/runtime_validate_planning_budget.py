@@ -3,10 +3,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import time
-from datetime import datetime, timezone
-from pathlib import Path
 import sys
+import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -27,7 +27,6 @@ from code_builder.planning_service import (
     PlanningService,
 )
 from code_builder.repository_service import RepositoryService
-
 
 PLANNING_TASK = (
     "Add a small backend Code Builder enhancement that improves planning "
@@ -60,7 +59,7 @@ CONFIGURATIONS = [
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _estimate_tokens(text: str) -> int:
@@ -93,29 +92,28 @@ async def _stream_ollama(
         async with httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
-        ) as client:
-            async with client.stream(
-                "POST",
-                "/api/generate",
-                json=payload,
-            ) as response:
-                response.raise_for_status()
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    now = time.monotonic()
-                    chunks += 1
-                    if first_chunk_seconds is None:
-                        first_chunk_seconds = now - started
-                    event = json.loads(line)
-                    text = event.get("response")
-                    if isinstance(text, str) and text:
-                        content_parts.append(text)
-                        if first_content_seconds is None:
-                            first_content_seconds = now - started
-                    if event.get("done") is True:
-                        final_payload = event
-                        break
+        ) as client, client.stream(
+            "POST",
+            "/api/generate",
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                now = time.monotonic()
+                chunks += 1
+                if first_chunk_seconds is None:
+                    first_chunk_seconds = now - started
+                event = json.loads(line)
+                text = event.get("response")
+                if isinstance(text, str) and text:
+                    content_parts.append(text)
+                    if first_content_seconds is None:
+                        first_content_seconds = now - started
+                if event.get("done") is True:
+                    final_payload = event
+                    break
     except httpx.TimeoutException:
         error_type = "timeout"
     except httpx.HTTPError as exc:

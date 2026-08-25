@@ -4,12 +4,11 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-
 from code_builder.task_service import TaskTimeoutError, _run_awaitable_sync
 
 
 async def _raise_asyncio_timeout() -> None:
-    raise asyncio.TimeoutError("simulated timeout")
+    raise TimeoutError("simulated timeout")
 
 
 async def _return_value() -> str:

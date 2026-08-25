@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str, str]:
@@ -22,7 +22,7 @@ def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str, str]:
         return 1, "", str(exc)
 
 
-def which(name: str) -> Optional[str]:
+def which(name: str) -> str | None:
     return shutil.which(name)
 
 

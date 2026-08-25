@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from code_builder.task_service import (
     TaskCancellationToken,
     TaskExecutionContext,

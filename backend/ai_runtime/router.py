@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from auth import require_owner
 from fastapi import APIRouter, Depends, HTTPException
 
-from auth import require_owner
 from .advisor import (
     AdvisorMemoryRequest,
     AdvisorProfileRequest,

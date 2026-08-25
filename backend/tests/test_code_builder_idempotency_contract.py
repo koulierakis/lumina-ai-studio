@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
-
 from code_builder.router import TaskCreateRequest, TaskStore, create_code_builder_task
 from code_builder.task_service import TaskCancellationToken
+from fastapi import BackgroundTasks, HTTPException
 
 
 class MinimalTaskService:

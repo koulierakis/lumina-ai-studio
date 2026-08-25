@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 class VideoProviderError(RuntimeError):
@@ -25,11 +24,11 @@ class VideoGenerationInput:
     quality: str = "standard"
     camera_motion: str = "auto"
     style: str = "cinematic"
-    seed: Optional[int] = None
+    seed: int | None = None
     source_images: list[bytes] = field(default_factory=list)
     source_mimes: list[str] = field(default_factory=list)
     source_urls: list[str] = field(default_factory=list)
-    source_video: Optional[bytes] = None
+    source_video: bytes | None = None
 
 
 @dataclass(frozen=True)

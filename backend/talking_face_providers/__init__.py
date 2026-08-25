@@ -1,7 +1,9 @@
 """Provider-neutral talking-face registry with a local simulation."""
 import asyncio
-from video_providers.mock_provider import MockVideoProvider
+
 from video_providers.base import VideoGenerationInput
+from video_providers.mock_provider import MockVideoProvider
+
 
 class MockTalkingFaceProvider:
     name = "mock"

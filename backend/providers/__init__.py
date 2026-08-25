@@ -6,7 +6,7 @@ from typing import Dict, Type
 
 
 def _hydrate_windows_user_environment() -> None:
-    """Load selected per-user Windows environment values into this process.
+    r"""Load selected per-user Windows environment values into this process.
 
     LUMINA is commonly launched from a long-lived desktop process. Windows user
     environment variables created after that parent process started are stored
@@ -76,7 +76,7 @@ from .openai_provider import OpenAIImageProvider
 from .skeletons import BflImageProvider, FalImageProvider, ReplicateImageProvider
 from .stable_diffusion_provider import LocalImageProvider, StableDiffusionProvider
 
-_REGISTRY: Dict[str, Type[ImageProvider]] = {
+_REGISTRY: dict[str, type[ImageProvider]] = {
     "comfyui": ComfyUIProvider,
     "fal": FalImageProvider,
     "bfl": BflImageProvider,

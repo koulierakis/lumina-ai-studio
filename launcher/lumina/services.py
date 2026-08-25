@@ -8,14 +8,13 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import load_config
-from .detect import detect_npm, detect_node, detect_ollama, detect_python
+from .detect import detect_node, detect_npm, detect_ollama, detect_python
 from .errors import (
     AlreadyRunningError,
     DependencyMissingError,
-    LauncherError,
     PortInUseError,
     StartupTimeoutError,
 )

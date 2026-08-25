@@ -1,6 +1,10 @@
 """Deterministic local WAV generator for Voice Studio development."""
 from __future__ import annotations
-import io, math, wave
+
+import io
+import math
+import wave
+
 
 class MockVoiceProvider:
     name = "mock"
