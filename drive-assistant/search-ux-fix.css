@@ -1,0 +1,33 @@
+.name-search-results{
+  position:fixed!important;
+  top:186px!important;
+  left:8px!important;
+  right:8px!important;
+  bottom:86px!important;
+  z-index:1490!important;
+  margin:0!important;
+  padding:0 0 20px!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  display:grid;
+  align-content:start;
+  gap:8px;
+}
+.name-search-results::after{content:"";display:block;height:12px}
+.name-search-card{min-height:auto!important}
+.lumina-directory-results{display:grid;gap:8px}
+.lumina-directory-card{border-color:rgba(100,226,213,.45)!important;box-shadow:0 12px 28px rgba(0,0,0,.28)}
+.lumina-directory-card .name-search-main strong::after{content:" · LUMINA";font-size:9px;letter-spacing:.08em;color:#64e2d5}
+.lumina-strict-empty{margin-bottom:8px}
+body:has(#nameSearchResults:not(.hidden)) .travel-mode{display:none!important}
+@media(max-width:430px){
+  .name-search-results{top:184px!important;bottom:88px!important;left:6px!important;right:6px!important}
+  .name-search-card{padding:8px!important;border-radius:16px!important;gap:6px!important}
+  .name-search-main{padding:4px!important}
+  .name-search-main strong{font-size:14px!important;margin-bottom:4px!important}
+  .name-search-main span{font-size:11px!important;line-height:1.32!important}
+  .name-search-start{min-height:44px!important;height:44px!important}
+}
