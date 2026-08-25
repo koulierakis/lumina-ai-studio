@@ -87,16 +87,18 @@ export default function Generate() {
       const nextPacks = Array.isArray(packResult.value) ? packResult.value : [];
       setPacks(nextPacks);
       setPacksError('');
-      const remembered = localStorage.getItem('lumina_active_pack');
-      const selected = nextPacks.find((item) => item.id === remembered) || nextPacks.find((item) => item.id === packId) || nextPacks[0];
-      setPackId(selected?.id || '');
+      setPackId((current) => {
+        const remembered = localStorage.getItem('lumina_active_pack');
+        const selected = nextPacks.find((item) => item.id === remembered) || nextPacks.find((item) => item.id === current) || nextPacks[0];
+        return selected?.id || '';
+      });
     } else {
       setPacksError(packResult.reason?.message || 'Identity Packs could not be loaded. Your existing photographs have not been deleted.');
     }
     setLoadingSetup(false);
-  }, [packId]);
+  }, []);
 
-  useEffect(() => { loadSetup(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+  useEffect(() => { loadSetup(); }, [loadSetup]);
   useEffect(() => { if (packId) localStorage.setItem('lumina_active_pack', packId); }, [packId]);
 
   useEffect(() => {
