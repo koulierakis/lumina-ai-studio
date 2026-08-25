@@ -11,11 +11,25 @@
     walk: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4.5" r="2"/><path d="m10.5 20 1.2-5.2-2-2.2-1.6 3.1-2.6-1.3 2.4-4.7a2 2 0 0 1 2.9-.8l2.3 1.6 2.1-2.1 1.5 1.6-2.8 2.8-2-1.3-.6 2.3 2.1 2.3 2.1 3.9"/></svg>',
     nearby: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s6-5.3 6-11a6 6 0 1 0-12 0c0 5.7 6 11 6 11Z"/><circle cx="12" cy="10" r="2.2"/></svg>',
     free: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 5V2M12 22v-3M5 12H2M22 12h-3"/><circle cx="12" cy="12" r="2.3"/></svg>',
-    speaker: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h3l4 3V7L8 10H5Z"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.5 6.8a7.5 7.5 0 0 1 0 10.4"/></svg>'
+    mic: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6.5 11.5a5.5 5.5 0 0 0 11 0M12 17v4M9 21h6"/></svg>',
+    speaker: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 10v4h3l4 3V7L8 10H5Z"/><path d="M15 9.2a4 4 0 0 1 0 5.6M17.5 6.8a7.5 7.5 0 0 1 0 10.4"/></svg>',
+    target: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+    menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg>',
+    stop: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>'
   };
 
   function icon(name) {
-    return `<span class="drive-vector-icon">${ICONS[name] || ''}</span>`;
+    const raw = ICONS[name] || '';
+    const svg = raw.replace('<svg ', '<svg fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ');
+    return `<span class="drive-vector-icon">${svg}</span>`;
+  }
+
+  function installPremiumIconStyles(){
+    if ($('#luminaPremiumIconStyles')) return;
+    const style=document.createElement('style');
+    style.id='luminaPremiumIconStyles';
+    style.textContent='.drive-vector-icon{display:grid!important;place-items:center;width:22px!important;height:22px!important;line-height:1!important;color:currentColor}.drive-vector-icon svg{width:22px;height:22px;display:block}.home-tool>.drive-vector-icon{width:23px!important;height:23px!important}.home-tool>.drive-vector-icon svg{width:23px;height:23px}.nav-tool>.drive-vector-icon{width:20px!important;height:20px!important}.nav-tool>.drive-vector-icon svg{width:20px;height:20px}.nav-mini .drive-vector-icon svg{width:19px;height:19px}';
+    document.head.appendChild(style);
   }
 
   function loadScript(src, marker) {
@@ -46,6 +60,12 @@
     if(free){free.className='home-tool';free.innerHTML=`${icon('free')}<small>Free Drive</small>`;bar.appendChild(free)}
     document.body.appendChild(bar);travel.classList.add('toolbar-source-hidden');actions.classList.add('toolbar-source-hidden');
   }
+
+  function decorateNavToolbar(){
+    const iconMap={navPoiBtn:'nearby',navVoiceBtn:'mic',navHandsFreeBtn:'speaker',navCenterBtn:'target',navSettingsBtn:'menu',navStopBtn:'stop'};
+    Object.entries(iconMap).forEach(([id,name])=>{const button=$(`#${id}`);const span=button?.querySelector('span');if(span)span.outerHTML=icon(name)});
+  }
+
   function setText(id,value){const el=$(id);if(el)el.textContent=value}
   function persistFreeDrive(on){try{const raw=JSON.parse(localStorage.getItem(SESSION_KEY)||'{}');raw.freeDrive=!!on;localStorage.setItem(SESSION_KEY,JSON.stringify(raw))}catch{}}
   function normalizeFreeDriveButton(on){const button=$('#freeDriveBtn');if(!button)return;button.classList.toggle('active',!!on);button.setAttribute('aria-pressed',String(!!on));const label=button.querySelector('small');if(label)label.textContent=on?'Free Drive ON':'Free Drive'}
@@ -56,6 +76,6 @@
   function speakStatus(){const speed=$('#speed')?.textContent||'0',limit=$('#speedLimit')?.textContent||'άγνωστο',road=$('#roadName')?.textContent||'την τρέχουσα θέση';if(!('speechSynthesis'in window))return;speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(`Τρέχουσα ταχύτητα ${speed} χιλιόμετρα την ώρα. Όριο ${limit}. Βρίσκεσαι σε ${road}.`);u.lang='el-GR';u.rate=.96;speechSynthesis.speak(u)}
   function reportDanger(){const list=$('#alertsList');if(list)list.insertAdjacentHTML('afterbegin','<div class="alert manual-danger"><span aria-hidden="true">!</span><div><b>Κίνδυνος</b><small>Χειροκίνητη οδηγική επισήμανση.</small></div></div>');if('vibrate'in navigator)navigator.vibrate([180,100,180])}
   function observeArrival(){const maneuver=$('#maneuverText');if(!maneuver||!window.MutationObserver)return;const check=()=>{const arrived=maneuver.textContent.trim()==='Άφιξη';if(!arrived){arrivalHandled=false;return}if(arrivalHandled)return;arrivalHandled=true;setTimeout(()=>{if(maneuver.textContent.trim()==='Άφιξη')safeClick($('#stopRouteBtn'))},2500)};new MutationObserver(check).observe(maneuver,{childList:true,characterData:true,subtree:true});check()}
-  function bind(){buildHomeToolbar();loadGoogleAndPoi();const free=$('#freeDriveBtn');free?.addEventListener('click',()=>setTimeout(syncFreeDrive,0));$('#navStopBtn')?.addEventListener('click',()=>{if(freeDriveIsOn())safeClick(free);setTimeout(leaveFreeDriveUI,0)});const statusBtn=document.createElement('button');statusBtn.type='button';statusBtn.id='navStatusBtn';statusBtn.className='nav-mini';statusBtn.innerHTML=icon('speaker');statusBtn.setAttribute('aria-label','Κατάσταση οδήγησης');statusBtn.addEventListener('click',speakStatus);const dock=$('#navVoiceDock');if(dock&&!$('#navStatusBtn'))dock.appendChild(statusBtn);const mic=$('#navVoiceBtn');let timer=null;mic?.addEventListener('pointerdown',()=>{timer=setTimeout(reportDanger,900)});['pointerup','pointercancel','pointerleave'].forEach(ev=>mic?.addEventListener(ev,()=>{if(timer)clearTimeout(timer);timer=null}));syncFreeDrive();observeArrival()}
+  function bind(){installPremiumIconStyles();buildHomeToolbar();decorateNavToolbar();loadGoogleAndPoi();const free=$('#freeDriveBtn');free?.addEventListener('click',()=>setTimeout(syncFreeDrive,0));$('#navStopBtn')?.addEventListener('click',()=>{if(freeDriveIsOn())safeClick(free);setTimeout(leaveFreeDriveUI,0)});const statusBtn=document.createElement('button');statusBtn.type='button';statusBtn.id='navStatusBtn';statusBtn.className='nav-mini';statusBtn.innerHTML=icon('speaker');statusBtn.setAttribute('aria-label','Κατάσταση οδήγησης');statusBtn.addEventListener('click',speakStatus);const dock=$('#navVoiceDock');if(dock&&!$('#navStatusBtn'))dock.appendChild(statusBtn);const mic=$('#navVoiceBtn');let timer=null;mic?.addEventListener('pointerdown',()=>{timer=setTimeout(reportDanger,900)});['pointerup','pointercancel','pointerleave'].forEach(ev=>mic?.addEventListener(ev,()=>{if(timer)clearTimeout(timer);timer=null}));syncFreeDrive();observeArrival()}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bind,{once:true});else bind();
 })();
