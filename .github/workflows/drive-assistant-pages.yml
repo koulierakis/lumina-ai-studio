@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v49-google-places-primary
+# deployment-trigger: v50-premium-automotive-ui
 
 on:
   push:
@@ -54,6 +54,8 @@ jobs:
           grep -Fq 'MIN_ZOOM=15' drive-assistant/map-poi-layer.js
           grep -Fq "map.getZoom()<14" drive-assistant/map-labels.js
           grep -Fq 'SpeechRecognition' drive-assistant/app-v2.js
+          grep -Fq 'drive-vector-icon' drive-assistant/drive-completion.js
+          grep -Fq 'premium mobile UI' drive-assistant/ui-fixes.css
       - name: Live provider regression smoke
         run: node drive-assistant/tests/production-smoke.mjs
 
@@ -101,7 +103,7 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html drive-completion.js navigation-search.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          for f in index.html drive-completion.js navigation-search.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js sw.js ui-fixes.css deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
           grep -Fq 'map-poi-layer.js?v=47' /tmp/index.html
           grep -Fq 'map-labels.js?v=47' /tmp/index.html
           grep -Fq 'google-places.js?v=49' /tmp/drive-completion.js
@@ -114,6 +116,8 @@ jobs:
           grep -Fq 'overpass.private.coffee' /tmp/overpass-fallback.js
           grep -Fq 'maps.mail.ru/osm/tools/overpass' /tmp/poi-catalog.js
           grep -Fq "const CACHE='lumina-drive-v48'" /tmp/sw.js
+          grep -Fq 'drive-vector-icon' /tmp/drive-completion.js
+          grep -Fq 'premium mobile UI' /tmp/ui-fixes.css
           grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
           node --check /tmp/drive-completion.js
           node --check /tmp/navigation-search.js
