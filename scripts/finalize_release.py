@@ -62,7 +62,7 @@ def patch_app() -> None:
     )
     replace_once(
         path,
-        "              <Route path=\"finance\" element={<ComingSoon title=\"JSA Finance\" />} />\n"
+        "              <Route path=\"finance\" element={<Navigate to=\"/studio/advisor\" replace />} />\n"
         "              <Route path=\"research\" element={<ComingSoon title=\"Internet Research\" />} />\n"
         "              <Route path=\"automations\" element={<ComingSoon title=\"Automations\" />} />\n",
         "              <Route path=\"finance\" element={<ProductivityCenter mode=\"finance\" />} />\n"
