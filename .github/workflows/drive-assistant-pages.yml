@@ -1,17 +1,101 @@
-name: LUMINA Drive Source Guard
+name: LUMINA Drive Production
 
 on:
+  push:
+    branches:
+      - feature/lumina-drive-assistant
+    paths:
+      - "drive-assistant/**"
+      - ".github/workflows/drive-assistant-pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: lumina-drive-pages
+  cancel-in-progress: true
 
 jobs:
-  source-guard:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: source
+        run: echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate Drive source
+        run: |
+          set -euo pipefail
+          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css premium-v52.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
+          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
+          grep -Fq 'google-places.js?v=53' drive-assistant/index.html
+          grep -Fq 'google-key-settings.js?v=53' drive-assistant/index.html
+          grep -Fq 'navigation-search.js?v=53' drive-assistant/index.html
+          grep -Fq 'lumina-drive-cache-reset-v53' drive-assistant/index.html
+          grep -Fq "const CACHE='lumina-drive-v53'" drive-assistant/sw.js
+          grep -Fq "provider('ArcGIS'" drive-assistant/navigation-search.js
+          grep -Fq "provider('Nominatim'" drive-assistant/navigation-search.js
+          grep -Fq "provider('Photon'" drive-assistant/navigation-search.js
+          grep -Fq "provider('OSM POI'" drive-assistant/navigation-search.js
+          grep -Fq 'LuminaGooglePlaces.textSearch' drive-assistant/navigation-search.js
+          grep -Fq 'Place.searchByText' drive-assistant/google-places.js
+          grep -Fq 'Place.searchNearby' drive-assistant/google-places.js
+          grep -Fq 'if (window.LuminaNameNavigation) return;' drive-assistant/address-autocomplete.js
+      - name: Live provider regression smoke
+        run: node drive-assistant/tests/production-smoke.mjs
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp build
+        run: |
+          printf '%s\n' "$(git rev-parse HEAD)" > drive-assistant/build.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > drive-assistant/deployed-at.txt
+          printf '%s\n' "feature/lumina-drive-assistant/drive-assistant" > drive-assistant/deploy-source.txt
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: drive-assistant
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  verify-production:
+    needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Production ownership notice
+      - name: Verify live LUMINA Drive assets
+        env:
+          EXPECTED_SHA: ${{ needs.validate.outputs.source_sha }}
+          BASE_URL: https://koulierakis.github.io/lumina-ai-studio
         run: |
-          echo "This branch is the canonical LUMINA Drive source."
-          echo "GitHub Pages deployment is owned exclusively by the default-branch production workflow."
-          echo "Production source remains feature/lumina-drive-assistant/drive-assistant/."
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 36); do
+            LIVE_SHA="$(curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/build.txt?verify=${GITHUB_RUN_ID}-${i}" 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then ok=1; break; fi
+            sleep 5
+          done
+          test "$ok" = 1
+          for f in index.html navigation-search.js address-autocomplete.js google-places.js google-key-settings.js poi-enhanced.js overpass-fallback.js sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          grep -Fq 'google-places.js?v=53' /tmp/index.html
+          grep -Fq 'google-key-settings.js?v=53' /tmp/index.html
+          grep -Fq "provider('OSM POI'" /tmp/navigation-search.js
+          grep -Fq 'LuminaGooglePlaces.textSearch' /tmp/navigation-search.js
+          grep -Fq 'Place.searchByText' /tmp/google-places.js
+          grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
+          node --check /tmp/navigation-search.js
+          node --check /tmp/address-autocomplete.js
+          node --check /tmp/google-places.js
+          node --check /tmp/poi-enhanced.js
