@@ -81,14 +81,26 @@ let webpackConfig = {
   },
   jest: {
     configure: (jestConfig) => {
-      // Jest 27 (bundled by react-scripts 5) does not fully understand the
-      // modern package-exports layout used by @lexical/react 0.45. Map
-      // Lexical React subpath imports to the package's public CommonJS shim
-      // files. Those shims select the matching dev/prod implementation and
-      // also cover Lexical's own internal ReactProviderExtension import.
+      // Jest 27 (bundled by react-scripts 5) predates the package-exports
+      // layout used by @lexical/react 0.45. Use the concrete CommonJS files
+      // advertised by Lexical's `require` exports. Explicit entries avoid
+      // relying on capture-group substitution in the CRA/Jest resolver.
+      const lexicalReactCjs = (name) =>
+        `<rootDir>/node_modules/@lexical/react/dist/${name}.js`;
+
       jestConfig.moduleNameMapper = {
         ...(jestConfig.moduleNameMapper || {}),
-        '^@lexical/react/(.+?)(?:\\.js)?$': '<rootDir>/node_modules/@lexical/react/$1.js',
+        '^@lexical/react/LexicalComposer$': lexicalReactCjs('LexicalComposer'),
+        '^@lexical/react/LexicalComposerContext$': lexicalReactCjs('LexicalComposerContext'),
+        '^@lexical/react/LexicalContentEditable$': lexicalReactCjs('LexicalContentEditable'),
+        '^@lexical/react/LexicalErrorBoundary$': lexicalReactCjs('LexicalErrorBoundary'),
+        '^@lexical/react/LexicalHistoryPlugin$': lexicalReactCjs('LexicalHistoryPlugin'),
+        '^@lexical/react/LexicalLinkPlugin$': lexicalReactCjs('LexicalLinkPlugin'),
+        '^@lexical/react/LexicalListPlugin$': lexicalReactCjs('LexicalListPlugin'),
+        '^@lexical/react/LexicalOnChangePlugin$': lexicalReactCjs('LexicalOnChangePlugin'),
+        '^@lexical/react/LexicalRichTextPlugin$': lexicalReactCjs('LexicalRichTextPlugin'),
+        '^@lexical/react/ReactProviderExtension$': lexicalReactCjs('ReactProviderExtension'),
+        '^@lexical/react/useLexicalEditable$': lexicalReactCjs('useLexicalEditable'),
       };
       return jestConfig;
     },
