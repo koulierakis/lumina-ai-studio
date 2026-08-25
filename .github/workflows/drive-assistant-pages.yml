@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v54-resilient-destination-search
+# deployment-trigger: v55-unified-search-street-address
 
 on:
   push:
@@ -44,9 +44,12 @@ jobs:
           grep -Fq 'lumina-drive-cache-reset-v53' drive-assistant/index.html
           grep -Fq "const CACHE='lumina-drive-v53'" drive-assistant/sw.js
           grep -Fq 'geocode.arcgis.com' drive-assistant/navigation-search.js
+          grep -Fq 'reverseGeocode' drive-assistant/navigation-search.js
+          grep -Fq 'Οδός / τοποθεσία:' drive-assistant/navigation-search.js
           grep -Fq "provider('ArcGIS'" drive-assistant/navigation-search.js
           grep -Fq "provider('Nominatim'" drive-assistant/navigation-search.js
           grep -Fq "provider('Photon'" drive-assistant/navigation-search.js
+          grep -Fq 'if (window.LuminaNameNavigation) return;' drive-assistant/address-autocomplete.js
           grep -Fq 'Place.searchByText' drive-assistant/google-places.js
           grep -Fq 'Place.searchNearby' drive-assistant/google-places.js
           grep -Fq 'LuminaGooglePlaces.textSearch' drive-assistant/navigation-search.js
@@ -111,7 +114,7 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html drive-completion.js navigation-search.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js premium-v52.css sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          for f in index.html drive-completion.js navigation-search.js address-autocomplete.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js premium-v52.css sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
           grep -Fq 'map-poi-layer.js?v=53' /tmp/index.html
           grep -Fq 'map-labels.js?v=53' /tmp/index.html
           grep -Fq 'navigation-search.js?v=53' /tmp/index.html
@@ -124,7 +127,10 @@ jobs:
           grep -Fq 'z>=18?140' /tmp/map-labels.js
           grep -Fq 'Google + OpenStreetMap' /tmp/poi-enhanced.js
           grep -Fq 'geocode.arcgis.com' /tmp/navigation-search.js
+          grep -Fq 'reverseGeocode' /tmp/navigation-search.js
+          grep -Fq 'Οδός / τοποθεσία:' /tmp/navigation-search.js
           grep -Fq "provider('ArcGIS'" /tmp/navigation-search.js
+          grep -Fq 'if (window.LuminaNameNavigation) return;' /tmp/address-autocomplete.js
           grep -Fq 'Place.searchByText' /tmp/google-places.js
           grep -Fq 'Place.searchNearby' /tmp/google-places.js
           grep -Fq 'LuminaGooglePlaces.textSearch' /tmp/navigation-search.js
@@ -133,6 +139,7 @@ jobs:
           grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
           node --check /tmp/drive-completion.js
           node --check /tmp/navigation-search.js
+          node --check /tmp/address-autocomplete.js
           node --check /tmp/google-places.js
           node --check /tmp/poi-enhanced.js
           node --check /tmp/map-labels.js
