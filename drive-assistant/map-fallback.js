@@ -42,7 +42,7 @@
       async textSearch(query) {
         const q = String(query || '').trim();
         if (q.length < 3) return [];
-        const u = new URL('https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates');
+        const u = new URL('https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates');
         u.searchParams.set('SingleLine', q);
         u.searchParams.set('f', 'json');
         u.searchParams.set('countryCode', 'GRC');
