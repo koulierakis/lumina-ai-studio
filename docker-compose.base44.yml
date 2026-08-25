@@ -1,0 +1,70 @@
+name: lumina-base44
+
+services:
+  backend:
+    image: python:3.11-slim
+    working_dir: /app/backend
+    volumes:
+      - ./:/app
+    environment:
+      # Local single-owner config (generated for dev; not external secrets)
+      JWT_SECRET: base44-dev-jwt-secret-change-me
+      OWNER_EMAIL: owner@lumina.local
+      OWNER_PASSWORD: lumina-dev-owner
+      # The CRA dev server proxies /api to this service, so the browser only
+      # ever talks to port 3000. Allow any Host so the proxy request succeeds.
+      TRUSTED_HOSTS: "*"
+      # Use the bundled mock providers so the app is fully functional with no
+      # external API keys. Real providers (Gemini/OpenAI/...) can be enabled later.
+      IMAGE_PROVIDER: mock
+      IMAGE_PROVIDER_FALLBACKS: mock
+      LUMINA_TEST_PROVIDER: "true"
+      VIDEO_PROVIDER: mock
+      VOICE_PROVIDER: mock
+      TALKING_FACE_PROVIDER: mock
+      PYTHONUNBUFFERED: "1"
+    command: >
+      sh -c "pip install --no-cache-dir -r requirements.txt &&
+             python -m uvicorn server:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/backend"
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://localhost:8000/api/health', timeout=5); sys.exit(0)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks: [lumina-net]
+
+  frontend:
+    image: node:20
+    working_dir: /app/frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - frontend_node_modules:/app/frontend/node_modules
+    environment:
+      # Bind all interfaces and accept the dynamic preview hostname.
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      CI: "true"
+      # Polling watch works reliably across bind mounts.
+      WATCHPACK_POLLING: "true"
+      CHOKIDAR_USEPOLLING: "true"
+      # Empty/relative backend URL -> all API calls go to same-origin /api,
+      # which the CRA dev-server proxy (src/setupProxy.js) forwards to backend.
+      REACT_APP_BACKEND_URL: ""
+    command: >
+      sh -c "yarn install --network-timeout 600000 && yarn start"
+    ports:
+      - "3000:3000"
+    networks: [lumina-net]
+
+networks:
+  lumina-net:
+    name: lumina-base44-net
+
+volumes:
+  frontend_node_modules:
