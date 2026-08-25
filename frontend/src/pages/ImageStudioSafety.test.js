@@ -9,7 +9,7 @@ describe('Image Studio production safety invariants', () => {
   test('generation UI only offers healthy identity-capable providers for explicit selection', () => {
     const generate = source('Generate.jsx');
     expect(generate).toContain("item.capabilities?.identity_references === true");
-    expect(generate).toContain('item.configured && item.healthy && identityReady');
+    expect(generate).toContain('item.configured && item.healthy && identityCapable');
     expect(generate).toContain('no identity references');
     expect(generate).toContain('navigate(`/studio/editor/${mid}`)');
   });
