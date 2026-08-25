@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v52-turn-guidance-road-labels-nearby
+# deployment-trigger: v53-full-street-labels-typography
 
 on:
   push:
@@ -47,7 +47,9 @@ jobs:
           grep -Fq 'RADII=[750,1500,3000,6000,12000]' drive-assistant/google-places.js
           grep -Fq 'RADII=[750,1500,2500,5000,10000]' drive-assistant/poi-enhanced.js
           grep -Fq 'Google + OpenStreetMap' drive-assistant/poi-enhanced.js
-          grep -Fq 'map.getZoom()<13' drive-assistant/map-labels.js
+          grep -Fq 'if(z<13' drive-assistant/map-labels.js
+          grep -Fq 'road-local' drive-assistant/map-labels.js
+          grep -Fq 'z>=18?140' drive-assistant/map-labels.js
           grep -Fq 'maneuver-symbol' drive-assistant/drive-completion.js
           grep -Fq 'slightRight' drive-assistant/drive-completion.js
           grep -Fq 'overpass.openstreetmap.fr' drive-assistant/poi-enhanced.js
@@ -109,7 +111,9 @@ jobs:
           grep -Fq 'premium-v52.css?v=52' /tmp/index.html
           grep -Fq 'maneuver-symbol' /tmp/drive-completion.js
           grep -Fq 'slightRight' /tmp/drive-completion.js
-          grep -Fq 'map.getZoom()<13' /tmp/map-labels.js
+          grep -Fq 'if(z<13' /tmp/map-labels.js
+          grep -Fq 'road-local' /tmp/map-labels.js
+          grep -Fq 'z>=18?140' /tmp/map-labels.js
           grep -Fq 'Google + OpenStreetMap' /tmp/poi-enhanced.js
           grep -Fq 'Place.searchByText' /tmp/google-places.js
           grep -Fq 'Place.searchNearby' /tmp/google-places.js
