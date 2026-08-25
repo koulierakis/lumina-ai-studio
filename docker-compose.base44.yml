@@ -69,7 +69,7 @@ services:
       # Docker/Base44 environment, where the backend is a compose service.
       REACT_APP_PROXY_TARGET: "http://backend:8000"
     command: >
-      sh -c "yarn install --network-timeout 600000 && yarn start"
+      sh -c "yarn install --frozen-lockfile --network-timeout 600000 && yarn start"
     ports:
       - "3000:3000"
     networks: [lumina-net]

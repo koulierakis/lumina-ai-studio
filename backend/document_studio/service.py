@@ -2365,7 +2365,7 @@ _PDF_FONT_BOLD_NAME = "LuminaUnicodeBold"
 
 
 def _register_pdf_fonts() -> None:
-    global _PDF_FONT_REGISTERED, _PDF_FONT_NAME, _PDF_FONT_BOLD_NAME
+    global _PDF_FONT_REGISTERED
     if _PDF_FONT_REGISTERED:
         return
     regular_candidates = [
@@ -2384,23 +2384,8 @@ def _register_pdf_fonts() -> None:
     bold_path = next((p for p in bold_candidates if p.exists()), None)
     if regular_path:
         pdfmetrics.registerFont(TTFont(_PDF_FONT_NAME, str(regular_path)))
-        if bold_path:
-            pdfmetrics.registerFont(TTFont(_PDF_FONT_BOLD_NAME, str(bold_path)))
-        # Map the family so reportlab can resolve bold/italic switching for
-        # <b>/<i> tags inside Paragraph flowables. Without this, ParagraphStyle
-        # raises "Can't map determine family/bold/italic for luminaunicode".
-        pdfmetrics.registerFontFamily(
-            _PDF_FONT_NAME,
-            normal=_PDF_FONT_NAME,
-            bold=_PDF_FONT_BOLD_NAME if bold_path else _PDF_FONT_NAME,
-            italic=_PDF_FONT_NAME,
-            boldItalic=_PDF_FONT_BOLD_NAME if bold_path else _PDF_FONT_NAME,
-        )
-    else:
-        # No Unicode TTF available — fall back to reportlab's built-in Helvetica
-        # family so PDF export still works (Latin only) instead of crashing.
-        _PDF_FONT_NAME = "Helvetica"
-        _PDF_FONT_BOLD_NAME = "Helvetica-Bold"
+    if bold_path:
+        pdfmetrics.registerFont(TTFont(_PDF_FONT_BOLD_NAME, str(bold_path)))
     _PDF_FONT_REGISTERED = True
 
 
