@@ -79,6 +79,19 @@ let webpackConfig = {
       },
     },
   },
+  jest: {
+    configure: (jestConfig) => {
+      // Jest 27 (bundled by react-scripts 5) does not fully understand the
+      // modern package-exports layout used by @lexical/react 0.45. Resolve
+      // Lexical React subpath imports to the package's CommonJS dist files so
+      // editor tests exercise the real implementation instead of mocks.
+      jestConfig.moduleNameMapper = {
+        ...(jestConfig.moduleNameMapper || {}),
+        '^@lexical/react/(.+?)(?:\\.js)?$': '<rootDir>/node_modules/@lexical/react/dist/$1.js',
+      };
+      return jestConfig;
+    },
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
