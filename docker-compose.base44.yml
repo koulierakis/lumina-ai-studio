@@ -11,9 +11,18 @@ services:
       JWT_SECRET: base44-dev-jwt-secret-change-me
       OWNER_EMAIL: owner@lumina.local
       OWNER_PASSWORD: lumina-dev-owner
+      # Lets the backend_test.py integration suite log in (tests/conftest.py
+      # otherwise defaults the test password to "password123").
+      LUMINA_TEST_OWNER_PASSWORD: lumina-dev-owner
       # The CRA dev server proxies /api to this service, so the browser only
       # ever talks to port 3000. Allow any Host so the proxy request succeeds.
       TRUSTED_HOSTS: "*"
+      # In compose the frontend runs as a separate service named "frontend";
+      # this lets the backend's readiness probe reach it so the dashboard
+      # reports "ready" instead of "degraded" (localhost:3000 is unreachable
+      # from inside the backend container).
+      LUMINA_FRONTEND_HOST: frontend
+      LUMINA_FRONTEND_PORT: "3000"
       # Use the bundled mock providers so the app is fully functional with no
       # external API keys. Real providers (Gemini/OpenAI/...) can be enabled later.
       IMAGE_PROVIDER: mock
@@ -24,7 +33,8 @@ services:
       TALKING_FACE_PROVIDER: mock
       PYTHONUNBUFFERED: "1"
     command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
+      sh -c "apt-get update && apt-get install -y --no-install-recommends fonts-dejavu-core &&
+             pip install --no-cache-dir -r requirements.txt &&
              python -m uvicorn server:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/backend"
     ports:
       - "8000:8000"
