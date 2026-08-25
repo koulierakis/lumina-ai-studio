@@ -1,5 +1,5 @@
 name: LUMINA Drive Production
-# deployment-trigger: v51-search-nearby-reliability
+# deployment-trigger: v52-turn-guidance-road-labels-nearby
 
 on:
   push:
@@ -35,27 +35,27 @@ jobs:
       - name: Validate Drive production source
         run: |
           set -euo pipefail
-          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
+          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css premium-v52.css tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
           for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js; do node --check "drive-assistant/$f"; done
-          grep -Fq 'map-poi-layer.js?v=47' drive-assistant/index.html
-          grep -Fq 'map-labels.js?v=47' drive-assistant/index.html
-          grep -Fq "const CACHE='lumina-drive-v48'" drive-assistant/sw.js
-          grep -Fq 'google-places.js?v=49' drive-assistant/drive-completion.js
-          grep -Fq 'google-key-settings.js?v=49' drive-assistant/drive-completion.js
-          grep -Fq 'poi-enhanced.js?v=49' drive-assistant/drive-completion.js
+          grep -Fq 'map-poi-layer.js?v=52' drive-assistant/index.html
+          grep -Fq 'map-labels.js?v=52' drive-assistant/index.html
+          grep -Fq 'premium-v52.css?v=52' drive-assistant/index.html
+          grep -Fq "const CACHE='lumina-drive-v52'" drive-assistant/sw.js
           grep -Fq 'Place.searchByText' drive-assistant/google-places.js
           grep -Fq 'Place.searchNearby' drive-assistant/google-places.js
           grep -Fq 'LuminaGooglePlaces.textSearch' drive-assistant/navigation-search.js
-          grep -Fq 'LuminaGooglePlaces.nearbyProgressive' drive-assistant/poi-enhanced.js
-          grep -Fq 'RADII=[1200,2500,5000,10000]' drive-assistant/poi-enhanced.js
+          grep -Fq 'RADII=[750,1500,3000,6000,12000]' drive-assistant/google-places.js
+          grep -Fq 'RADII=[750,1500,2500,5000,10000]' drive-assistant/poi-enhanced.js
+          grep -Fq 'Google + OpenStreetMap' drive-assistant/poi-enhanced.js
+          grep -Fq 'map.getZoom()<13' drive-assistant/map-labels.js
+          grep -Fq 'maneuver-symbol' drive-assistant/drive-completion.js
+          grep -Fq 'slightRight' drive-assistant/drive-completion.js
           grep -Fq 'overpass.openstreetmap.fr' drive-assistant/poi-enhanced.js
           grep -Fq 'overpass.private.coffee' drive-assistant/overpass-fallback.js
           grep -Fq 'maps.mail.ru/osm/tools/overpass' drive-assistant/poi-catalog.js
           grep -Fq 'MIN_ZOOM=15' drive-assistant/map-poi-layer.js
-          grep -Fq "map.getZoom()<14" drive-assistant/map-labels.js
           grep -Fq 'SpeechRecognition' drive-assistant/app-v2.js
           grep -Fq 'drive-vector-icon' drive-assistant/drive-completion.js
-          grep -Fq 'premium mobile UI' drive-assistant/ui-fixes.css
       - name: Live provider regression smoke
         run: node drive-assistant/tests/production-smoke.mjs
 
@@ -86,46 +86,67 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
-  verify-live:
-    needs: deploy
+  verify-production:
+    needs: [validate, deploy]
     runs-on: ubuntu-latest
     steps:
-      - name: Verify deployed Drive
+      - name: Verify live LUMINA Drive assets
         env:
           EXPECTED_SHA: ${{ needs.deploy.outputs.source_sha }}
+          BASE_URL: https://koulierakis.github.io/lumina-ai-studio
         run: |
           set -euo pipefail
-          BASE="https://koulierakis.github.io/lumina-ai-studio"
-          for attempt in $(seq 1 20); do
-            LIVE_SHA="$(curl -fsSL --max-time 15 "$BASE/build.txt?verify=$attempt" 2>/dev/null | tr -d '\r\n' || true)"
-            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then break; fi
-            if [ "$attempt" -eq 20 ]; then echo "Live SHA mismatch: expected $EXPECTED_SHA got $LIVE_SHA"; exit 1; fi
-            sleep 6
+          ok=0
+          for i in $(seq 1 36); do
+            LIVE_SHA="$(curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/build.txt?verify=${GITHUB_RUN_ID}-${i}" 2>/dev/null | tr -d '\r\n' || true)"
+            if [ "$LIVE_SHA" = "$EXPECTED_SHA" ]; then ok=1; break; fi
+            sleep 5
           done
-          curl -fsSL "$BASE/index.html?verify=$EXPECTED_SHA" | grep -Fq 'LUMINA Drive Assistant'
-          curl -fsSL "$BASE/google-places.js?verify=$EXPECTED_SHA" | grep -Fq 'Place.searchByText'
-          curl -fsSL "$BASE/address-autocomplete.js?verify=$EXPECTED_SHA" | grep -Fq 'LuminaGooglePlaces.textSearch'
-          curl -fsSL "$BASE/drive-completion.js?verify=$EXPECTED_SHA" | grep -Fq 'drive-vector-icon'
-          curl -fsSL "$BASE/ui-fixes.css?verify=$EXPECTED_SHA" | grep -Fq 'premium mobile UI'
+          test "$ok" = 1
+          for f in index.html drive-completion.js navigation-search.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js poi-catalog.js poi-enhanced.js overpass-fallback.js premium-v52.css sw.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          grep -Fq 'map-poi-layer.js?v=52' /tmp/index.html
+          grep -Fq 'map-labels.js?v=52' /tmp/index.html
+          grep -Fq 'premium-v52.css?v=52' /tmp/index.html
+          grep -Fq 'maneuver-symbol' /tmp/drive-completion.js
+          grep -Fq 'slightRight' /tmp/drive-completion.js
+          grep -Fq 'map.getZoom()<13' /tmp/map-labels.js
+          grep -Fq 'Google + OpenStreetMap' /tmp/poi-enhanced.js
+          grep -Fq 'Place.searchByText' /tmp/google-places.js
+          grep -Fq 'Place.searchNearby' /tmp/google-places.js
+          grep -Fq 'LuminaGooglePlaces.textSearch' /tmp/navigation-search.js
+          grep -Fq 'overpass.private.coffee' /tmp/overpass-fallback.js
+          grep -Fq "const CACHE='lumina-drive-v52'" /tmp/sw.js
+          grep -Fxq 'feature/lumina-drive-assistant/drive-assistant' /tmp/deploy-source.txt
+          node --check /tmp/drive-completion.js
+          node --check /tmp/navigation-search.js
+          node --check /tmp/google-places.js
+          node --check /tmp/poi-enhanced.js
+          node --check /tmp/map-labels.js
 
-  record-production-result:
-    needs: [deploy, verify-live]
-    if: ${{ always() && needs.deploy.result == 'success' && needs.verify-live.result == 'success' }}
+  record-result:
+    if: ${{ always() }}
+    needs: [validate, deploy, verify-production]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: feature/lumina-drive-assistant
-      - name: Record verified production SHA
+          ref: feature/milestone1-pdf-docx-engine
+      - name: Record result
         env:
+          VALIDATE_RESULT: ${{ needs.validate.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          VERIFY_RESULT: ${{ needs.verify-production.result }}
           SOURCE_SHA: ${{ needs.deploy.outputs.source_sha }}
         run: |
-          printf '%s\n' "$SOURCE_SHA" > drive-assistant/production-verified.txt
-      - name: Commit production verification marker
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add drive-assistant/production-verified.txt
-          if git diff --cached --quiet; then exit 0; fi
-          git commit -m "chore(drive): record verified production build"
-          git push origin HEAD:feature/lumina-drive-assistant
+          set -euo pipefail
+          git config user.name "LUMINA Production Verifier"
+          git config user.email "actions@users.noreply.github.com"
+          mkdir -p .production-verification
+          printf '%s\n' "${SOURCE_SHA:-unknown}" > .production-verification/build.txt
+          printf '%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .production-verification/verified-at.txt
+          printf '%s\n' "https://koulierakis.github.io/lumina-ai-studio/" > .production-verification/live-url.txt
+          printf 'validate=%s\ndeploy=%s\nverify=%s\n' "$VALIDATE_RESULT" "$DEPLOY_RESULT" "$VERIFY_RESULT" > .production-verification/results.txt
+          if [ "$VALIDATE_RESULT" = success ] && [ "$DEPLOY_RESULT" = success ] && [ "$VERIFY_RESULT" = success ]; then printf '%s\n' PASS > .production-verification/status.txt; else printf '%s\n' FAIL > .production-verification/status.txt; fi
+          git add .production-verification
+          git commit -m "chore(drive): record production verification [skip ci]" || exit 0
+          git push origin HEAD:feature/milestone1-pdf-docx-engine
