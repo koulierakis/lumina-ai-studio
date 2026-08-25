@@ -108,6 +108,9 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
+  // Accept dynamic preview hosts while serving the standalone Drive PWA.
+  devServerConfig.allowedHosts = "all";
+
   // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
@@ -145,7 +148,13 @@ if (isDevServer) {
 }
 
 const configureDevServer = webpackConfig.devServer;
-webpackConfig.devServer = (devServerConfig) =>
-  makeDevServerV5Compatible(configureDevServer(devServerConfig));
+webpackConfig.devServer = (devServerConfig) => {
+  const compatible = makeDevServerV5Compatible(configureDevServer(devServerConfig));
+  compatible.static = [
+    { directory: path.resolve(__dirname, "public"), publicPath: "/" },
+    { directory: path.resolve(__dirname, "../drive-assistant"), publicPath: "/drive-assistant" },
+  ];
+  return compatible;
+};
 
 module.exports = webpackConfig;
