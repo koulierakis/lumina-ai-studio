@@ -63,9 +63,11 @@ services:
       # Polling watch works reliably across bind mounts.
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
-      # Empty/relative backend URL -> all API calls go to same-origin /api,
-      # which the CRA dev-server proxy (src/setupProxy.js) forwards to backend.
+      # Empty/relative backend URL -> all API calls go to same-origin /api.
       REACT_APP_BACKEND_URL: ""
+      # Override the portable localhost default in setupProxy.js only for this
+      # Docker/Base44 environment, where the backend is a compose service.
+      REACT_APP_PROXY_TARGET: "http://backend:8000"
     command: >
       sh -c "yarn install --network-timeout 600000 && yarn start"
     ports:
