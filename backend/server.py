@@ -151,6 +151,7 @@ from document_studio.router import configure_document_studio_router, router as d
 from ai_runtime.router import router as runtime_router  # noqa: E402
 from ai_runtime.manager import runtime_manager  # noqa: E402
 from ai_runtime.schemas import RuntimeJob, RuntimeJobStatus  # noqa: E402
+from mentor import configure_mentor, router as mentor_router  # noqa: E402
 
 from code_creator import create_project as code_create_project, generate_project as code_generate_project, get_project as code_get_project, list_projects as code_list_projects, ollama_status as code_ollama_status, read_file as code_read_file, run_safe_check as code_run_safe_check  # noqa: E402
 from runtime_info import (  # noqa: E402
@@ -193,6 +194,7 @@ talking_portrait_installs_coll = TalkingPortraitCollection(persistence_provider,
 projects_coll = LocalPersistenceCollection(persistence_provider, "projects")
 preferences_coll = LocalPersistenceCollection(persistence_provider, "preferences")
 notifications_coll = LocalPersistenceCollection(persistence_provider, "notifications")
+mentor_sessions_coll = LocalPersistenceCollection(persistence_provider, "mentor_sessions")
 
 
 def _configure_local_first_collections() -> None:
@@ -360,6 +362,7 @@ configure_code_builder_router(
     backup_service=code_builder_backup_service,
 )
 configure_document_studio_router(persistence_provider, media_coll, notifications_coll)
+configure_mentor(sessions_collection=mentor_sessions_coll, model=str(runtime_config["preferred_ollama_model"]))
 
 
 async def _runtime_execute(owner: str, studio: str, task_type: str, provider: str | None, payload: dict, executor):
@@ -2558,6 +2561,119 @@ async def create_voice_org(body: dict, owner: str = Depends(require_owner)) -> V
     if kind not in {"folder", "collection"} or not name: raise HTTPException(400, "Choose an organization type and name.")
     item = VoiceLibraryOrganization(owner_email=owner, kind=kind, name=name); await voice_library_orgs_coll.insert_one(item.model_dump()); return item
 
+
+# ---------- Personal Voice / ElevenLabs integration ----------
+@api.post("/voice/packs/{pack_id}/clone", response_model=VoicePack)
+async def clone_voice_pack(pack_id: str, owner: str = Depends(require_owner)) -> VoicePack:
+    """Create one persistent ElevenLabs Instant Voice Clone from saved pack samples."""
+    pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
+    if not pack:
+        raise HTTPException(404, "Voice Pack not found")
+    if pack.get("provider_voice_id") and pack.get("provider") == "elevenlabs" and pack.get("readiness_status") == "ready":
+        return VoicePack(**pack)
+    if not pack.get("consent_confirmed") or not str(pack.get("ownership_declaration") or "").strip():
+        raise HTTPException(400, "Confirm ownership and consent before creating My Voice.")
+    sample_ids = list(pack.get("sample_media_ids") or [])
+    if not sample_ids:
+        raise HTTPException(400, "Record and save your voice before creating My Voice.")
+
+    provider = get_voice_provider("elevenlabs")
+    configured = getattr(provider, "is_configured", lambda: True)()
+    if not configured:
+        raise HTTPException(409, "ELEVENLABS_API_KEY is not configured.")
+
+    await voice_packs_coll.update_one(
+        {"id": pack_id, "owner_email": owner},
+        {"$set": {"provider": "elevenlabs", "readiness_status": "provider-pending", "updated_at": now_iso()}},
+    )
+    try:
+        audio_files = []
+        extension_for_mime = {
+            "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/mpeg": ".mp3",
+            "audio/mp3": ".mp3", "audio/ogg": ".ogg", "audio/webm": ".webm",
+        }
+        for index, media_id in enumerate(sample_ids, start=1):
+            media = await media_coll.find_one({"id": media_id, "owner_email": owner}, {"_id": 0})
+            if not media:
+                continue
+            mime = str(media.get("mime_type") or "audio/webm").lower()
+            audio_files.append((f"my-voice-{index}{extension_for_mime.get(mime, '.audio')}", mime, read_bytes(media["filename"], "reference")))
+        if not audio_files:
+            raise RuntimeError("No readable voice recording was found in this Voice Pack.")
+
+        result = await provider.clone_voice(
+            name=str(pack.get("name") or "My Voice"),
+            audio_files=audio_files,
+            description="Personal voice model created by the owner in LUMINA Voice Studio.",
+        )
+        status = "provider-pending" if result.get("requires_verification") else "ready"
+        await voice_packs_coll.update_one(
+            {"id": pack_id, "owner_email": owner},
+            {"$set": {
+                "provider": "elevenlabs",
+                "provider_voice_id": result["voice_id"],
+                "readiness_status": status,
+                "updated_at": now_iso(),
+            }},
+        )
+    except Exception as exc:
+        logger.exception("Personal voice cloning failed: %s", exc)
+        await voice_packs_coll.update_one(
+            {"id": pack_id, "owner_email": owner},
+            {"$set": {"readiness_status": "failed", "updated_at": now_iso()}},
+        )
+        raise HTTPException(502, "My Voice could not be created. Check the ElevenLabs account/key and the recording, then try again.") from exc
+
+    updated = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
+    return VoicePack(**updated)
+
+
+@api.post("/voice/generate-personal", response_model=VoiceJob)
+async def generate_with_personal_voice(
+    background: BackgroundTasks,
+    pack_id: str = Form(...),
+    text: str = Form(...),
+    style_prompt: str = Form("Ήρεμα, φυσικά και επαγγελματικά."),
+    owner: str = Depends(require_owner),
+) -> VoiceJob:
+    """Generate any new text with the persistent cloned voice from a Voice Pack."""
+    clean_text = text.strip()
+    if not clean_text:
+        raise HTTPException(400, "Enter text to generate speech.")
+    pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
+    if not pack:
+        raise HTTPException(404, "Voice Pack not found")
+    voice_id = str(pack.get("provider_voice_id") or "").strip()
+    if pack.get("provider") != "elevenlabs" or not voice_id or pack.get("readiness_status") != "ready":
+        raise HTTPException(409, "My Voice is not ready yet.")
+    provider = get_voice_provider("elevenlabs")
+    if not getattr(provider, "is_configured", lambda: True)():
+        raise HTTPException(409, "ELEVENLABS_API_KEY is not configured.")
+
+    direction = (style_prompt or "calm").strip()[:500]
+    job = VoiceJob(
+        owner_email=owner,
+        provider="elevenlabs",
+        mode="text-to-speech",
+        text=clean_text,
+        voice=voice_id,
+        style=direction,
+        output_format="mp3",
+        sample_rate=44100,
+        bitrate="128k",
+        title=clean_text[:80] or "My Voice",
+        metadata={
+            "personal_voice": True,
+            "voice_pack_id": pack_id,
+            "style_prompt": direction,
+            "identity_preservation": True,
+        },
+    )
+    await voice_jobs_coll.insert_one(job.model_dump())
+    background.add_task(_run_voice_job, job.id, owner)
+    return job
+
+
 # ---------- Central platform: projects, unified work, search and settings ----------
 @api.get("/projects", response_model=List[Project])
 async def list_projects(include_archived: bool = False, owner: str = Depends(require_owner)) -> List[Project]:
@@ -3360,6 +3476,7 @@ app.include_router(api)
 app.include_router(code_builder_router)
 app.include_router(document_studio_router)
 app.include_router(runtime_router)
+app.include_router(mentor_router)
 
 
 def _active_private_lan_ip() -> str | None:

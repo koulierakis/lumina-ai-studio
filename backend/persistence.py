@@ -145,7 +145,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         "enterprise_document_template_versions", "document_people", "document_banks",
         "document_clauses", "talking_portrait_jobs",
         "talking_portrait_install_jobs", "talking_portrait_logs", "talking_portrait_outputs",
-        "provider_status",
+        "provider_status", "mentor_sessions",
     }
 
     def __init__(self, path: Path | None = None, *, fallback_active: bool = False, mongo_configured: bool = False, mongo_available: bool = False):
