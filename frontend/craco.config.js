@@ -108,6 +108,10 @@ let webpackConfig = {
 };
 
 webpackConfig.devServer = (devServerConfig) => {
+  // Accept the dynamic preview hostname (Base44 serves the app through a
+  // proxy host that changes whenever the environment is recreated).
+  devServerConfig.allowedHosts = "all";
+
   // Add health check endpoints if enabled
   if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
     const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
@@ -145,7 +149,16 @@ if (isDevServer) {
 }
 
 const configureDevServer = webpackConfig.devServer;
-webpackConfig.devServer = (devServerConfig) =>
-  makeDevServerV5Compatible(configureDevServer(devServerConfig));
+webpackConfig.devServer = (devServerConfig) => {
+  const compatible = makeDevServerV5Compatible(configureDevServer(devServerConfig));
+  // Serve the LUMINA Drive PWA from /drive-assistant/ — the static directory
+  // must be mounted before the SPA history fallback so the PWA's JS/CSS/HTML
+  // are served as real files, not the React app's index.html.
+  compatible.static = [
+    { directory: path.resolve(__dirname, "public"), publicPath: "/" },
+    { directory: path.resolve(__dirname, "../drive-assistant"), publicPath: "/drive-assistant" },
+  ];
+  return compatible;
+};
 
 module.exports = webpackConfig;

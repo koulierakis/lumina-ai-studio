@@ -1,0 +1,17 @@
+{
+  "previewPort": 3000,
+  "healthPath": "/api/health",
+  "startCommand": "docker compose -f docker-compose.base44.yml up -d",
+  "secrets": [
+    {
+      "name": "GEMINI_API_KEY",
+      "description": "Optional. Google Gemini API key for real identity-preserving image generation. Without it the app uses the bundled mock image provider (solid PNGs). Get it from Google AI Studio (aistudio.google.com).",
+      "requiredAtBoot": false
+    },
+    {
+      "name": "OPENAI_API_KEY",
+      "description": "Optional. OpenAI API key for the OpenAI image provider fallback. Without it the mock provider is used. Get it from platform.openai.com.",
+      "requiredAtBoot": false
+    }
+  ]
+}
