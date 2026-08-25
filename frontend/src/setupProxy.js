@@ -1,14 +1,16 @@
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
-// Forward only /api requests to the backend service. Client-side routes
-// (e.g. /studio/dashboard) are left to the dev server's history fallback so
-// the SPA router keeps working. The backend runs on an internal compose
-// network hostname "backend" so no CORS is needed from the browser.
+// Forward only /api requests to the backend. Base44/Docker can override the
+// target via REACT_APP_PROXY_TARGET, while normal local development keeps the
+// localhost backend default. Client-side routes remain handled by the CRA
+// history fallback so the SPA router keeps working.
 module.exports = function (app) {
+  const target = process.env.REACT_APP_PROXY_TARGET || 'http://localhost:8000';
+
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://backend:8000',
+      target,
       changeOrigin: true,
     })
   );
