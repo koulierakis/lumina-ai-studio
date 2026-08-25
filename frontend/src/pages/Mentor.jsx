@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Brain, CheckCircle2, CircleAlert, Plus, Send, Target } from 'lucide-react';
 import { apiGet, apiPatch, apiPost } from '../lib/api';
 
@@ -13,13 +13,13 @@ export default function Mentor() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     const data = await apiGet('/mentor/sessions');
     setSessions(data.items || []);
-    if (!activeId && data.items?.length) setActiveId(data.items[0].id);
-  };
+    setActiveId((current) => current || data.items?.[0]?.id || '');
+  }, []);
 
-  useEffect(() => { loadSessions().catch((err) => setError(err?.message || 'Could not load Mentor sessions.')); }, []);
+  useEffect(() => { loadSessions().catch((err) => setError(err?.message || 'Could not load Mentor sessions.')); }, [loadSessions]);
   useEffect(() => {
     if (!activeId) { setSession(null); return; }
     apiGet(`/mentor/sessions/${activeId}`).then(setSession).catch((err) => setError(err?.message || 'Could not load Mentor session.'));
