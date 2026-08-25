@@ -22,6 +22,7 @@ import CodeBuilder from './pages/CodeBuilder';
 import DocumentStudio from './pages/DocumentStudio';
 import ExecutiveAdvisor from './pages/ExecutiveAdvisor';
 import Mentor from './pages/Mentor';
+import LuminaDrive from './pages/LuminaDrive';
 
 export default function App() {
   return (
@@ -54,6 +55,7 @@ export default function App() {
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="advisor" element={<ExecutiveAdvisor />} />
               <Route path="mentor" element={<Mentor />} />
+              <Route path="drive" element={<LuminaDrive />} />
               <Route path="developer" element={<DeveloperCenter />} />
               <Route path="code-creator" element={<CodeCreator />} />
               <Route path="code-builder" element={<CodeBuilder />} />
