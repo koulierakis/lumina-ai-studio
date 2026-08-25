@@ -99,7 +99,7 @@ let webpackConfig = {
         '^@lexical/react/LexicalListPlugin$': lexicalReactCjs('LexicalListPlugin'),
         '^@lexical/react/LexicalOnChangePlugin$': lexicalReactCjs('LexicalOnChangePlugin'),
         '^@lexical/react/LexicalRichTextPlugin$': lexicalReactCjs('LexicalRichTextPlugin'),
-        '^@lexical/react/ReactProviderExtension$': lexicalReactCjs('ReactProviderExtension'),
+        '^@lexical/react/ReactProviderExtension$': lexicalReactCjs('LexicalReactProviderExtension'),
         '^@lexical/react/useLexicalEditable$': lexicalReactCjs('useLexicalEditable'),
       };
       return jestConfig;
@@ -144,7 +144,7 @@ webpackConfig.devServer = (devServerConfig) => {
         middlewares = originalSetupMiddlewares(middlewares, devServer);
       }
 
-      // Setup health endpoints
+      // Setup health check endpoints
       setupHealthEndpoints(devServer, healthPluginInstance);
 
       return middlewares;
