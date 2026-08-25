@@ -4,6 +4,8 @@ import AuthImage from '../components/AuthImage';
 import { toast } from 'sonner';
 import { Plus, Trash2, Upload, Star, Check } from 'lucide-react';
 
+const ACTIVE_PACK_KEY = 'lumina_active_pack';
+
 export default function IdentityPacks() {
   const [packs, setPacks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -20,13 +22,28 @@ export default function IdentityPacks() {
       const data = await apiGet('/identity-packs');
       const normalized = Array.isArray(data) ? data : [];
       setPacks(normalized);
-      if (!selected && normalized.length) {
-        setSelected(normalized[0]);
-        localStorage.setItem('lumina_active_pack', normalized[0].id);
+
+      if (!normalized.length) {
+        setSelected(null);
+        localStorage.removeItem(ACTIVE_PACK_KEY);
+      } else {
+        const rememberedId = localStorage.getItem(ACTIVE_PACK_KEY);
+        const currentId = selected?.id;
+        const next =
+          normalized.find((pack) => pack.id === rememberedId)
+          || normalized.find((pack) => pack.id === currentId)
+          || normalized[0];
+        setSelected(next);
+        localStorage.setItem(ACTIVE_PACK_KEY, next.id);
       }
     } catch (err) {
-      setPacks([]);
-      setLoadError(err?.message || 'Identity Packs are temporarily unavailable.');
+      // A connection failure is not evidence that user data is empty. Keep any
+      // already-loaded packs visible and explicitly distinguish offline state
+      // from an empty collection.
+      setLoadError(
+        err?.message
+        || 'Identity Packs could not be loaded. Your existing packs and photographs have not been deleted.',
+      );
     } finally {
       setLoading(false);
     }
@@ -47,7 +64,7 @@ export default function IdentityPacks() {
       toast.success('Identity Pack created');
       await load();
       setSelected(data);
-      localStorage.setItem('lumina_active_pack', data.id);
+      localStorage.setItem(ACTIVE_PACK_KEY, data.id);
     } catch (err) {
       toast.error(err?.message || err?.response?.data?.detail || 'Failed to create');
     }
@@ -61,6 +78,7 @@ export default function IdentityPacks() {
       const data = await uploadFormData(`/identity-packs/${selected.id}/photos`, fd);
       setSelected(data);
       setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
+      localStorage.setItem(ACTIVE_PACK_KEY, data.id);
       toast.success('Reference photos added');
     } catch (err) {
       toast.error(err?.message || err?.response?.data?.detail || 'Upload failed');
@@ -93,7 +111,10 @@ export default function IdentityPacks() {
     if (!window.confirm('Permanently delete this Identity Pack and its photos?')) return;
     try {
       await apiDelete(`/identity-packs/${id}`);
-      if (selected?.id === id) setSelected(null);
+      if (selected?.id === id) {
+        setSelected(null);
+        localStorage.removeItem(ACTIVE_PACK_KEY);
+      }
       toast.success('Pack deleted');
       await load();
     } catch (err) {
@@ -103,12 +124,11 @@ export default function IdentityPacks() {
 
   const selectPack = (p) => {
     setSelected(p);
-    localStorage.setItem('lumina_active_pack', p.id);
+    localStorage.setItem(ACTIVE_PACK_KEY, p.id);
   };
 
   return (
     <div className="h-full w-full flex">
-      {/* Left column: pack list */}
       <div className="w-72 shrink-0 border-r border-white/[0.06] bg-ink-950 h-full overflow-y-auto">
         <div className="px-6 py-6 flex items-center justify-between">
           <h2 className="font-display text-2xl text-white tracking-tight">Identity Packs</h2>
@@ -146,8 +166,11 @@ export default function IdentityPacks() {
         <div className="px-2 pb-6 space-y-1">
           {loading && <div className="px-4 text-sm text-white/40">Loading…</div>}
           {!loading && loadError && (
-            <div className="px-4 py-5">
-              <p className="text-amber-200/90 text-xs leading-relaxed">{loadError}</p>
+            <div className="px-4 py-5" data-testid="identity-load-error">
+              <p className="text-amber-200/90 text-xs leading-relaxed">
+                Identity Packs could not be loaded. Your existing packs and photographs have not been deleted.
+              </p>
+              <p className="mt-2 text-white/35 text-[11px] break-words">{loadError}</p>
               <button
                 type="button"
                 onClick={load}
@@ -188,17 +211,28 @@ export default function IdentityPacks() {
         </div>
       </div>
 
-      {/* Right: pack detail */}
       <div className="flex-1 h-full overflow-y-auto">
         {!selected ? (
           <div className="h-full flex items-center justify-center">
-            <div className="text-center max-w-md">
-              <h3 className="font-display text-3xl text-white mb-3">Create your first Identity Pack</h3>
-              <p className="text-white/50 text-sm leading-relaxed">
-                Upload up to five reference photographs of yourself. These will be used to preserve
-                your identity across every generation.
-              </p>
-            </div>
+            {loadError ? (
+              <div className="text-center max-w-md px-6">
+                <h3 className="font-display text-3xl text-white mb-3">Identity Packs unavailable</h3>
+                <p className="text-amber-100/80 text-sm leading-relaxed">
+                  The backend could not be reached. Existing Identity Packs and photographs have not been deleted.
+                </p>
+                <button type="button" onClick={load} className="mt-5 rounded bg-gold px-4 py-2 text-sm text-black">
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <div className="text-center max-w-md">
+                <h3 className="font-display text-3xl text-white mb-3">Create your first Identity Pack</h3>
+                <p className="text-white/50 text-sm leading-relaxed">
+                  Upload up to five reference photographs of yourself. These will be used to preserve
+                  your identity across every generation.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-10 max-w-5xl">
@@ -216,13 +250,20 @@ export default function IdentityPacks() {
               {selected.photo_ids.length} of 5 reference photographs
             </p>
 
+            {loadError && (
+              <div className="mb-5 rounded border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100">
+                Connection lost. Showing the last loaded pack. Retry before making changes.
+                <button type="button" onClick={load} className="ml-3 text-gold">Retry</button>
+              </div>
+            )}
+
             <div
-              className="border border-dashed border-white/10 rounded-lg p-8 mb-8 hover:border-gold/40 transition-colors cursor-pointer"
-              onClick={() => fileRef.current?.click()}
+              className={`border border-dashed border-white/10 rounded-lg p-8 mb-8 transition-colors ${loadError ? 'opacity-50 cursor-not-allowed' : 'hover:border-gold/40 cursor-pointer'}`}
+              onClick={() => !loadError && fileRef.current?.click()}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
                 e.preventDefault();
-                if (e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
+                if (!loadError && e.dataTransfer.files.length) uploadFiles(e.dataTransfer.files);
               }}
               data-testid="upload-dropzone"
             >
@@ -232,6 +273,7 @@ export default function IdentityPacks() {
                 multiple
                 accept="image/png,image/jpeg,image/webp"
                 className="hidden"
+                disabled={Boolean(loadError)}
                 onChange={(e) => e.target.files && uploadFiles(e.target.files)}
                 data-testid="upload-input"
               />
