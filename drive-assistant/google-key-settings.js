@@ -1,12 +1,7 @@
 (()=>{
   'use strict';
   function mask(v){if(!v)return'';return v.length>10?`${v.slice(0,6)}…${v.slice(-4)}`:'••••••••'}
-  function loadMapboxPoiV2(){
-    if(document.querySelector('script[data-lumina-mapbox-poi-v2]'))return;
-    const s=document.createElement('script');s.src='mapbox-poi-v2.js?v=58';s.defer=true;s.dataset.luminaMapboxPoiV2='1';document.head.appendChild(s);
-  }
   function mount(){
-    loadMapboxPoiV2();
     const list=document.querySelector('.settings-list');if(!list||document.querySelector('#googlePlacesKeyRow'))return;
     const stored=localStorage.getItem('lumina-google-maps-api-key')||'';
     const row=document.createElement('div');row.id='googlePlacesKeyRow';row.style.cssText='padding:12px 0;border-top:1px solid rgba(255,255,255,.08);display:grid;gap:8px';
