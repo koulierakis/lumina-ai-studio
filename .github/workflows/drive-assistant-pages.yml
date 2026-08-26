@@ -33,12 +33,14 @@ jobs:
       - name: Validate Drive source
         run: |
           set -euo pipefail
-          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css premium-v52.css voice-command-guard.js tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
-          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js voice-command-guard.js; do node --check "drive-assistant/$f"; done
+          for f in index.html app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js mapbox-poi-v2.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js session-bootstrap.js road-safety.js sw.js manifest.webmanifest ui-fixes.css premium-v52.css voice-command-guard.js tests/production-smoke.mjs; do test -s "drive-assistant/$f"; done
+          for f in app-v2.js navigation-search.js shared-gps.js route-selection-bridge.js poi-catalog.js poi-enhanced.js mapbox-poi-v2.js google-places.js google-key-settings.js map-poi-layer.js map-labels.js address-autocomplete.js drive-completion.js road-safety.js overpass-fallback.js walking-router.js map-fallback.js user-marker-hook.js reverse-geocode-fallback.js session-bootstrap.js sw.js voice-command-guard.js; do node --check "drive-assistant/$f"; done
           grep -Eq 'google-places\.js\?v=[0-9]+' drive-assistant/index.html
           grep -Eq 'google-key-settings\.js\?v=[0-9]+' drive-assistant/index.html
           grep -Eq 'navigation-search\.js\?v=[0-9]+' drive-assistant/index.html
           grep -Eq 'voice-command-guard\.js\?v=[0-9]+' drive-assistant/index.html
+          grep -Eq 'mapbox-poi-v2\.js\?v=[0-9]+' drive-assistant/index.html
+          grep -Fq 'if(!key)return false' drive-assistant/mapbox-poi-v2.js
           grep -Eq 'lumina-drive-cache-reset-v[0-9]+' drive-assistant/index.html
           grep -Eq "const CACHE='lumina-drive-v[0-9]+'" drive-assistant/sw.js
           grep -Fq "provider('ArcGIS'" drive-assistant/navigation-search.js
@@ -91,10 +93,12 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html navigation-search.js address-autocomplete.js google-places.js google-key-settings.js poi-enhanced.js overpass-fallback.js sw.js voice-command-guard.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          for f in index.html navigation-search.js address-autocomplete.js google-places.js google-key-settings.js poi-enhanced.js mapbox-poi-v2.js overpass-fallback.js sw.js voice-command-guard.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
           grep -Eq 'google-places\.js\?v=[0-9]+' /tmp/index.html
           grep -Eq 'google-key-settings\.js\?v=[0-9]+' /tmp/index.html
           grep -Eq 'voice-command-guard\.js\?v=[0-9]+' /tmp/index.html
+          grep -Eq 'mapbox-poi-v2\.js\?v=[0-9]+' /tmp/index.html
+          grep -Fq 'if(!key)return false' /tmp/mapbox-poi-v2.js
           grep -Fq "provider('OSM POI'" /tmp/navigation-search.js
           grep -Fq 'LuminaGooglePlaces.textSearch' /tmp/navigation-search.js
           grep -Fq 'Place.searchByText' /tmp/google-places.js
@@ -104,4 +108,5 @@ jobs:
           node --check /tmp/address-autocomplete.js
           node --check /tmp/google-places.js
           node --check /tmp/poi-enhanced.js
+          node --check /tmp/mapbox-poi-v2.js
           node --check /tmp/voice-command-guard.js
