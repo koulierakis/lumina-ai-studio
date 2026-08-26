@@ -64,6 +64,20 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
+      - name: Inject production Mapbox configuration
+        env:
+          MAPBOX_ACCESS_TOKEN: ${{ secrets.MAPBOX_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$MAPBOX_ACCESS_TOKEN"
+          node - <<'NODE'
+          const fs = require('fs');
+          const token = process.env.MAPBOX_ACCESS_TOKEN;
+          fs.writeFileSync('drive-assistant/runtime-config.js', `window.__LUMINA_CONFIG__=Object.assign({},window.__LUMINA_CONFIG__||{},{mapboxAccessToken:${JSON.stringify(token)}});\n`);
+          let html = fs.readFileSync('drive-assistant/index.html','utf8');
+          html = html.replace('<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>', '<script src="runtime-config.js"></script><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>');
+          fs.writeFileSync('drive-assistant/index.html', html);
+          NODE
       - name: Stamp build
         run: |
           printf '%s\n' "$(git rev-parse HEAD)" > drive-assistant/build.txt
@@ -93,11 +107,13 @@ jobs:
             sleep 5
           done
           test "$ok" = 1
-          for f in index.html navigation-search.js address-autocomplete.js google-places.js google-key-settings.js poi-enhanced.js mapbox-poi-v2.js overpass-fallback.js sw.js voice-command-guard.js deploy-source.txt; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
+          for f in index.html navigation-search.js address-autocomplete.js google-places.js google-key-settings.js poi-enhanced.js mapbox-poi-v2.js overpass-fallback.js sw.js voice-command-guard.js deploy-source.txt runtime-config.js; do curl -fsS -H 'Cache-Control: no-cache' "$BASE_URL/$f?verify=${GITHUB_RUN_ID}" -o "/tmp/${f}"; done
           grep -Eq 'google-places\.js\?v=[0-9]+' /tmp/index.html
           grep -Eq 'google-key-settings\.js\?v=[0-9]+' /tmp/index.html
           grep -Eq 'voice-command-guard\.js\?v=[0-9]+' /tmp/index.html
           grep -Eq 'mapbox-poi-v2\.js\?v=[0-9]+' /tmp/index.html
+          grep -Fq 'runtime-config.js' /tmp/index.html
+          grep -Fq 'mapboxAccessToken' /tmp/runtime-config.js
           grep -Fq 'if(!key)return false' /tmp/mapbox-poi-v2.js
           grep -Fq "provider('OSM POI'" /tmp/navigation-search.js
           grep -Fq 'LuminaGooglePlaces.textSearch' /tmp/navigation-search.js
