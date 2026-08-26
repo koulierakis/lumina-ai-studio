@@ -12,7 +12,6 @@ import json
 import os
 import random
 from collections.abc import Iterable
-from typing import List, Optional
 
 from PIL import Image
 
@@ -23,8 +22,14 @@ except ImportError:  # dependency validation is exposed through provider status
     genai = None
     types = None
 
-from .base import ErrorKind, GeneratedImage, GenerationInput, ImageProvider, ProviderCapabilities, ProviderError
-
+from .base import (
+    ErrorKind,
+    GeneratedImage,
+    GenerationInput,
+    ImageProvider,
+    ProviderCapabilities,
+    ProviderError,
+)
 
 IDENTITY_PRESERVATION_SYSTEM = (
     "You are a photorealistic image-generation assistant that PRESERVES the "
@@ -72,7 +77,7 @@ def _api_keys() -> list[str]:
     return [fallback] if fallback else []
 
 
-def _api_key() -> Optional[str]:
+def _api_key() -> str | None:
     keys = _api_keys()
     if not keys:
         return None
@@ -441,13 +446,13 @@ class GeminiImageProvider(ImageProvider):
     async def _one_call(self, spec: GenerationInput) -> GeneratedImage:
         return await asyncio.to_thread(self._generate_sync, spec)
 
-    async def generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    async def generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         count = max(1, min(4, int(spec.count or 1)))
         tasks = [self._one_call(spec) for _ in range(count)]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        output: List[GeneratedImage] = []
-        errors: List[str] = []
+        output: list[GeneratedImage] = []
+        errors: list[str] = []
 
         for result in results:
             if isinstance(result, Exception):
@@ -477,9 +482,9 @@ class GeminiImageProvider(ImageProvider):
         source_bytes: bytes,
         source_mime: str,
         instruction: str,
-        mask_bytes: Optional[bytes],
-        mask_mime: Optional[str],
-        identity_refs: Optional[List[bytes]],
+        mask_bytes: bytes | None,
+        mask_mime: str | None,
+        identity_refs: list[bytes] | None,
     ) -> GeneratedImage:
         prompt_parts = [instruction.strip() or "Enhance this image."]
 
@@ -547,9 +552,9 @@ class GeminiImageProvider(ImageProvider):
         source_bytes: bytes,
         source_mime: str,
         instruction: str,
-        mask_bytes: Optional[bytes] = None,
-        mask_mime: Optional[str] = "image/png",
-        identity_refs: Optional[List[bytes]] = None,
+        mask_bytes: bytes | None = None,
+        mask_mime: str | None = "image/png",
+        identity_refs: list[bytes] | None = None,
     ) -> GeneratedImage:
         return await asyncio.to_thread(
             self._edit_sync,

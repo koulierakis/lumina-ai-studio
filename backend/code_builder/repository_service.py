@@ -32,7 +32,7 @@ import re
 import tempfile
 import time
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Iterable, Iterator, Sequence
 from uuid import UUID, uuid4
@@ -80,7 +80,7 @@ class UnsupportedFileEncodingError(RepositoryServiceError):
     """Raised when a text file cannot be decoded safely."""
 
 
-UTC = timezone.utc
+UTC = UTC
 
 DEFAULT_INDEX_DIRECTORY: Final[str] = ".lumina"
 DEFAULT_INDEX_FILE_NAME: Final[str] = "code_builder_repository_index.json"
@@ -660,7 +660,7 @@ class RepositoryService:
     def from_request(
         cls,
         request: CodebaseAnalysisRequest,
-    ) -> "RepositoryService":
+    ) -> RepositoryService:
         """Create a repository service from an analysis request."""
 
         return cls(configuration=request.configuration)

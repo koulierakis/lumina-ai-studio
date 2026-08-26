@@ -8,14 +8,13 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import load_config
-from .detect import detect_npm, detect_node, detect_ollama, detect_python
+from .detect import detect_node, detect_npm, detect_ollama, detect_python
 from .errors import (
     AlreadyRunningError,
     DependencyMissingError,
-    LauncherError,
     PortInUseError,
     StartupTimeoutError,
 )
@@ -38,6 +37,16 @@ def _creation_flags() -> int:
         # Hide console windows for child processes when launched via VBS/GUI path.
         return getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     return 0
+
+
+def _probe_host(host: str) -> str:
+    """Return a routable local address for health checks.
+
+    0.0.0.0 is a bind address, not a destination.  The launcher may bind to all
+    interfaces for private-network/mobile use, but local health probes and the
+    browser opened on the host machine must use loopback.
+    """
+    return "127.0.0.1" if host in {"localhost", "0.0.0.0"} else host
 
 
 def _open_log(name: str, repo_root: Path) -> Any:
@@ -81,8 +90,8 @@ def is_lumina_running(repo_root: Path | None = None) -> bool:
     cfg = load_config(root)
     backend_pid = (state.get("services") or {}).get("backend", {}).get("pid")
     frontend_pid = (state.get("services") or {}).get("frontend", {}).get("pid")
-    backend_ready = check_backend(cfg["backend_host"], cfg["backend_port"]).get("ok")
-    frontend_ready = check_frontend(cfg["frontend_host"], cfg["frontend_port"]).get("ok")
+    backend_ready = check_backend(_probe_host(cfg["backend_host"]), cfg["backend_port"]).get("ok")
+    frontend_ready = check_frontend(_probe_host(cfg["frontend_host"]), cfg["frontend_port"]).get("ok")
     owned_backend = owns_process("backend", backend_pid, repo_root=root) if backend_pid else False
     owned_frontend = owns_process("frontend", frontend_pid, repo_root=root) if frontend_pid else False
     return bool((owned_backend and backend_ready) or (owned_frontend and frontend_ready) or (backend_ready and frontend_ready and (owned_backend or owned_frontend)))
@@ -166,7 +175,8 @@ def _start_ollama_if_needed(repo_root: Path, cfg: dict[str, Any]) -> list[str]:
 
 def _start_backend(repo_root: Path, cfg: dict[str, Any]) -> None:
     host, port = cfg["backend_host"], int(cfg["backend_port"])
-    if check_backend(host, port).get("ok"):
+    probe = _probe_host(host)
+    if check_backend(probe, port).get("ok"):
         state = load_state(repo_root)
         pid = (state.get("services") or {}).get("backend", {}).get("pid")
         if owns_process("backend", pid, repo_root=repo_root):
@@ -174,7 +184,7 @@ def _start_backend(repo_root: Path, cfg: dict[str, Any]) -> None:
             return
         raise PortInUseError("backend", port)
 
-    if port_in_use(host if host != "0.0.0.0" else "127.0.0.1", port):
+    if port_in_use(probe, port):
         raise PortInUseError("backend", port)
 
     python = sys.executable
@@ -204,7 +214,7 @@ def _start_backend(repo_root: Path, cfg: dict[str, Any]) -> None:
     )
     record_service("backend", proc.pid, cmd, repo_root=repo_root)
     ready = wait_until(
-        lambda: bool(check_backend(host, port).get("ok")),
+        lambda: bool(check_backend(probe, port).get("ok")),
         timeout=cfg["startup_timeout_seconds"],
         interval=cfg["readiness_poll_interval_seconds"],
         label="Backend",
@@ -215,7 +225,8 @@ def _start_backend(repo_root: Path, cfg: dict[str, Any]) -> None:
 
 def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
     host, port = cfg["frontend_host"], int(cfg["frontend_port"])
-    if check_frontend(host, port).get("ok"):
+    probe = _probe_host(host)
+    if check_frontend(probe, port).get("ok"):
         state = load_state(repo_root)
         pid = (state.get("services") or {}).get("frontend", {}).get("pid")
         if owns_process("frontend", pid, repo_root=repo_root):
@@ -223,8 +234,7 @@ def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
             return
         raise PortInUseError("frontend", port)
 
-    check_host = "127.0.0.1" if host in {"localhost", "0.0.0.0"} else host
-    if port_in_use(check_host, port):
+    if port_in_use(probe, port):
         raise PortInUseError("frontend", port)
 
     npm = detect_npm()
@@ -240,10 +250,17 @@ def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
     env = os.environ.copy()
     env["BROWSER"] = "none"
     env["PORT"] = str(port)
-    env.setdefault(
-        "REACT_APP_BACKEND_URL",
-        f"http://{cfg['backend_host']}:{cfg['backend_port']}",
-    )
+    env["HOST"] = host
+    # For mobile/private-network access the browser must call the same origin
+    # that served the frontend.  A hard-coded 127.0.0.1 would point at the
+    # phone itself rather than the computer hosting LUMINA.
+    if cfg.get("remote_access"):
+        env["REACT_APP_BACKEND_URL"] = ""
+    else:
+        env.setdefault(
+            "REACT_APP_BACKEND_URL",
+            f"http://{cfg['backend_host']}:{cfg['backend_port']}",
+        )
     proc = subprocess.Popen(  # noqa: S603
         cmd,
         cwd=str(frontend_dir),
@@ -255,7 +272,7 @@ def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
     )
     record_service("frontend", proc.pid, cmd, repo_root=repo_root)
     ready = wait_until(
-        lambda: bool(check_frontend(host, port).get("ok")),
+        lambda: bool(check_frontend(probe, port).get("ok")),
         timeout=cfg["startup_timeout_seconds"],
         interval=cfg["readiness_poll_interval_seconds"],
         label="Frontend",
@@ -271,7 +288,7 @@ def _open_dashboard(repo_root: Path, cfg: dict[str, Any]) -> None:
     if cfg.get("open_browser_once") and state.get("browser_opened"):
         logger.info("Dashboard already opened for this runtime session.")
         return
-    url = f"http://{cfg['frontend_host']}:{cfg['frontend_port']}/"
+    url = f"http://{_probe_host(cfg['frontend_host'])}:{cfg['frontend_port']}/"
     logger.info("Opening dashboard: %s", url)
     try:
         webbrowser.open(url)
@@ -291,9 +308,11 @@ def start_all(repo_root: Path | None = None) -> dict[str, Any]:
     if is_lumina_running(root):
         raise AlreadyRunningError()
 
-    # Also guard against foreign processes already serving our ports
-    if check_backend(cfg["backend_host"], cfg["backend_port"]).get("ok") and check_frontend(
-        cfg["frontend_host"], cfg["frontend_port"]
+    # Also guard against foreign processes already serving our ports.
+    backend_probe = _probe_host(cfg["backend_host"])
+    frontend_probe = _probe_host(cfg["frontend_host"])
+    if check_backend(backend_probe, cfg["backend_port"]).get("ok") and check_frontend(
+        frontend_probe, cfg["frontend_port"]
     ).get("ok"):
         raise AlreadyRunningError(
             "Backend and frontend are already responding. "
@@ -320,8 +339,8 @@ def start_all(repo_root: Path | None = None) -> dict[str, Any]:
         return {
             "ok": True,
             "warnings": warnings,
-            "backend": check_backend(cfg["backend_host"], cfg["backend_port"]),
-            "frontend": check_frontend(cfg["frontend_host"], cfg["frontend_port"]),
+            "backend": check_backend(backend_probe, cfg["backend_port"]),
+            "frontend": check_frontend(frontend_probe, cfg["frontend_port"]),
             "ollama": check_ollama(cfg["ollama_host"], cfg["ollama_port"], cfg["preferred_ollama_model"]),
         }
     except Exception:
@@ -359,13 +378,16 @@ def status_report(repo_root: Path | None = None) -> dict[str, Any]:
     cfg = load_config(root)
     cleanup_stale_pids(root)
     state = load_state(root)
-    backend = check_backend(cfg["backend_host"], cfg["backend_port"])
-    frontend = check_frontend(cfg["frontend_host"], cfg["frontend_port"])
+    backend_probe = _probe_host(cfg["backend_host"])
+    frontend_probe = _probe_host(cfg["frontend_host"])
+    backend = check_backend(backend_probe, cfg["backend_port"])
+    frontend = check_frontend(frontend_probe, cfg["frontend_port"])
     ollama = check_ollama(cfg["ollama_host"], cfg["ollama_port"], cfg["preferred_ollama_model"])
     services = state.get("services") or {}
     return {
         "repo_root": str(root),
         "running": is_lumina_running(root),
+        "remote_access": bool(cfg.get("remote_access")),
         "backend": {
             **backend,
             "pid": (services.get("backend") or {}).get("pid"),
@@ -385,8 +407,11 @@ def status_report(repo_root: Path | None = None) -> dict[str, Any]:
         "warnings": state.get("warnings") or [],
         "started_at": state.get("started_at"),
         "config": {
+            "backend_host": cfg["backend_host"],
             "backend_port": cfg["backend_port"],
+            "frontend_host": cfg["frontend_host"],
             "frontend_port": cfg["frontend_port"],
             "preferred_ollama_model": cfg["preferred_ollama_model"],
+            "remote_access": bool(cfg.get("remote_access")),
         },
     }

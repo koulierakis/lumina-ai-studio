@@ -4,19 +4,17 @@ Uses simple email + bcrypt password verified against env vars.
 Issues signed JWT tokens for session persistence.
 """
 from __future__ import annotations
-import os
+
 import hmac
-from datetime import datetime, timedelta, timezone
+import ipaddress
+import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 import bcrypt
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-
-_bearer = HTTPBearer(auto_error=False)
+from fastapi import HTTPException, Request
 
 # Authentication is also imported by local maintenance commands and tests.
 # Load the backend-owned configuration here so credential verification never
@@ -26,10 +24,10 @@ load_dotenv(Path(__file__).resolve().with_name(".env"), override=False)
 
 
 def _secret() -> str:
-    s = os.environ.get("JWT_SECRET")
-    if not s:
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
         raise RuntimeError("JWT_SECRET not configured")
-    return s
+    return secret
 
 
 def _owner_email() -> str:
@@ -42,6 +40,11 @@ def _owner_password() -> str:
 
 def _owner_password_hash() -> str:
     return (os.environ.get("OWNER_PASSWORD_HASH") or "").strip()
+
+
+def _local_passwordless_enabled() -> bool:
+    value = os.environ.get("LUMINA_LOCAL_PASSWORDLESS", "1")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def verify_credentials(email: str, password: str) -> bool:
@@ -73,22 +76,57 @@ def hash_password(plain: str) -> str:
 def issue_token(email: str, hours: int = 24 * 30) -> str:
     payload = {
         "sub": email.strip().lower(),
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(hours=hours),
     }
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
 
-def decode_token(token: str) -> Optional[str]:
+def decode_token(token: str) -> str | None:
     try:
         payload = jwt.decode(token, _secret(), algorithms=["HS256"])
-        return payload.get("sub")
+        subject = payload.get("sub")
+        return str(subject).strip().lower() if subject else None
     except jwt.PyJWTError:
         return None
 
 
-async def require_owner(
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
-) -> str:
-    """Local single-owner mode: allow access without authentication."""
-    return _owner_email() or "owner@lumina.local"
+def _is_loopback_request(request: Request) -> bool:
+    client = request.client
+    host = (client.host if client else "").strip()
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host.lower() == "localhost"
+
+
+async def require_owner(request: Request) -> str:
+    """Authenticate the owner, optionally allowing passwordless loopback access.
+
+    Desktop installations default to passwordless access for requests originating
+    from the same computer. Set ``LUMINA_LOCAL_PASSWORDLESS=0`` to require a
+    valid JWT even on loopback, which is also how the security integration suite
+    verifies the protected-route contract.
+
+    If an Authorization header is supplied it is always validated. A malformed,
+    forged, expired, or wrong-owner token is never converted into passwordless
+    access by the local fallback.
+    """
+    owner_email = _owner_email() or "owner@lumina.local"
+    authorization = (request.headers.get("authorization") or "").strip()
+
+    if authorization:
+        scheme, separator, token = authorization.partition(" ")
+        if not separator or scheme.lower() != "bearer" or not token.strip():
+            raise HTTPException(status_code=401, detail="Invalid authorization header")
+        subject = decode_token(token.strip())
+        if not subject or not hmac.compare_digest(subject, owner_email):
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return owner_email
+
+    if _local_passwordless_enabled() and _is_loopback_request(request):
+        return owner_email
+
+    raise HTTPException(status_code=401, detail="Authentication required")

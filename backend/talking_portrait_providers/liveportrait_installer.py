@@ -9,14 +9,12 @@ import subprocess
 import sys
 import time
 import traceback
-import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable
 
 from .liveportrait_provider import LivePortraitProvider
-
 
 INSTALL_STAGES = [
     "preflight",
@@ -49,7 +47,7 @@ COMPATIBLE_PYTHON = {(3, 10), (3, 11), (3, 12), (3, 13)}
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
 def runtime_root() -> Path:

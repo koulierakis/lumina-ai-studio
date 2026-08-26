@@ -79,6 +79,32 @@ let webpackConfig = {
       },
     },
   },
+  jest: {
+    configure: (jestConfig) => {
+      // Jest 27 (bundled by react-scripts 5) predates the package-exports
+      // layout used by @lexical/react 0.45. Use the concrete CommonJS files
+      // advertised by Lexical's `require` exports. Explicit entries avoid
+      // relying on capture-group substitution in the CRA/Jest resolver.
+      const lexicalReactCjs = (name) =>
+        `<rootDir>/node_modules/@lexical/react/dist/${name}.js`;
+
+      jestConfig.moduleNameMapper = {
+        ...(jestConfig.moduleNameMapper || {}),
+        '^@lexical/react/LexicalComposer$': lexicalReactCjs('LexicalComposer'),
+        '^@lexical/react/LexicalComposerContext$': lexicalReactCjs('LexicalComposerContext'),
+        '^@lexical/react/LexicalContentEditable$': lexicalReactCjs('LexicalContentEditable'),
+        '^@lexical/react/LexicalErrorBoundary$': lexicalReactCjs('LexicalErrorBoundary'),
+        '^@lexical/react/LexicalHistoryPlugin$': lexicalReactCjs('LexicalHistoryPlugin'),
+        '^@lexical/react/LexicalLinkPlugin$': lexicalReactCjs('LexicalLinkPlugin'),
+        '^@lexical/react/LexicalListPlugin$': lexicalReactCjs('LexicalListPlugin'),
+        '^@lexical/react/LexicalOnChangePlugin$': lexicalReactCjs('LexicalOnChangePlugin'),
+        '^@lexical/react/LexicalRichTextPlugin$': lexicalReactCjs('LexicalRichTextPlugin'),
+        '^@lexical/react/ReactProviderExtension$': lexicalReactCjs('LexicalReactProviderExtension'),
+        '^@lexical/react/useLexicalEditable$': lexicalReactCjs('useLexicalEditable'),
+      };
+      return jestConfig;
+    },
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -118,7 +144,7 @@ webpackConfig.devServer = (devServerConfig) => {
         middlewares = originalSetupMiddlewares(middlewares, devServer);
       }
 
-      // Setup health endpoints
+      // Setup health check endpoints
       setupHealthEndpoints(devServer, healthPluginInstance);
 
       return middlewares;

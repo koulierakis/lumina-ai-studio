@@ -35,10 +35,9 @@ import tempfile
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
-
 
 DEFAULT_BACKUP_DIRECTORY = Path(".lumina") / "backups"
 MANIFEST_FILENAME = "manifest.json"
@@ -1041,7 +1040,7 @@ class BackupService:
 
     @staticmethod
     def _generate_backup_id() -> str:
-        timestamp = datetime.now(timezone.utc).strftime(
+        timestamp = datetime.now(UTC).strftime(
             "%Y%m%dT%H%M%SZ"
         )
         random_suffix = uuid.uuid4().hex[:12]
@@ -1049,7 +1048,7 @@ class BackupService:
 
     @staticmethod
     def _utc_now() -> str:
-        return datetime.now(timezone.utc).isoformat()
+        return datetime.now(UTC).isoformat()
 
     @staticmethod
     def _sha256_file(path: Path) -> str:

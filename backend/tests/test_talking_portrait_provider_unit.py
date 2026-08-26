@@ -4,12 +4,24 @@ import json
 import tempfile
 
 import pytest
-from PIL import Image
-
 import server
-from talking_portrait_providers import auto_detect_talking_portrait_provider, get_talking_portrait_provider, talking_portrait_catalog
-from talking_portrait_providers.base import GeneratedTalkingPortrait, TalkingPortraitCancelledError, TalkingPortraitInput, TalkingPortraitProviderError
-from talking_portrait_providers.liveportrait_provider import LivePortraitProvider, _LocalLipSyncEngine, _raise_if_cancelled
+from PIL import Image
+from talking_portrait_providers import (
+    auto_detect_talking_portrait_provider,
+    get_talking_portrait_provider,
+    talking_portrait_catalog,
+)
+from talking_portrait_providers.base import (
+    GeneratedTalkingPortrait,
+    TalkingPortraitCancelledError,
+    TalkingPortraitInput,
+    TalkingPortraitProviderError,
+)
+from talking_portrait_providers.liveportrait_provider import (
+    LivePortraitProvider,
+    _LocalLipSyncEngine,
+    _raise_if_cancelled,
+)
 
 
 class _FakeTalkingPortraitJobs:

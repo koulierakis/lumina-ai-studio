@@ -2,15 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import json
 import logging
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
-from contextlib import asynccontextmanager
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any, Final, Protocol, cast
+from typing import Annotated, Any, Final, Protocol
 
 from fastapi import (
     APIRouter,
@@ -19,20 +19,16 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
-    Request,
     Response,
     status,
 )
-from fastapi.responses import JSONResponse
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     field_validator,
-    model_validator,
 )
 
-from . import models as domain_models
 from .backup_service import BackupService
 from .build_service import (
     BuildCommandSpec,
@@ -50,19 +46,16 @@ from .task_service import (
     TaskCancellationToken,
     TaskExecutionResult,
     TaskRequest,
-    TaskResultMappingError,
     TaskService,
     TaskServiceConfiguration,
-    TaskServiceError,
     TaskStatus,
     TaskTimeoutError,
-    TaskValidationError,
+    _run_awaitable_sync,
     create_task_service,
     get_task_result_changed_paths,
     get_task_result_error,
     is_successful_task_result,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -115,8 +108,13 @@ class CodeBuilderRepositoryError(CodeBuilderRouterError):
 class CodeBuilderTaskPhase(str, enum.Enum):
     QUEUED = "queued"
     ANALYZING = "analyzing"
+    PLANNING = "planning"
+    VALIDATING = "validating"
     AWAITING_APPROVAL = "awaiting_approval"
     APPROVED = "approved"
+    APPLYING = "applying"
+    VERIFYING = "verifying"
+    # Backward-compatible aggregate retained for stored/legacy clients.
     EXECUTING = "executing"
     ROLLING_BACK = "rolling_back"
     COMPLETED = "completed"
@@ -341,6 +339,8 @@ class TaskSummaryResponse(BaseModel):
 class TaskDetailResponse(TaskSummaryResponse):
     request: dict[str, Any]
     result: dict[str, Any] | None = None
+    preparation_result: dict[str, Any] | None = None
+    review_result: dict[str, Any] | None = None
     events: tuple[TaskEventResponse, ...] = Field(default_factory=tuple)
     approval_comment: str | None = None
     approved_at_epoch: float | None = None
@@ -389,7 +389,7 @@ class RepositoryNodeResponse(BaseModel):
     node_type: RepositoryNodeType
     size_bytes: int | None = None
     modified_at_epoch: float | None = None
-    children: tuple["RepositoryNodeResponse", ...] = Field(
+    children: tuple[RepositoryNodeResponse, ...] = Field(
         default_factory=tuple
     )
 
@@ -450,6 +450,8 @@ class StoredTask:
     auto_start_after_approval: bool
     cancellation_token: TaskCancellationToken
     result: Any = None
+    preparation_result: Any = None
+    review_result: Any = None
     started_at_epoch: float | None = None
     finished_at_epoch: float | None = None
     approved_at_epoch: float | None = None
@@ -904,6 +906,254 @@ def _task_request_from_api(
     )
 
 
+def _build_preparation_request(stored_task: StoredTask) -> TaskRequest:
+    metadata = dict(stored_task.request.metadata)
+    metadata["code_builder_preparation"] = True
+    return stored_task.request.model_copy(
+        update={
+            "dry_run": True,
+            "backup_policy": BackupPolicy.DISABLED,
+            "build_policy": BuildPolicy.DISABLED,
+            "rollback_policy": RollbackPolicy.NEVER,
+            "metadata": metadata,
+        }
+    )
+
+
+def _lock_prepared_operations_to_validation(
+    prepared: Mapping[str, Any],
+    raw_operations: Sequence[Any],
+) -> list[Any]:
+    validation = prepared.get("patch_validation")
+    validation_results = (
+        validation.get("results")
+        if isinstance(validation, Mapping)
+        else None
+    )
+    results = (
+        list(validation_results)
+        if isinstance(validation_results, Sequence)
+        and not isinstance(validation_results, (str, bytes, bytearray))
+        else []
+    )
+
+    by_operation_id: dict[str, Mapping[str, Any]] = {}
+    for result in results:
+        if not isinstance(result, Mapping):
+            continue
+        operation_id = result.get("operation_id")
+        if operation_id is not None:
+            by_operation_id[str(operation_id)] = result
+
+    locked: list[Any] = []
+    for index, raw_operation in enumerate(raw_operations):
+        if not isinstance(raw_operation, Mapping):
+            locked.append(raw_operation)
+            continue
+
+        operation = dict(raw_operation)
+        if operation.get("expected_sha256"):
+            locked.append(operation)
+            continue
+
+        validation_result: Mapping[str, Any] | None = None
+        operation_id = operation.get("operation_id")
+        if operation_id is not None:
+            validation_result = by_operation_id.get(str(operation_id))
+
+        if validation_result is None and index < len(results):
+            candidate = results[index]
+            if isinstance(candidate, Mapping):
+                operation_path = str(operation.get("path") or "")
+                result_path = str(candidate.get("path") or candidate.get("relative_path") or "")
+                if not operation_path or operation_path == result_path:
+                    validation_result = candidate
+
+        if validation_result is not None:
+            original_sha256 = validation_result.get("original_sha256")
+            if original_sha256:
+                operation["expected_sha256"] = str(original_sha256)
+
+        locked.append(operation)
+
+    return locked
+
+
+def _bind_prepared_patch_to_request(stored_task: StoredTask) -> TaskRequest:
+    prepared = _serialize_value(stored_task.preparation_result)
+    if not isinstance(prepared, Mapping):
+        raise CodeBuilderApprovalError(
+            "Task does not have a completed preparation result."
+        )
+
+    raw_patch = prepared.get("patch")
+    if not isinstance(raw_patch, Mapping):
+        raise CodeBuilderApprovalError(
+            "Task preparation did not produce an approvable patch."
+        )
+
+    raw_operations = raw_patch.get("operations")
+    if not isinstance(raw_operations, Sequence) or isinstance(
+        raw_operations, (str, bytes, bytearray)
+    ) or not raw_operations:
+        raise CodeBuilderApprovalError(
+            "Task preparation did not produce patch operations."
+        )
+
+    metadata = dict(stored_task.request.metadata)
+    metadata.pop("patch_operations", None)
+    metadata.pop("execution_patch_operations", None)
+    metadata["approved_patch_operations"] = _lock_prepared_operations_to_validation(
+        prepared,
+        raw_operations,
+    )
+    metadata["approved_preparation_plan"] = prepared.get("plan")
+    metadata["approved_preparation_task_id"] = stored_task.request.task_id
+    return stored_task.request.model_copy(update={"metadata": metadata})
+
+
+def _review_prepared_change(
+    *,
+    task_service: TaskService,
+    stored_task: StoredTask,
+    preparation_result: Any,
+) -> dict[str, Any]:
+    ollama_service = task_service.ollama_service
+    reviewer = getattr(
+        ollama_service,
+        "analyze_code_task",
+        None,
+    )
+
+    planning_service = getattr(task_service, "planning_service", None)
+    planning_configuration = getattr(planning_service, "configuration", None)
+    model = (
+        getattr(planning_configuration, "model", None)
+        or getattr(ollama_service, "model", None)
+    )
+
+    serialized_preparation = _serialize_value(preparation_result)
+    review_instruction = (
+        "Act as the independent LUMINA Code Builder reviewer. Review ONLY "
+        "the supplied prepared implementation plan, proposed patch/diff, "
+        "and patch validation. Do not generate replacement code and do not "
+        "modify files. Check scope alignment, correctness risks, unsafe or "
+        "destructive changes, missing tests, plan/patch mismatches, and "
+        "rollback concerns. Give a concise verdict using PASS, WARN, or "
+        "BLOCK as the first word, followed by concrete findings with file "
+        "paths when known."
+    )
+
+    timeout_seconds = min(
+        stored_task.request.task_timeout_seconds,
+        300.0,
+    )
+
+    try:
+        if callable(reviewer):
+            content = reviewer(
+                instruction=review_instruction,
+                repository_context=serialized_preparation,
+                user_context={
+                    "original_instruction": stored_task.request.instruction,
+                    "task_id": stored_task.request.task_id,
+                    "purpose": "pre_approval_review",
+                },
+                target_paths=stored_task.request.target_paths,
+                excluded_paths=stored_task.request.excluded_paths,
+                timeout_seconds=timeout_seconds,
+                cancellation_token=stored_task.cancellation_token,
+            )
+        else:
+            generator = getattr(ollama_service, "generate", None)
+            if not callable(generator) or not model:
+                return {
+                    "status": "unavailable",
+                    "model": str(model) if model else None,
+                    "summary": (
+                        "Independent AI review is unavailable because no "
+                        "compatible local model generation method is configured."
+                    ),
+                    "reviewed_at_epoch": time.time(),
+                }
+
+            review_payload = {
+                "original_instruction": stored_task.request.instruction,
+                "target_paths": list(stored_task.request.target_paths),
+                "excluded_paths": list(stored_task.request.excluded_paths),
+                "prepared_change": serialized_preparation,
+            }
+            prompt = json.dumps(
+                review_payload,
+                ensure_ascii=False,
+                default=str,
+            )
+            # Keep the review bounded even when the prepared diff is large.
+            prompt = prompt[:500_000]
+
+            options: dict[str, Any] = {
+                "temperature": 0.0,
+                "num_predict": 768,
+            }
+            context_window = getattr(
+                planning_configuration,
+                "context_window",
+                None,
+            )
+            if isinstance(context_window, int) and context_window > 0:
+                options["num_ctx"] = context_window
+
+            raw_response = _run_awaitable_sync(
+                generator(
+                    model=str(model),
+                    prompt=prompt,
+                    system_prompt=review_instruction,
+                    options=options,
+                    timeout_seconds=timeout_seconds,
+                    verify_model=False,
+                ),
+                timeout_seconds=timeout_seconds,
+                operation_name="Independent Code Builder review",
+            )
+            content = getattr(raw_response, "content", raw_response)
+
+    except Exception as exc:
+        logger.warning(
+            "Code Builder AI review failed for task %s: %s",
+            stored_task.request.task_id,
+            exc,
+        )
+        return {
+            "status": "unavailable",
+            "model": str(model) if model else None,
+            "summary": f"AI review failed: {exc}",
+            "reviewed_at_epoch": time.time(),
+        }
+
+    normalized = str(content).strip()
+    first_line = (
+        normalized.splitlines()[0].strip().upper()
+        if normalized
+        else ""
+    )
+    verdict = (
+        "block"
+        if first_line.startswith("BLOCK")
+        else "warn"
+        if first_line.startswith("WARN")
+        else "pass"
+        if first_line.startswith("PASS")
+        else "warn"
+    )
+    return {
+        "status": "completed",
+        "verdict": verdict,
+        "model": str(model) if model else None,
+        "summary": normalized,
+        "reviewed_at_epoch": time.time(),
+    }
+
+
 def _phase_from_result(
     result: Any,
 ) -> CodeBuilderTaskPhase:
@@ -1063,6 +1313,12 @@ def _task_detail_response(
     serialized_result = _serialize_value(
         stored_task.result
     )
+    serialized_preparation = _serialize_value(
+        stored_task.preparation_result
+    )
+    serialized_review = _serialize_value(
+        stored_task.review_result
+    )
 
     serialized_rollback = _serialize_value(
         stored_task.rollback_result
@@ -1086,6 +1342,16 @@ def _task_detail_response(
                 if serialized_result is not None
                 else None
             )
+        ),
+        preparation_result=(
+            dict(serialized_preparation)
+            if isinstance(serialized_preparation, Mapping)
+            else None
+        ),
+        review_result=(
+            dict(serialized_review)
+            if isinstance(serialized_review, Mapping)
+            else None
         ),
         events=events,
         approval_comment=(
@@ -1186,10 +1452,7 @@ def _validate_task_id(task_id: str) -> str:
 def _phase_allows_approval(
     phase: CodeBuilderTaskPhase,
 ) -> bool:
-    return phase in {
-        CodeBuilderTaskPhase.AWAITING_APPROVAL,
-        CodeBuilderTaskPhase.QUEUED,
-    }
+    return phase is CodeBuilderTaskPhase.AWAITING_APPROVAL
 
 
 def _phase_allows_cancellation(
@@ -1198,8 +1461,12 @@ def _phase_allows_cancellation(
     return phase in {
         CodeBuilderTaskPhase.QUEUED,
         CodeBuilderTaskPhase.ANALYZING,
+        CodeBuilderTaskPhase.PLANNING,
+        CodeBuilderTaskPhase.VALIDATING,
         CodeBuilderTaskPhase.AWAITING_APPROVAL,
         CodeBuilderTaskPhase.APPROVED,
+        CodeBuilderTaskPhase.APPLYING,
+        CodeBuilderTaskPhase.VERIFYING,
         CodeBuilderTaskPhase.EXECUTING,
     }
 
@@ -1279,22 +1546,22 @@ def _update_phase_from_event(
             CodeBuilderTaskPhase.ANALYZING
         ),
         TaskStatus.PLANNING.value: (
-            CodeBuilderTaskPhase.ANALYZING
+            CodeBuilderTaskPhase.PLANNING
         ),
         TaskStatus.BACKING_UP.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.APPLYING
         ),
         TaskStatus.GENERATING_PATCH.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.VALIDATING
         ),
         TaskStatus.VALIDATING_PATCH.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.VALIDATING
         ),
         TaskStatus.APPLYING_PATCH.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.APPLYING
         ),
         TaskStatus.BUILDING.value: (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.VERIFYING
         ),
         TaskStatus.ROLLING_BACK.value: (
             CodeBuilderTaskPhase.ROLLING_BACK
@@ -1327,21 +1594,38 @@ def _update_phase_from_event(
     )
 
     if new_phase is None:
-        if normalized_stage in {
-            "analysis",
-            "planning",
-        }:
+        if normalized_stage == "analysis":
             new_phase = CodeBuilderTaskPhase.ANALYZING
+        elif normalized_stage == "planning":
+            new_phase = CodeBuilderTaskPhase.PLANNING
         elif normalized_stage in {
-            "backup",
             "patch_generation",
             "patch_validation",
-            "patch_application",
-            "build",
         }:
-            new_phase = CodeBuilderTaskPhase.EXECUTING
+            new_phase = CodeBuilderTaskPhase.VALIDATING
+        elif normalized_stage in {
+            "backup",
+            "patch_application",
+        }:
+            new_phase = CodeBuilderTaskPhase.APPLYING
+        elif normalized_stage == "build":
+            new_phase = CodeBuilderTaskPhase.VERIFYING
         elif normalized_stage == "rollback":
             new_phase = CodeBuilderTaskPhase.ROLLING_BACK
+
+    if (
+        stored_task.require_approval
+        and stored_task.approved_at_epoch is None
+        and new_phase in {
+            CodeBuilderTaskPhase.APPLYING,
+            CodeBuilderTaskPhase.VERIFYING,
+            CodeBuilderTaskPhase.EXECUTING,
+            CodeBuilderTaskPhase.COMPLETED,
+        }
+    ):
+        # Preparation may generate/validate a diff, but public state must never
+        # imply repository mutation before explicit approval.
+        new_phase = CodeBuilderTaskPhase.VALIDATING
 
     if new_phase is not None:
         stored_task.phase = new_phase
@@ -1409,24 +1693,22 @@ def _run_stored_task_sync(
 ) -> None:
     with stored_task.execution_lock:
         if stored_task.phase in {
+            CodeBuilderTaskPhase.APPLYING,
+            CodeBuilderTaskPhase.VERIFYING,
             CodeBuilderTaskPhase.EXECUTING,
             CodeBuilderTaskPhase.COMPLETED,
             CodeBuilderTaskPhase.ROLLED_BACK,
         }:
             return
 
-        if (
+        preparing = (
             stored_task.require_approval
             and stored_task.approved_at_epoch is None
-        ):
-            stored_task.phase = (
-                CodeBuilderTaskPhase.AWAITING_APPROVAL
-            )
-            stored_task.touch()
-            return
-
+        )
         stored_task.phase = (
-            CodeBuilderTaskPhase.EXECUTING
+            CodeBuilderTaskPhase.ANALYZING
+            if preparing
+            else CodeBuilderTaskPhase.APPLYING
         )
         stored_task.started_at_epoch = time.time()
         stored_task.finished_at_epoch = None
@@ -1436,10 +1718,15 @@ def _run_stored_task_sync(
         task_store,
         stored_task,
     )
+    execution_request = (
+        _build_preparation_request(stored_task)
+        if preparing
+        else stored_task.request
+    )
 
     try:
         result = task_service.execute(
-            stored_task.request,
+            execution_request,
             event_callback=callback,
             cancellation_token=(
                 stored_task.cancellation_token
@@ -1463,10 +1750,23 @@ def _run_stored_task_sync(
 
     with stored_task.execution_lock:
         stored_task.result = result
-        stored_task.phase = _phase_from_result(
-            result
-        )
-        stored_task.finished_at_epoch = time.time()
+        if preparing:
+            if _phase_from_result(result) is not CodeBuilderTaskPhase.COMPLETED:
+                stored_task.phase = _phase_from_result(result)
+                stored_task.finished_at_epoch = time.time()
+            else:
+                stored_task.preparation_result = result
+                stored_task.review_result = _review_prepared_change(
+                    task_service=task_service,
+                    stored_task=stored_task,
+                    preparation_result=result,
+                )
+                stored_task.phase = CodeBuilderTaskPhase.AWAITING_APPROVAL
+                stored_task.metadata["preparation_completed_at_epoch"] = time.time()
+                stored_task.finished_at_epoch = None
+        else:
+            stored_task.phase = _phase_from_result(result)
+            stored_task.finished_at_epoch = time.time()
         stored_task.touch()
 
 
@@ -2103,11 +2403,7 @@ async def create_code_builder_task(
 
     now = time.time()
 
-    initial_phase = (
-        CodeBuilderTaskPhase.AWAITING_APPROVAL
-        if payload.require_approval
-        else CodeBuilderTaskPhase.QUEUED
-    )
+    initial_phase = CodeBuilderTaskPhase.QUEUED
 
     stored_task = StoredTask(
         request=task_request,
@@ -2153,10 +2449,23 @@ async def create_code_builder_task(
         created_task is not stored_task
     )
 
-    if (
-        not is_existing_idempotent_task
-        and not payload.require_approval
-    ):
+    if is_existing_idempotent_task:
+        existing_payload = created_task.api_request.model_dump(mode="json")
+        incoming_payload = payload.model_dump(mode="json")
+        if existing_payload != incoming_payload:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "idempotency_key_conflict",
+                    "message": (
+                        "This Idempotency-Key is already bound to a different "
+                        "Code Builder request."
+                    ),
+                    "task_id": created_task.request.task_id,
+                },
+            )
+
+    if not is_existing_idempotent_task:
         _schedule_task_execution(
             background_tasks=background_tasks,
             task_service=task_service,
@@ -2334,6 +2643,46 @@ async def get_code_builder_task_events(
     return tuple(events)
 
 
+def _validate_review_allows_approval(
+    review_result: Any,
+    *,
+    task_id: str,
+) -> None:
+    serialized_review = _serialize_value(review_result)
+    if not isinstance(serialized_review, Mapping):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "ai_review_unavailable",
+                "message": "Independent AI review must complete before approval.",
+                "task_id": task_id,
+            },
+        )
+
+    review_status = str(serialized_review.get("status") or "").strip().casefold()
+    verdict = str(serialized_review.get("verdict") or "").strip().casefold()
+
+    if review_status != "completed" or verdict not in {"pass", "warn", "block"}:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "ai_review_unavailable",
+                "message": "Independent AI review must complete successfully before approval.",
+                "task_id": task_id,
+            },
+        )
+
+    if verdict == "block":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "error": "ai_review_blocked",
+                "message": "AI review blocked this prepared change. Revise the task before approval.",
+                "task_id": task_id,
+            },
+        )
+
+
 @router.post(
     "/tasks/{task_id}/approve",
     response_model=TaskApprovalResponse,
@@ -2446,6 +2795,26 @@ async def approve_code_builder_task(
                 approved=False,
                 execution_started=False,
             )
+
+        _validate_review_allows_approval(
+            stored_task.review_result,
+            task_id=normalized_task_id,
+        )
+
+
+        try:
+            stored_task.request = _bind_prepared_patch_to_request(
+                stored_task
+            )
+        except CodeBuilderApprovalError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "error": "task_not_prepared",
+                    "message": str(exc),
+                    "task_id": normalized_task_id,
+                },
+            ) from exc
 
         stored_task.approved_at_epoch = (
             time.time()
@@ -2826,6 +3195,10 @@ async def delete_code_builder_task(
     with stored_task.execution_lock:
         if stored_task.phase in {
             CodeBuilderTaskPhase.ANALYZING,
+            CodeBuilderTaskPhase.PLANNING,
+            CodeBuilderTaskPhase.VALIDATING,
+            CodeBuilderTaskPhase.APPLYING,
+            CodeBuilderTaskPhase.VERIFYING,
             CodeBuilderTaskPhase.EXECUTING,
             CodeBuilderTaskPhase.ROLLING_BACK,
         }:

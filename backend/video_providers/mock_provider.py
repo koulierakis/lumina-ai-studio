@@ -5,7 +5,13 @@ import io
 
 from PIL import Image, ImageEnhance, ImageOps
 
-from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderCapabilities, VideoProviderError
+from .base import (
+    GeneratedVideo,
+    VideoGenerationInput,
+    VideoProvider,
+    VideoProviderCapabilities,
+    VideoProviderError,
+)
 
 
 class MockVideoProvider(VideoProvider):

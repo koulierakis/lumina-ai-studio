@@ -7,6 +7,96 @@ export const DOCUMENT_TYPES = [
 
 export const DOCUMENT_CREATION_MODES = ['prompt', 'template', 'uploaded', 'rewrite', 'merge', 'continue', 'translate', 'improve', 'summarize', 'expand', 'style'];
 export const EXPORT_FORMATS = ['pdf', 'docx', 'html', 'markdown', 'rtf', 'txt'];
+export const DOCUMENT_AI_PROVIDERS = ['ollama', 'groq'];
+
+function normalizedProvider(provider) {
+  const value = String(provider || '').trim().toLowerCase();
+  if (!value) return undefined;
+  if (!DOCUMENT_AI_PROVIDERS.includes(value)) {
+    const error = new Error('Unsupported document AI provider.');
+    error.code = 'invalid_provider';
+    throw error;
+  }
+  return value;
+}
+
+function compactPayload(payload = {}) {
+  return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+}
+
+export function normalizePackAdvisorResponse(payload = {}) {
+  const recommendations = Array.isArray(payload.recommendations) ? payload.recommendations : [];
+  return {
+    ...payload,
+    recommendations: recommendations.filter((item, index, items) => (
+      item?.document_type && items.findIndex((candidate) => candidate?.document_type === item.document_type) === index
+    )),
+    profile_validation: payload.profile_validation || {},
+  };
+}
+
+export function friendlyDocumentAIError(error = {}) {
+  if (error.code === 'invalid_provider') return 'Choose Ollama or Groq as the AI provider.';
+  if (error.status === 504 || error.code === 'http_504') return 'The AI provider timed out. Try again.';
+  if (error.status === 503 || error.code === 'http_503') return 'The selected AI provider is unavailable.';
+  if (error.status === 502 || error.code === 'http_502') return 'The AI provider returned an invalid preview.';
+  if (error.status === 422 || error.code === 'http_422') return 'The preview failed validation or fact-integrity checks.';
+  if (error.status === 400 || error.code === 'http_400') return 'Review the request and provider settings.';
+  return 'AI assistance could not complete the request.';
+}
+
+export function packAdvisor(payload = {}) {
+  return apiPost('/documents/pack-advisor', compactPayload({
+    objective: String(payload.objective || '').trim(),
+    company_profile_id: payload.company_profile_id || undefined,
+  })).then(normalizePackAdvisorResponse);
+}
+
+export function naturalCreatePreview(payload = {}) {
+  return apiPost('/documents/natural-create/preview', compactPayload({
+    request: String(payload.request || '').trim(),
+    company_profile_id: payload.company_profile_id || undefined,
+    country: payload.country || 'GR',
+    language: payload.language || 'en',
+    tone: payload.tone || 'automatic',
+    style: payload.style || 'automatic',
+    requested_type: payload.requested_type || undefined,
+    structured_fields: payload.structured_fields || {},
+    provider: normalizedProvider(payload.provider),
+    allow_fallback: false,
+  }));
+}
+
+export function generateAIPreview(payload = {}) {
+  const allowFallback = Boolean(payload.allow_fallback && payload.fallback_provider);
+  return apiPost('/documents/generate-ai/preview', compactPayload({
+    objective: String(payload.objective || '').trim(),
+    document_type: payload.document_type,
+    company_profile_id: payload.company_profile_id || undefined,
+    country: payload.country || 'GR',
+    language: payload.language || 'en',
+    tone: payload.tone || 'automatic',
+    style: payload.style || 'automatic',
+    structured_fields: payload.structured_fields || {},
+    provider: normalizedProvider(payload.provider),
+    fallback_provider: allowFallback ? normalizedProvider(payload.fallback_provider) : undefined,
+    allow_fallback: allowFallback,
+  }));
+}
+
+export function generatePackPreview(payload = {}) {
+  const allowFallback = Boolean(payload.allow_fallback && payload.fallback_provider);
+  return apiPost('/documents/generate-pack/preview', compactPayload({
+    objective: String(payload.objective || '').trim(),
+    company_profile_id: payload.company_profile_id || undefined,
+    selected_document_types: [...new Set(payload.selected_document_types || [])],
+    generate_all: false,
+    title: payload.title || 'Document Pack',
+    provider: normalizedProvider(payload.provider),
+    fallback_provider: allowFallback ? normalizedProvider(payload.fallback_provider) : undefined,
+    allow_fallback: allowFallback,
+  }));
+}
 
 export const PROFESSIONAL_TEMPLATE_CATALOG = [
   { id: 'board-resolution-pro', name: 'Board Resolution Pack', category: 'Corporate Governance', jurisdiction: 'Common Law', tags: ['resolution', 'board', 'governance'], blocks: ['cover', 'recitals', 'resolutions', 'certification', 'signature'], tone: 'Formal corporate governance with certification block' },
@@ -85,6 +175,10 @@ export const DEFAULT_COMPANY_PROFILE = {
 };
 
 export const documentApi = {
+  packAdvisor,
+  naturalCreatePreview,
+  generateAIPreview,
+  generatePackPreview,
   templates: () => apiGet('/documents/templates'),
   templateLibrary: (params = {}) => apiGet('/documents/template-library', { params }),
   createTemplate: (payload) => apiPost('/documents/template-library', payload),

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import bcrypt
-from dotenv import dotenv_values
 from pathlib import Path
-import pytest
 
+import bcrypt
+import pytest
 from auth import verify_credentials
+from dotenv import dotenv_values
 from login_limiter import LoginRateLimiter
 
 

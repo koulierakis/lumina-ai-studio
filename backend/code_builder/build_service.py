@@ -11,15 +11,12 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, Literal, TypeAlias
+from typing import Any, Final, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import models as domain_models
-from . import patch_service
-from . import repository_service
 from . import security
-
 
 IS_WINDOWS: Final[bool] = os.name == "nt"
 
@@ -1199,6 +1196,7 @@ def resolve_executable(
             candidate = repository_root / candidate
 
         resolved = _validate_resolved_executable_file(candidate)
+        execution_path = candidate.absolute()
 
         if _is_relative_to(resolved, repository_root):
             if (
@@ -1219,7 +1217,7 @@ def resolve_executable(
                 f"in the custom-command allowlist: {resolved}"
             )
 
-        return resolved
+        return execution_path
 
     environment = dict(search_environment or os.environ)
     path_value = environment.get("PATH") or environment.get("Path") or ""
@@ -1245,6 +1243,7 @@ def resolve_executable(
         )
 
     resolved = _validate_resolved_executable_file(Path(located))
+    execution_path = Path(located).absolute()
 
     if (
         _is_relative_to(resolved, repository_root)
@@ -1256,7 +1255,7 @@ def resolve_executable(
             f"not permitted: {resolved}"
         )
 
-    return resolved
+    return execution_path
 
 
 def _invoke_optional_security_hook(
@@ -2383,7 +2382,7 @@ def execute_resolved_command(
         error_type = type(exc).__name__
         error_message = str(exc)
 
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         status = BuildStatus.ERROR
         error_type = BuildExecutableNotFoundError.__name__
         error_message = (

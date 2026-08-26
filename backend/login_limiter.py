@@ -6,12 +6,12 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Deque, Dict
+from typing import Callable
 
 
 @dataclass
 class _AttemptBucket:
-    failures: Deque[float] = field(default_factory=deque)
+    failures: deque[float] = field(default_factory=deque)
     blocked_until: float = 0.0
     last_seen: float = 0.0
 
@@ -32,7 +32,7 @@ class LoginRateLimiter:
         self.block_seconds = max(1, block_seconds)
         self.max_clients = max(100, max_clients)
         self._clock = clock
-        self._buckets: Dict[str, _AttemptBucket] = {}
+        self._buckets: dict[str, _AttemptBucket] = {}
         self._lock = threading.Lock()
 
     def retry_after(self, key: str) -> int:

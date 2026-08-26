@@ -1,9 +1,13 @@
 """Talking Portrait Studio provider registry."""
 from __future__ import annotations
 
-from .base import GeneratedTalkingPortrait, TalkingPortraitInput, TalkingPortraitProvider, TalkingPortraitProviderError
+from .base import (
+    GeneratedTalkingPortrait,
+    TalkingPortraitInput,
+    TalkingPortraitProvider,
+    TalkingPortraitProviderError,
+)
 from .liveportrait_provider import LivePortraitProvider
-
 
 _REGISTRY: dict[str, type[TalkingPortraitProvider]] = {"liveportrait": LivePortraitProvider}
 _FUTURE = ("musetalk", "echomimic", "hallo", "sadtalker", "wav2lip")

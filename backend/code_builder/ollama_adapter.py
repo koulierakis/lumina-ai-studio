@@ -14,7 +14,6 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Final
 from urllib.parse import urlparse
 
-
 DEFAULT_MODEL: Final[str] = "qwen2.5-coder:7b"
 DEFAULT_BASE_URL: Final[str] = "http://127.0.0.1:11434"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 300.0

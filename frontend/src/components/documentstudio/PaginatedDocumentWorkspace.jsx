@@ -12,13 +12,15 @@ import {
 
 const MEASURE_DEBOUNCE_MS = 80;
 
-function collectBlockMetrics(root) {
-  if (!root) return [];
-  const editable = root.querySelector('[contenteditable="true"]') || root;
-  const children = Array.from(editable.children || []);
-  const source = children.length ? children : [editable];
+function editorContentElement(root) {
+  return root?.querySelector?.('[contenteditable]') || null;
+}
 
-  return source.map((element) => {
+function collectBlockMetrics(editable) {
+  if (!editable) return [];
+  const children = Array.from(editable.children || []);
+
+  return children.map((element) => {
     const rect = element.getBoundingClientRect?.();
     const styles = window.getComputedStyle ? window.getComputedStyle(element) : null;
     const marginTop = parseFloat(styles?.marginTop || '0') || 0;
@@ -32,17 +34,19 @@ function collectBlockMetrics(root) {
 
 export function measurePageFlow(editorElement, layout) {
   const contentBox = pageContentBox(layout);
-  const editable = editorElement?.querySelector?.('[contenteditable="true"]') || editorElement;
+  const editable = editorContentElement(editorElement);
   if (!editable || !contentBox.heightPx || !Number.isFinite(contentBox.heightPx)) {
     throw new Error('Page flow measurement target is unavailable.');
   }
 
-  const blockMetrics = collectBlockMetrics(editorElement);
-  const scrollHeight = editable.scrollHeight || editorElement.scrollHeight || 0;
+  const blockMetrics = collectBlockMetrics(editable);
   const pageCount = calculateMeasuredPages({
     blockMetrics,
     contentHeightPx: contentBox.heightPx,
-    scrollHeightPx: scrollHeight,
+    // The editor layer is sized from the current page count. Its scrollHeight
+    // therefore includes generated page space and must not be treated as
+    // content, or each measurement recursively creates more virtual pages.
+    scrollHeightPx: 0,
   });
 
   return {
@@ -115,7 +119,7 @@ export default function PaginatedDocumentWorkspace({
     resizeObserverRef.current?.disconnect();
     resizeObserverRef.current = new ResizeObserver(() => scheduleMeasure());
     resizeObserverRef.current.observe(editorElementRef.current);
-    const editable = editorElementRef.current.querySelector?.('[contenteditable="true"]');
+    const editable = editorContentElement(editorElementRef.current);
     if (editable) resizeObserverRef.current.observe(editable);
     return () => resizeObserverRef.current?.disconnect();
   }, [children, editorElementRef, preview, scheduleMeasure]);
@@ -166,7 +170,7 @@ export default function PaginatedDocumentWorkspace({
             className="lumina-paginated-editor-layer"
             style={{
               width: `${dimensions.width}mm`,
-              minHeight: `${dimensions.height * pageCount}mm`,
+              minHeight: `${dimensions.height}mm`,
               padding: `${normalized.margins.top}mm ${normalized.margins.right}mm ${normalized.margins.bottom}mm ${normalized.margins.left}mm`,
               transform: `scale(${scale})`,
               transformOrigin: 'top left',

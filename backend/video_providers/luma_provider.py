@@ -8,7 +8,14 @@ from urllib.parse import urlparse
 
 import requests
 
-from .base import GeneratedVideo, ProviderJob, VideoGenerationInput, VideoProvider, VideoProviderCapabilities, VideoProviderError
+from .base import (
+    GeneratedVideo,
+    ProviderJob,
+    VideoGenerationInput,
+    VideoProvider,
+    VideoProviderCapabilities,
+    VideoProviderError,
+)
 
 
 class LumaVideoProvider(VideoProvider):

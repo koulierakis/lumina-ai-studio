@@ -241,3 +241,11 @@ Use backend environment variables:
 - Text-to-speech is locally testable. Provider-ready operations, tags, favorites, folders and collections share the existing LUMINA conventions.
 - External speech, transcription, cloning, enhancement and multi-format generation remain integration work.
 - Voice Pack CRUD, ownership consent, archive/restore, private sample upload/removal, and provider-reference fields are implemented. Browser recording, transcription processing, real cloning, and talking-face workflows remain pending.
+
+
+## Release completion pass (2026-08-12)
+- Replaced the remaining active-route placeholders with owner-private local modules: JSA Finance, Internet Research and Automations.
+- Finance provides a persisted multi-currency income/expense ledger with month/year summaries.
+- Research provides persisted research records plus guarded public HTTP/HTTPS source import with SSRF/local-network blocking and bounded text extraction.
+- Automations provides persisted once/hourly/daily/weekly notification tasks and a backend scheduler lifecycle tied to Lumina startup/shutdown.
+- These modules require no paid provider credentials for their core local operation.

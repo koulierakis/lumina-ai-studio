@@ -63,14 +63,6 @@ def main() -> int:
         "rolled_back",
         "rollback_failed",
     }
-    target_phases = {
-        "queued",
-        "approved",
-        "analyzing",
-        "planning",
-        "executing",
-        "generating_patch",
-    }
     seen: list[str] = []
     deadline = time.time() + 900
     last_detail: dict | None = None

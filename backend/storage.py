@@ -1,9 +1,9 @@
 """Local disk storage for private media assets."""
 from __future__ import annotations
+
 import os
-from pathlib import Path
-from typing import Tuple
 import uuid
+from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 
@@ -45,7 +45,7 @@ def _kind_dir(root: Path, kind: str) -> Path:
     return root / ("references" if kind == "reference" else "generated")
 
 
-def save_bytes(data: bytes, mime: str, kind: str = "reference") -> Tuple[str, str, int]:
+def save_bytes(data: bytes, mime: str, kind: str = "reference") -> tuple[str, str, int]:
     """Save bytes to disk. Returns (filename, absolute_path, size_bytes)."""
     if kind not in {"reference", "generated"}:
         raise ValueError("Invalid storage kind")

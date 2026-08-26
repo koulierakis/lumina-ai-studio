@@ -5,15 +5,15 @@ import { ListItemNode, ListNode, INSERT_ORDERED_LIST_COMMAND, INSERT_UNORDERED_L
 import { $createHeadingNode, HeadingNode, QuoteNode } from '@lexical/rich-text';
 import { $patchStyleText, $setBlocksType } from '@lexical/selection';
 import { mergeRegister } from '@lexical/utils';
-import { LexicalComposer } from '@lexical/react/LexicalComposer.js';
-import { ContentEditable } from '@lexical/react/LexicalContentEditable.js';
-import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary.js';
-import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin.js';
-import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin.js';
-import { ListPlugin } from '@lexical/react/LexicalListPlugin.js';
-import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin.js';
-import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin.js';
-import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext.js';
+import { LexicalComposer } from '@lexical/react/LexicalComposer';
+import { ContentEditable } from '@lexical/react/LexicalContentEditable';
+import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
+import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
+import { LinkPlugin } from '@lexical/react/LexicalLinkPlugin';
+import { ListPlugin } from '@lexical/react/LexicalListPlugin';
+import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin';
+import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import {
   $getRoot,
   $getSelection,
@@ -39,9 +39,13 @@ function Placeholder() {
   return <div className="pointer-events-none absolute left-0 top-0 text-neutral-400">Start typing your document…</div>;
 }
 
-function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
+function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady, disabled }) {
   const [editor] = useLexicalComposerContext();
   const lastExternalHtml = useRef(html || '');
+
+  useEffect(() => {
+    editor.setEditable(!disabled);
+  }, [disabled, editor]);
 
   useEffect(() => {
     onEditorReady?.(editor);
@@ -75,7 +79,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
       let value = '';
       editor.getEditorState().read(() => {
         value = $generateHtmlFromNodes(editor, null);
-      });
+      }, { editor });
       return sanitizeEditorHtml(value);
     },
   }), [editor]);
@@ -133,7 +137,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady }) {
       const nextHtml = sanitizeEditorHtml($generateHtmlFromNodes(editor, null));
       lastExternalHtml.current = nextHtml;
       onHtmlChange(nextHtml);
-    });
+    }, { editor });
   }} />;
 }
 
@@ -167,7 +171,7 @@ const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtml
         <HistoryPlugin />
         <ListPlugin />
         <LinkPlugin />
-        <EditorBridge html={html} onHtmlChange={onHtmlChange} editorApiRef={ref || editorApiRef} onEditorReady={onEditorReady} />
+        <EditorBridge html={html} onHtmlChange={onHtmlChange} editorApiRef={ref || editorApiRef} onEditorReady={onEditorReady} disabled={disabled} />
       </div>
     </LexicalComposer>
   );
