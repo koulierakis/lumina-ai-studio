@@ -17,6 +17,11 @@ Modules include:
 - build_service
 - history_service
 - task_service
+- persistent_task_store
 """
 
-__version__ = "1.0.0"
+__version__ = "1.2.0"
+
+from .persistent_task_store import install_persistent_task_store
+
+install_persistent_task_store()

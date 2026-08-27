@@ -44,7 +44,14 @@ function ReviewBadge({ review }) {
 
 export default function CodeBuilder() {
   const [instruction, setInstruction] = useState('');
-  const [task, setTask] = useState(null);
+  const [task, setTask] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem('lumina_code_builder_task');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [comment, setComment] = useState('');
@@ -59,6 +66,41 @@ export default function CodeBuilder() {
       setError(err?.message || 'Could not refresh Code Builder task.');
     }
   }, [task?.task_id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const restoreTask = async () => {
+      try {
+        const storedTaskId = window.localStorage.getItem('lumina_code_builder_task_id');
+        if (storedTaskId) {
+          try {
+            const detail = await apiGet(`/code-builder/tasks/${storedTaskId}`, { retry: false });
+            if (!cancelled) setTask(detail);
+            return;
+          } catch {
+            window.localStorage.removeItem('lumina_code_builder_task_id');
+            window.localStorage.removeItem('lumina_code_builder_task');
+          }
+        }
+        const response = await apiGet('/code-builder/tasks?limit=50', { retry: false });
+        const candidate = (response.items || []).find((item) => !TERMINAL_PHASES.has(item.phase)) || response.items?.[0];
+        if (candidate && !cancelled) {
+          const detail = await apiGet(`/code-builder/tasks/${candidate.task_id}`, { retry: false });
+          if (!cancelled) setTask(detail);
+        }
+      } catch {
+        // A disconnected backend should not erase the locally remembered task.
+      }
+    };
+    restoreTask();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!task?.task_id) return;
+    window.localStorage.setItem('lumina_code_builder_task_id', task.task_id);
+    window.localStorage.setItem('lumina_code_builder_task', JSON.stringify(task));
+  }, [task]);
 
   useEffect(() => {
     if (!task?.task_id || TERMINAL_PHASES.has(task.phase) || task.phase === 'awaiting_approval') return undefined;
@@ -115,6 +157,20 @@ export default function CodeBuilder() {
       setTask(response.task);
     } catch (err) {
       setError(err?.responseData?.detail?.message || err?.message || 'Rollback failed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelTask = async () => {
+    if (!task?.task_id || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await apiPost(`/code-builder/tasks/${task.task_id}/cancel`, { reason: 'Cancelled from Code Builder UI.' });
+      setTask(response);
+    } catch (err) {
+      setError(err?.responseData?.detail?.message || err?.message || 'Cancellation failed.');
     } finally {
       setBusy(false);
     }
@@ -195,6 +251,7 @@ export default function CodeBuilder() {
                 <p className="mt-2 text-xs leading-relaxed text-white/45">Approve only the prepared, validated and reviewed patch shown here. Approval starts the protected backup → apply → verification pipeline.</p>
                 <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Optional approval note" className="mt-4 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none placeholder:text-white/25 focus:border-gold/40" />
                 <div className="mt-4 grid grid-cols-2 gap-2"><button data-testid="code-builder-reject" onClick={() => decide('reject')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md border border-red-400/20 px-3 py-2.5 text-xs text-red-100 disabled:opacity-30"><XCircle className="h-4 w-4" />Reject</button><button data-testid="code-builder-approve" onClick={() => decide('approve')} disabled={!canApprove || busy} className="inline-flex items-center justify-center gap-2 rounded-md bg-gold px-3 py-2.5 text-xs font-medium text-black disabled:opacity-30"><CheckCircle2 className="h-4 w-4" />Approve & apply</button></div>
+                {!TERMINAL_PHASES.has(task.phase) && task.phase !== 'awaiting_approval' && <button data-testid="code-builder-cancel" onClick={cancelTask} disabled={busy} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-red-400/20 px-3 py-2.5 text-xs text-red-100 hover:border-red-400/40 disabled:opacity-30"><XCircle className="h-4 w-4" />Cancel task</button>}
                 {canRollback && <button onClick={rollback} disabled={busy} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-white/10 px-3 py-2.5 text-xs text-white/65 hover:text-white disabled:opacity-30"><RotateCcw className="h-4 w-4" />Rollback</button>}
               </section>
 

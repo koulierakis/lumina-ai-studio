@@ -19,6 +19,9 @@ describe('Code Builder transactional workspace', () => {
     expect(page).toContain('data-testid="code-builder-reject"');
     expect(page).toContain('data-testid="code-builder-ai-review"');
     expect(page).toContain('data-testid="code-builder-verification"');
+    expect(page).toContain("lumina_code_builder_task_id");
+    expect(page).toContain("apiGet('/code-builder/tasks?limit=50'");
+    expect(page).toContain('data-testid="code-builder-cancel"');
     expect(page).toContain('Proposed diff');
     expect(page).toContain('No production writes before explicit approval.');
   });
