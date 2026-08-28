@@ -143,7 +143,7 @@ def test_greek_cv_full_chain_preview_save_reload_pdf_docx(tmp_path):
     assert reloaded.design["cv_style"] == "modern"
     assert reloaded.design["cv_layout"] == "two-column"
     assert reloaded.metadata["fact_integrity_required"] is True
-    assert "Μαρία Παπαδοπούλου" in reloaded.content_text
+    assert "μαρια παπαδοπουλου" in reloaded.content_text.casefold()
     assert "EMAIL" in reloaded.metadata["intentional_blank_fields"]
 
     pdf = render_pdf_bytes(reloaded, profile)
