@@ -7,7 +7,7 @@ from copy import deepcopy
 from io import BytesIO
 
 from document_studio.document_ai_provider import DocumentAIProvider
-from document_studio.models import CompanyProfile, CorporateDocument, NaturalDocumentCreationRequest
+from document_studio.models import CompanyProfile, NaturalDocumentCreationRequest
 from document_studio.natural_creation import create_natural_document
 from document_studio.service import render_docx_bytes, render_pdf_bytes
 from persistence import SQLitePersistenceProvider
@@ -117,10 +117,20 @@ def test_greek_cv_full_chain_preview_save_reload_pdf_docx(tmp_path):
         "content_text": preview.document.content,
         "searchable_text": preview.document.content,
         "content_html": (
-            "<article><h1>Επαγγελματικό Βιογραφικό</h1>"
-            "<p>Μαρία Παπαδοπούλου</p>"
+            "<article>"
+            "<h1>ΜΑΡΙΑ ΠΑΠΑΔΟΠΟΥΛΟΥ</h1>"
             "<h2>Επαγγελματικό Προφίλ</h2>"
-            "<p>Στέλεχος διοίκησης με εμπειρία στην οργάνωση έργων.</p></article>"
+            "<p>Στέλεχος διοίκησης με εμπειρία στην οργάνωση έργων.</p>"
+            "<h2>ΕΠΑΓΓΕΛΜΑΤΙΚΗ ΕΜΠΕΙΡΙΑ</h2>"
+            "<p>Project Coordinator — Example AE — 2022–2026</p>"
+            "<p>Συντόνισε έργα και ομάδες με σαφή χρονοδιαγράμματα.</p>"
+            "<h2>ΕΚΠΑΙΔΕΥΣΗ</h2>"
+            "<p>Πτυχίο Διοίκησης Επιχειρήσεων — 2021</p>"
+            "<h2>ΔΕΞΙΟΤΗΤΕΣ</h2>"
+            "<p>Οργάνωση έργων, επικοινωνία, Microsoft Office</p>"
+            "<h2>ΓΛΩΣΣΕΣ</h2>"
+            "<p>Ελληνικά, Αγγλικά</p>"
+            "</article>"
         ),
         "design": {
             "cv_style": "modern",
@@ -158,8 +168,10 @@ def test_greek_cv_full_chain_preview_save_reload_pdf_docx(tmp_path):
         names = set(archive.namelist())
         assert "word/document.xml" in names
         xml = archive.read("word/document.xml").decode("utf-8")
-        assert "Επαγγελματικό Βιογραφικό" in xml or "ΜΑΡΙΑ ΠΑΠΑΔΟΠΟΥΛΟΥ" in xml
+        assert "ΜΑΡΙΑ ΠΑΠΑΔΟΠΟΥΛΟΥ" in xml
         assert "Επαγγελματικό Προφίλ" in xml
         assert "ΕΠΑΓΓΕΛΜΑΤΙΚΗ ΕΜΠΕΙΡΙΑ" in xml
+        assert "ΕΚΠΑΙΔΕΥΣΗ" in xml
+        assert "ΓΛΩΣΣΕΣ" in xml
 
     assert len(docx) > 1000
