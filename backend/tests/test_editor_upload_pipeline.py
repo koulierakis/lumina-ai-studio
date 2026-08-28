@@ -191,7 +191,7 @@ def test_editor_upload_pipeline_validation_error_is_not_empty_object():
     assert body["message"] == "Request validation failed"
     assert body["detail"]["message"] == "Request validation failed"
     assert body["detail"]["exception_type"] == "RequestValidationError"
-    assert body["stack"]
+    assert "stack" not in body
     assert body["technical_details"]["path"] == f"/api/identity-packs/{pack_id}/photos"
 
 
