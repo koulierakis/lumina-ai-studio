@@ -9,6 +9,19 @@ import {
 const DEFAULT_DOCUMENT_TYPES = [
   'nda', 'consulting_agreement', 'company_profile', 'board_resolution',
   'corporate_resolution', 'banking_cover_letter', 'aml_declaration',
+  'professional_cv',
+];
+
+const CV_STYLES = [
+  ['minimal', 'Minimal'],
+  ['professional', 'Professional'],
+  ['modern', 'Modern'],
+  ['executive', 'Executive'],
+  ['corporate', 'Corporate'],
+  ['elegant', 'Elegant'],
+  ['creative', 'Creative'],
+  ['luxury', 'Luxury'],
+  ['ats', 'ATS-friendly'],
 ];
 
 function ProviderSelect({ value, onChange, label = 'Provider' }) {
@@ -17,8 +30,8 @@ function ProviderSelect({ value, onChange, label = 'Provider' }) {
       <span>{label}</span>
       <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
         <option value="">Automatic (Ollama)</option>
-        {DOCUMENT_AI_PROVIDERS.map((provider) => (
-          <option key={provider} value={provider}>{provider === 'groq' ? 'Groq' : 'Ollama'}</option>
+        {DOCUMENT_AI_PROVIDERS.map((providerName) => (
+          <option key={providerName} value={providerName}>{providerName === 'groq' ? 'Groq' : 'Ollama'}</option>
         ))}
       </select>
     </label>
@@ -92,6 +105,13 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
   const [naturalPreview, setNaturalPreview] = useState(null);
   const [aiPreview, setAIPreview] = useState(null);
   const [packPreview, setPackPreview] = useState(null);
+  const [cvPreview, setCvPreview] = useState(null);
+  const [cvDetails, setCvDetails] = useState('');
+  const [cvLanguage, setCvLanguage] = useState('el');
+  const [cvStyle, setCvStyle] = useState('professional');
+  const [cvLayout, setCvLayout] = useState('single-column');
+  const [cvLength, setCvLength] = useState('2-pages');
+  const [cvPhoto, setCvPhoto] = useState('without-photo');
   const [loadingAction, setLoadingAction] = useState('');
   const [error, setError] = useState('');
 
@@ -124,6 +144,35 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
   async function createNaturalPreview() {
     const result = await run('natural', () => documentApi.naturalCreatePreview({ request: naturalRequest, company_profile_id: profileId, provider }));
     if (result) setNaturalPreview(result);
+  }
+
+  async function createCvPreview() {
+    const languageLabel = cvLanguage === 'el' ? 'Greek' : 'English';
+    const request = [
+      `Create a complete professional CV/resume in ${languageLabel}.`,
+      `Visual style: ${cvStyle}. Layout: ${cvLayout}. Length: ${cvLength}. Photo preference: ${cvPhoto}.`,
+      'Use clear professional section headings, strong hierarchy, concise achievements, consistent dates and polished language.',
+      'Do not invent employers, dates, qualifications, skills or contact details. Keep missing facts as explicit placeholders.',
+      cvStyle === 'ats' ? 'Prioritize ATS compatibility: simple structure, standard headings, no decorative tables or text boxes.' : '',
+      `Candidate information:\n${cvDetails.trim()}`,
+    ].filter(Boolean).join('\n');
+    const result = await run('cv', () => documentApi.naturalCreatePreview({
+      request,
+      company_profile_id: profileId,
+      provider,
+      requested_type: 'professional_cv',
+      language: cvLanguage,
+      tone: cvStyle === 'creative' ? 'confident' : 'professional',
+      style: cvStyle,
+      structured_fields: {
+        cv_style: cvStyle,
+        cv_layout: cvLayout,
+        cv_length: cvLength,
+        photo_preference: cvPhoto,
+        fact_integrity_required: true,
+      },
+    }));
+    if (result) setCvPreview(result);
   }
 
   async function createAIPreview() {
@@ -172,28 +221,19 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
       </div>
       {error && <div className="doc-ai-error" role="alert"><XCircle size={16} />{error}</div>}
       <div className="doc-ai-grid">
-        <section className="doc-ai-section">
-          <h3>Pack Advisor</h3>
-          <label className="doc-ai-field">
-            <span>What do you need this document pack for?</span>
-            <textarea aria-label="Document pack objective" value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="For example: Prepare our company for corporate bank onboarding." />
-          </label>
-          <button type="button" onClick={analyze} disabled={!objective.trim() || loadingAction}>{loadingAction === 'advisor' ? 'Analyzing…' : 'Analyze Required Documents'}</button>
-          {advisor && (
-            <div className="doc-ai-recommendations">
-              <div className="doc-ai-readiness">Readiness: {Math.round((advisor.profile_validation?.completeness_ratio || 0) * 100)}%</div>
-              {recommendations.length === 0 && <p className="doc-ai-empty">No recommendations returned.</p>}
-              {recommendations.map((item) => (
-                <label key={item.document_type} className={`doc-ai-recommendation ${item.priority}`}>
-                  <input type="checkbox" checked={selectedTypes.includes(item.document_type)} onChange={() => toggleType(item.document_type)} />
-                  <span><strong>{item.title}</strong><em>{item.priority === 'required' ? 'Required' : 'Optional'}</em><small>{item.reason}</small>
-                    {item.missing_data?.length > 0 && <span className="doc-ai-missing"><AlertTriangle size={13} />Missing: {item.missing_data.join(', ')}</span>}
-                  </span>
-                </label>
-              ))}
-              {recommendations.length > 0 && <div className="doc-ai-selection-actions"><button type="button" onClick={() => setSelectedTypes([...new Set(requiredTypes)])}>Select required</button><button type="button" onClick={() => setSelectedTypes([...new Set(recommendations.map((item) => item.document_type))])}>Select all recommendations</button></div>}
-            </div>
-          )}
+        <section className="doc-ai-section" aria-label="Professional CV builder">
+          <h3>Professional CV / Résumé</h3>
+          <label className="doc-ai-field"><span>Candidate information</span><textarea aria-label="CV candidate information" value={cvDetails} onChange={(event) => setCvDetails(event.target.value)} placeholder="Paste name, contact details, profile, work history, education, skills, languages and achievements." /></label>
+          <div className="doc-ai-selection-actions">
+            <label className="doc-ai-field"><span>Language</span><select aria-label="CV language" value={cvLanguage} onChange={(event) => setCvLanguage(event.target.value)}><option value="el">Ελληνικά</option><option value="en">English</option></select></label>
+            <label className="doc-ai-field"><span>Style</span><select aria-label="CV style" value={cvStyle} onChange={(event) => setCvStyle(event.target.value)}>{CV_STYLES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="doc-ai-field"><span>Layout</span><select aria-label="CV layout" value={cvLayout} onChange={(event) => setCvLayout(event.target.value)}><option value="single-column">Single column</option><option value="two-column">Two columns</option></select></label>
+            <label className="doc-ai-field"><span>Length</span><select aria-label="CV length" value={cvLength} onChange={(event) => setCvLength(event.target.value)}><option value="1-page">1 page</option><option value="2-pages">2 pages</option><option value="detailed">Detailed 2+ pages</option></select></label>
+            <label className="doc-ai-field"><span>Photo</span><select aria-label="CV photo" value={cvPhoto} onChange={(event) => setCvPhoto(event.target.value)}><option value="without-photo">Without photo</option><option value="with-photo-placeholder">With photo placeholder</option></select></label>
+          </div>
+          <ProviderSelect value={provider} onChange={setProvider} />
+          <button type="button" onClick={createCvPreview} disabled={!cvDetails.trim() || loadingAction}>{loadingAction === 'cv' ? 'Creating CV preview…' : 'Create CV Preview'}</button>
+          <PreviewCard preview={cvPreview} title="Professional CV" onApply={onApplyPreview} onSave={(preview) => savePreview(preview, cvLanguage === 'el' ? 'Επαγγελματικό Βιογραφικό' : 'Professional CV')} saving={loadingAction === 'save'} />
         </section>
 
         <section className="doc-ai-section">
@@ -202,6 +242,13 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
           <ProviderSelect value={provider} onChange={setProvider} />
           <button type="button" onClick={createNaturalPreview} disabled={!naturalRequest.trim() || loadingAction}>{loadingAction === 'natural' ? 'Creating preview…' : 'Preview Natural Draft'}</button>
           <PreviewCard preview={naturalPreview} title="Natural draft" onApply={onApplyPreview} onSave={(preview) => savePreview(preview, 'Natural AI Draft')} saving={loadingAction === 'save'} />
+        </section>
+
+        <section className="doc-ai-section">
+          <h3>Pack Advisor</h3>
+          <label className="doc-ai-field"><span>What do you need this document pack for?</span><textarea aria-label="Document pack objective" value={objective} onChange={(event) => setObjective(event.target.value)} placeholder="For example: Prepare our company for corporate bank onboarding." /></label>
+          <button type="button" onClick={analyze} disabled={!objective.trim() || loadingAction}>{loadingAction === 'advisor' ? 'Analyzing…' : 'Analyze Required Documents'}</button>
+          {advisor && <div className="doc-ai-recommendations"><div className="doc-ai-readiness">Readiness: {Math.round((advisor.profile_validation?.completeness_ratio || 0) * 100)}%</div>{recommendations.length === 0 && <p className="doc-ai-empty">No recommendations returned.</p>}{recommendations.map((item) => <label key={item.document_type} className={`doc-ai-recommendation ${item.priority}`}><input type="checkbox" checked={selectedTypes.includes(item.document_type)} onChange={() => toggleType(item.document_type)} /><span><strong>{item.title}</strong><em>{item.priority === 'required' ? 'Required' : 'Optional'}</em><small>{item.reason}</small>{item.missing_data?.length > 0 && <span className="doc-ai-missing"><AlertTriangle size={13} />Missing: {item.missing_data.join(', ')}</span>}</span></label>)}{recommendations.length > 0 && <div className="doc-ai-selection-actions"><button type="button" onClick={() => setSelectedTypes([...new Set(requiredTypes)])}>Select required</button><button type="button" onClick={() => setSelectedTypes([...new Set(recommendations.map((item) => item.document_type))])}>Select all recommendations</button></div>}</div>}
         </section>
 
         <section className="doc-ai-section">
@@ -217,15 +264,7 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
           <h3>Selected pack preview</h3>
           <p>{selectedTypes.length} document type{selectedTypes.length === 1 ? '' : 's'} selected.</p>
           <button type="button" onClick={createPackPreview} disabled={!objective.trim() || selectedTypes.length === 0 || loadingAction}>{loadingAction === 'pack' ? 'Generating pack preview…' : 'Preview Selected'}</button>
-          {packPreview && (
-            <div className="doc-ai-pack-results" aria-label="Pack preview results">
-              <div className={`doc-ai-pack-summary ${packPreview.overall_status}`}>{packPreview.overall_status === 'complete' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}Overall status: {String(packPreview.overall_status || '').replaceAll('_', ' ')}</div>
-              {(packPreview.items || []).map((item, index) => (
-                <div key={`${item.document_type}-${index}`} className={`doc-ai-pack-item ${item.status}`}><FileText size={15} /><span><strong>{item.document_type.replaceAll('_', ' ')}</strong><small>{item.error_message || item.status}</small></span>{item.preview && <><button type="button" onClick={() => onApplyPreview(item.preview)}>Review and apply</button><button type="button" onClick={() => savePreview(item.preview, item.document_type.replaceAll('_', ' '))} disabled={loadingAction === 'save'}>Save</button></>}</div>
-              ))}
-              {(packPreview.items || []).some((item) => item.preview && item.status !== 'failed') && <button type="button" className="doc-ai-apply" onClick={savePack} disabled={loadingAction === 'save-pack'}><Save size={14} /> {loadingAction === 'save-pack' ? 'Saving pack…' : 'Save Ready Pack to Library'}</button>}
-            </div>
-          )}
+          {packPreview && <div className="doc-ai-pack-results" aria-label="Pack preview results"><div className={`doc-ai-pack-summary ${packPreview.overall_status}`}>{packPreview.overall_status === 'complete' ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}Overall status: {String(packPreview.overall_status || '').replaceAll('_', ' ')}</div>{(packPreview.items || []).map((item, index) => <div key={`${item.document_type}-${index}`} className={`doc-ai-pack-item ${item.status}`}><FileText size={15} /><span><strong>{item.document_type.replaceAll('_', ' ')}</strong><small>{item.error_message || item.status}</small></span>{item.preview && <><button type="button" onClick={() => onApplyPreview(item.preview)}>Review and apply</button><button type="button" onClick={() => savePreview(item.preview, item.document_type.replaceAll('_', ' '))} disabled={loadingAction === 'save'}>Save</button></>}</div>)}{(packPreview.items || []).some((item) => item.preview && item.status !== 'failed') && <button type="button" className="doc-ai-apply" onClick={savePack} disabled={loadingAction === 'save-pack'}><Save size={14} /> {loadingAction === 'save-pack' ? 'Saving pack…' : 'Save Ready Pack to Library'}</button>}</div>}
         </section>
       </div>
     </aside>
