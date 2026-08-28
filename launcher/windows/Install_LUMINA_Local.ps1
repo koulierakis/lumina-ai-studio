@@ -50,7 +50,7 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'git pull failed. Local changes may need review.' }
         Pop-Location
     } else {
-        Write-Status "Cloning LUMINA to $target ..."
+        Write-Status "Cloning complete LUMINA repository to $target ..."
         git clone --branch $branch --single-branch $repoUrl $target
         if ($LASTEXITCODE -ne 0) { throw 'git clone failed.' }
     }
@@ -95,6 +95,7 @@ try {
     $stopShortcut.Description = 'Stop LUMINA AI Studio local services'
     $stopShortcut.Save()
 
+    Set-Content -Path (Join-Path $desktop 'LUMINA AI Studio.url') -Value "[InternetShortcut]`r`nURL=http://localhost:3000/`r`n"
     Set-Content -Path (Join-Path $desktop 'LUMINA Document Studio.url') -Value "[InternetShortcut]`r`nURL=http://localhost:3000/studio/documents`r`n"
 
     Write-Status 'Running LUMINA doctor...'
@@ -117,8 +118,8 @@ try {
     if (-not $ready) { throw "LUMINA did not become ready on http://localhost:3000/. Check $target\.lumina-runtime\logs and $log" }
 
     Write-Status 'LUMINA is ready.'
-    Start-Process 'http://localhost:3000/studio/documents'
-    [System.Windows.Forms.MessageBox]::Show("LUMINA AI Studio installed successfully.`n`nDesktop shortcut: LUMINA AI Studio`nDocument Studio: http://localhost:3000/studio/documents", 'LUMINA') | Out-Null
+    Start-Process 'http://localhost:3000/'
+    [System.Windows.Forms.MessageBox]::Show("LUMINA AI Studio installed successfully.`n`nComplete folder: $target`nHome page: http://localhost:3000/`nDocument Studio: http://localhost:3000/studio/documents", 'LUMINA') | Out-Null
 }
 catch {
     $msg = $_.Exception.Message + "`n`nInstall log:`n" + $log
