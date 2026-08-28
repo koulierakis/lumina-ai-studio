@@ -1,4 +1,4 @@
-﻿"""Local Ollama API integration for the LUMINA Code Builder.
+"""Local Ollama API integration for the LUMINA Code Builder.
 
 This module provides a production-oriented asynchronous client for a local
 Ollama installation.
@@ -811,7 +811,7 @@ def _safe_error_body(
         return "[response body could not be decoded]"
 
     if len(body) > maximum_characters:
-        return f"{body[:maximum_characters]}β€¦"
+        return f"{body[:maximum_characters]}…"
 
     return body
 
@@ -2744,7 +2744,11 @@ class OllamaService:
             model=model,
             prompt=effective_prompt,
             system_prompt=system_prompt,
-            output_format="json",
+            output_format=(
+                effective_schema
+                if effective_schema is not None
+                else "json"
+            ),
             options=options,
             images=images,
             raw=False,
@@ -2863,7 +2867,11 @@ class OllamaService:
         raw_response = await self.chat(
             model=model,
             messages=effective_messages,
-            output_format="json",
+            output_format=(
+                effective_schema
+                if effective_schema is not None
+                else "json"
+            ),
             options=options,
             tools=tools,
             keep_alive=keep_alive,
