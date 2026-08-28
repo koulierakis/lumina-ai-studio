@@ -3324,7 +3324,26 @@ async def code_builder_model_status(
             "message": "Code Builder model status is unavailable.",
         }
 
-    health = await checker(include_models=True)
+    # Keep the health probe's async client off the task worker's event loop.
+    # Planning runs in a dedicated thread and must own the loop that first
+    # uses the long-lived Ollama client.
+    wrapped_service = getattr(
+        ollama_service,
+        "wrapped_service",
+        ollama_service,
+    )
+    if isinstance(wrapped_service, OllamaService):
+        probe_service = OllamaService(
+            configuration=wrapped_service.configuration,
+        )
+        try:
+            health = await probe_service.check_connection(
+                include_models=True,
+            )
+        finally:
+            await probe_service.close()
+    else:
+        health = await checker(include_models=True)
     installed = {item.name.casefold() for item in health.installed_models}
     model_name = str(model).strip() if model else None
     configured = bool(model_name)

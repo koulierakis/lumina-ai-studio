@@ -350,7 +350,8 @@ code_builder_task_service = create_task_service(
     patch_service=code_builder_patch_service,
     build_service=code_builder_build_service,
     ollama_service=create_ollama_task_adapter(
-        code_builder_ollama_service
+        code_builder_ollama_service,
+        model=str(runtime_config["preferred_ollama_model"]),
     ),
 )
 
