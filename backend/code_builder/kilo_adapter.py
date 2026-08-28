@@ -1,14 +1,14 @@
 """Safe optional Kilo Code adapter for the LUMINA Code Builder.
 
-The adapter deliberately keeps Kilo behind LUMINA's controller instead of
-letting the external agent become the source of truth. It starts Kilo only in
-a caller-selected repository directory, never invokes a shell, uses JSON event
-output, applies bounded timeouts, and requires explicit opt-in before enabling
-Kilo's auto-approval mode.
+Kilo remains behind LUMINA's controller. The CLI adapter is intentionally not
+treated as a trusted policy boundary: Kilo's ``--auto`` mode can execute its own
+tools, so LUMINA only permits it for an explicitly declared disposable sandbox.
+For production integration on a real workspace, ACP is the preferred direction
+because Kilo exposes permission requests that a LUMINA policy client can mediate.
 
 This module is dependency-free and does not require Kilo to be installed at
-import time. Callers may probe availability and decide whether to fall back to
-LUMINA's native Ollama pipeline.
+import time. Callers may probe availability and fall back to LUMINA's native
+Ollama pipeline.
 """
 
 from __future__ import annotations
@@ -26,6 +26,19 @@ DEFAULT_KILO_BINARY: Final[str] = "kilo"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 900.0
 MAX_PROMPT_CHARACTERS: Final[int] = 200_000
 MAX_OUTPUT_CHARACTERS: Final[int] = 2_000_000
+_SAFE_ENVIRONMENT_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "USERPROFILE",
+    }
+)
 
 
 class KiloAdapterError(RuntimeError):
@@ -47,6 +60,7 @@ class KiloAdapterConfiguration:
     allow_auto_approve: bool = False
     model: str | None = None
     agent: str | None = None
+    environment: Mapping[str, str] | None = None
 
     def __post_init__(self) -> None:
         if not self.binary.strip():
@@ -69,7 +83,7 @@ class KiloRunResult:
 
 
 class KiloAdapter:
-    """Launch Kilo in a tightly constrained, machine-readable mode."""
+    """Launch Kilo in a constrained, machine-readable CLI mode."""
 
     def __init__(self, configuration: KiloAdapterConfiguration | None = None) -> None:
         self.configuration = configuration or KiloAdapterConfiguration()
@@ -103,6 +117,19 @@ class KiloAdapter:
             raise KiloAdapterError(f"Repository directory does not exist: {root}")
         return root
 
+    def _safe_environment(self) -> dict[str, str]:
+        environment = {
+            key: value
+            for key, value in os.environ.items()
+            if key.upper() in _SAFE_ENVIRONMENT_KEYS
+        }
+        for key, value in (self.configuration.environment or {}).items():
+            normalized_key = str(key).strip()
+            if not normalized_key:
+                raise KiloAdapterError("Kilo environment variable name must not be empty.")
+            environment[normalized_key] = str(value)
+        return environment
+
     def build_command(
         self,
         *,
@@ -110,6 +137,7 @@ class KiloAdapter:
         repository_root: str | os.PathLike[str],
         session_id: str | None = None,
         auto_approve: bool = False,
+        disposable_workspace: bool = False,
         attached_files: Sequence[str] = (),
     ) -> tuple[str, ...]:
         normalized_prompt = prompt.strip()
@@ -141,6 +169,10 @@ class KiloAdapter:
                 raise KiloAdapterError(
                     "Kilo auto-approval requires explicit LUMINA configuration opt-in."
                 )
+            if not disposable_workspace:
+                raise KiloAdapterError(
+                    "Kilo auto-approval is allowed only inside a disposable sandbox workspace."
+                )
             command.append("--auto")
 
         for raw_file in attached_files:
@@ -164,6 +196,7 @@ class KiloAdapter:
         repository_root: str | os.PathLike[str],
         session_id: str | None = None,
         auto_approve: bool = False,
+        disposable_workspace: bool = False,
         attached_files: Sequence[str] = (),
     ) -> KiloRunResult:
         command = self.build_command(
@@ -171,6 +204,7 @@ class KiloAdapter:
             repository_root=repository_root,
             session_id=session_id,
             auto_approve=auto_approve,
+            disposable_workspace=disposable_workspace,
             attached_files=attached_files,
         )
         root = self._safe_repository_root(repository_root)
@@ -187,7 +221,7 @@ class KiloAdapter:
                 timeout=self.configuration.timeout_seconds,
                 check=False,
                 shell=False,
-                env=os.environ.copy(),
+                env=self._safe_environment(),
             )
         except subprocess.TimeoutExpired as exc:
             raise KiloExecutionError(
@@ -209,8 +243,6 @@ class KiloAdapter:
             try:
                 event = json.loads(text)
             except json.JSONDecodeError:
-                # Kilo may emit non-event informational text. Preserve stdout but
-                # never interpret such text as a trusted structured event.
                 continue
             if isinstance(event, Mapping):
                 events.append(dict(event))
