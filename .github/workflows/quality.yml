@@ -6,6 +6,16 @@ permissions:
   contents: read
   security-events: write
 jobs:
+  document-cv-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt
+      - name: Run Greek CV end-to-end acceptance gate
+        run: python -m pytest backend/tests/test_document_studio_cv_e2e.py -q
   backend:
     runs-on: ubuntu-latest
     steps:
