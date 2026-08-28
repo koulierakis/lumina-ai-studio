@@ -20,4 +20,4 @@ for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 1
 }
 if (-not $ready) { throw 'LUMINA frontend did not become ready on http://localhost:3000/' }
-Start-Process 'http://localhost:3000/studio/documents'
+Start-Process 'http://localhost:3000/'
