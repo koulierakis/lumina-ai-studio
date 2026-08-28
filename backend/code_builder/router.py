@@ -3303,6 +3303,41 @@ async def code_builder_health(
     )
 
 
+@router.get(
+    "/model-status",
+    status_code=status.HTTP_200_OK,
+    summary="Get Code Builder model status",
+)
+async def code_builder_model_status(
+    task_service: Annotated[
+        TaskService,
+        Depends(get_task_service),
+    ],
+) -> dict[str, Any]:
+    ollama_service = task_service.ollama_service
+    checker = getattr(ollama_service, "check_connection", None)
+    model = getattr(ollama_service, "model", None)
+    if not callable(checker):
+        return {
+            "status": "unavailable",
+            "model": str(model) if model else None,
+            "message": "Code Builder model status is unavailable.",
+        }
+
+    health = await checker(include_models=True)
+    installed = {item.name.casefold() for item in health.installed_models}
+    model_name = str(model).strip() if model else None
+    configured = bool(model_name)
+    ready = bool(health.available and configured and model_name.casefold() in installed)
+    return {
+        "status": "ready" if ready else "offline" if not health.available else "not_configured" if not configured or model_name.casefold() not in installed else "unavailable",
+        "model": model_name,
+        "available": health.available,
+        "configured": configured,
+        "message": health.error or ("Code Builder model is ready." if ready else "Configured Code Builder model is not installed."),
+    }
+
+
 def create_code_builder_router(
     *,
     task_service: TaskService,

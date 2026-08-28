@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, CircleAlert, Code2, FileCode2, Loader2, Play, RefreshCw, RotateCcw, ShieldCheck, Sparkles, XCircle } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, CircleAlert, Code2, FileCode2, Loader2, Mic, MicOff, Play, RefreshCw, RotateCcw, ShieldCheck, Sparkles, XCircle } from 'lucide-react';
 import { apiGet, apiPost } from '../lib/api';
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled', 'timed_out', 'rolled_back', 'rollback_failed']);
+const DRAFT_STORAGE_KEY = 'lumina_code_builder_instruction';
+
+function getSpeechRecognition() {
+  if (typeof window === 'undefined') return null;
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function speechErrorMessage(error) {
+  const messages = {
+    'not-allowed': 'Microphone permission was denied. You can continue by typing.',
+    'service-not-allowed': 'Speech recognition is unavailable. You can continue by typing.',
+    'no-speech': 'No speech was detected. Try again when you are ready.',
+    network: 'Speech recognition could not reach its service. Try again or type your request.',
+    aborted: 'Voice input stopped. Your draft is still available.',
+  };
+  return messages[error] || 'Voice input is unavailable right now. Your text draft is still available.';
+}
 
 function pretty(value) {
   if (value === null || value === undefined) return '';
@@ -43,7 +60,7 @@ function ReviewBadge({ review }) {
 }
 
 export default function CodeBuilder() {
-  const [instruction, setInstruction] = useState('');
+  const [instruction, setInstruction] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem(DRAFT_STORAGE_KEY) || '' : ''));
   const [task, setTask] = useState(() => {
     try {
       const raw = window.localStorage.getItem('lumina_code_builder_task');
@@ -55,6 +72,84 @@ export default function CodeBuilder() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [comment, setComment] = useState('');
+  const [voiceLanguage, setVoiceLanguage] = useState('auto');
+  const [voiceState, setVoiceState] = useState('ready');
+  const [voiceMessage, setVoiceMessage] = useState('');
+  const [modelStatus, setModelStatus] = useState('unknown');
+  const recognitionRef = useRef(null);
+  const voicePrefixRef = useRef('');
+
+  useEffect(() => {
+    window.localStorage.setItem(DRAFT_STORAGE_KEY, instruction);
+  }, [instruction]);
+
+  useEffect(() => () => recognitionRef.current?.abort(), []);
+
+  const refreshModelStatus = useCallback(async () => {
+    try {
+      const status = await apiGet('/code-builder/model-status', { retry: false });
+      setModelStatus(status.status || 'unavailable');
+    } catch {
+      setModelStatus('offline');
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshModelStatus();
+  }, [refreshModelStatus]);
+
+  const toggleVoice = () => {
+    if (voiceState === 'listening') {
+      setVoiceState('processing');
+      setVoiceMessage('Processing speech…');
+      recognitionRef.current?.stop();
+      return;
+    }
+
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) {
+      setVoiceState('unavailable');
+      setVoiceMessage('Voice input is not supported in this browser. You can continue by typing.');
+      return;
+    }
+
+    const recognition = new Recognition();
+    const language = voiceLanguage === 'auto'
+      ? (navigator.language?.toLowerCase().startsWith('el') ? 'el-GR' : 'en-US')
+      : voiceLanguage;
+    voicePrefixRef.current = instruction.trim() ? `${instruction.trim()}\n` : '';
+    recognition.lang = language;
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.onstart = () => {
+      setVoiceState('listening');
+      setVoiceMessage('Listening. Nothing will be submitted automatically.');
+    };
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results).map((result) => result[0]?.transcript || '').join('');
+      setInstruction(`${voicePrefixRef.current}${transcript}`.trimEnd());
+      setVoiceState('listening');
+    };
+    recognition.onerror = (event) => {
+      setVoiceState(event.error === 'not-allowed' ? 'denied' : 'error');
+      setVoiceMessage(speechErrorMessage(event.error));
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setVoiceState((current) => current === 'processing' || current === 'listening' ? 'ready' : current);
+      setVoiceMessage('Draft captured. Review it before submitting.');
+    };
+    recognitionRef.current = recognition;
+    setVoiceState('processing');
+    setVoiceMessage('Preparing microphone…');
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setVoiceState('error');
+      setVoiceMessage('Voice input could not start. You can continue by typing.');
+    }
+  };
 
   const refresh = useCallback(async (taskId = task?.task_id) => {
     if (!taskId) return;
@@ -100,6 +195,11 @@ export default function CodeBuilder() {
     if (!task?.task_id) return;
     window.localStorage.setItem('lumina_code_builder_task_id', task.task_id);
     window.localStorage.setItem('lumina_code_builder_task', JSON.stringify(task));
+    if (task.review_result?.status === 'unavailable' || /ollama|model/i.test(task.error_message || '')) {
+      setModelStatus('unavailable');
+    } else if (task.review_result?.status === 'completed') {
+      setModelStatus('ready');
+    }
   }, [task]);
 
   useEffect(() => {
@@ -123,8 +223,10 @@ export default function CodeBuilder() {
         rollback_policy: 'on_any_failure',
       });
       setTask(response.task);
+      setModelStatus(response.task?.review_result?.status === 'unavailable' ? 'unavailable' : 'ready');
     } catch (err) {
       setError(err?.message || 'Could not create Code Builder task.');
+      setModelStatus('unavailable');
     } finally {
       setBusy(false);
     }
@@ -184,13 +286,17 @@ export default function CodeBuilder() {
   const diffs = useMemo(() => collectDiffs(preparation), [preparation]);
   const canApprove = task?.phase === 'awaiting_approval' && Boolean(preparation?.patch) && Boolean(preparation?.patch_validation) && Boolean(review);
   const canRollback = ['completed', 'failed', 'cancelled', 'timed_out', 'rollback_failed'].includes(task?.phase);
+  const voiceLabel = voiceState === 'listening' ? 'Listening…' : voiceState === 'processing' ? 'Processing speech…' : voiceState === 'denied' ? 'Microphone denied' : voiceState === 'unavailable' ? 'Voice unavailable' : voiceState === 'error' ? 'Voice error' : 'Ready';
+  const modelLabel = modelStatus === 'ready' ? 'AI model ready' : modelStatus === 'offline' ? 'Ollama offline' : modelStatus === 'not_configured' ? 'Model not configured' : 'AI model unavailable';
+  const taskResult = task?.result || {};
+  const resultStatus = task?.phase === 'completed' ? 'Task completed' : task?.phase === 'rolled_back' ? 'Task rolled back safely' : task?.phase === 'cancelled' ? 'Task cancelled' : task?.phase === 'timed_out' ? 'Task timed out' : task?.phase === 'rollback_failed' ? 'Task failed and rollback needs attention' : task?.phase === 'failed' ? 'Task failed' : null;
 
   return (
     <main className="min-h-screen w-full overflow-y-auto" data-testid="code-builder-page">
       <div className="mx-auto max-w-[1500px] p-6 sm:p-10">
         <header className="flex flex-col gap-5 border-b border-white/[0.07] pb-8 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-gold">Repository-native development</p>
+            <p className="text-sm font-semibold uppercase tracking-[0.2em] text-gold">Repository-native development</p>
             <h2 className="mt-2 font-display text-4xl tracking-tight text-white sm:text-5xl">Code Builder</h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/50">Analyze, plan and review proposed repository changes before any production file is written. Approval is the transaction boundary.</p>
           </div>
@@ -198,11 +304,24 @@ export default function CodeBuilder() {
         </header>
 
         <section className="mt-8 rounded-xl border border-white/[0.08] bg-white/[0.02] p-5">
-          <label className="text-[11px] uppercase tracking-[0.2em] text-white/45" htmlFor="code-builder-instruction">Development instruction</label>
-          <textarea id="code-builder-instruction" data-testid="code-builder-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} rows={4} placeholder="Improve Document Studio so that…" className="mt-3 w-full resize-y rounded-lg border border-white/10 bg-black/20 px-4 py-3 text-sm leading-relaxed text-white outline-none placeholder:text-white/25 focus:border-gold/40" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="text-base font-semibold text-white" htmlFor="code-builder-instruction">Development instruction</label>
+            <button type="button" data-testid="code-builder-model-status" onClick={refreshModelStatus} title="Recheck Code Builder model" className={`inline-flex items-center gap-2 text-sm ${modelStatus === 'ready' ? 'text-emerald-200' : 'text-amber-200'}`}><span className="h-2 w-2 rounded-full bg-current" />{modelLabel}<RefreshCw className="h-3.5 w-3.5" /></button>
+          </div>
+          <div className="mt-3 rounded-lg border border-white/10 bg-black/20 focus-within:border-gold/40">
+            <textarea id="code-builder-instruction" data-testid="code-builder-instruction" value={instruction} onChange={(event) => setInstruction(event.target.value)} onKeyDown={(event) => { if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') { event.preventDefault(); createTask(); } }} rows={5} placeholder="Describe the change you want LUMINA to prepare…" className="w-full resize-y bg-transparent px-4 py-4 text-base leading-relaxed text-white outline-none placeholder:text-white/30" />
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.07] px-4 py-3">
+              <div className="flex flex-wrap items-center gap-3">
+                <button type="button" data-testid="code-builder-voice" onClick={toggleVoice} aria-pressed={voiceState === 'listening'} title="Dictate development instruction" className={`inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-semibold transition ${voiceState === 'listening' ? 'border-red-300/40 bg-red-400/10 text-red-100' : 'border-white/10 bg-white/[0.05] text-white/75 hover:border-gold/40 hover:text-white'}`}>{voiceState === 'listening' ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}{voiceLabel}</button>
+                <label className="flex items-center gap-2 text-sm text-white/55" htmlFor="code-builder-voice-language"><span className="sr-only">Voice language</span><select id="code-builder-voice-language" data-testid="code-builder-voice-language" value={voiceLanguage} onChange={(event) => setVoiceLanguage(event.target.value)} className="rounded-md border border-white/10 bg-white/[0.05] px-2 py-2 text-sm text-white outline-none focus:border-gold/40"><option value="auto">Auto language</option><option value="el-GR">Greek</option><option value="en-US">English</option></select></label>
+              </div>
+              <span className="text-sm text-white/45">Review before running</span>
+            </div>
+          </div>
+          {voiceMessage && <p data-testid="code-builder-voice-status" className="mt-2 text-sm text-white/55">{voiceMessage}</p>}
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 text-xs text-white/40"><ShieldCheck className="h-4 w-4 text-gold" />No production writes before explicit approval.</div>
-            <button data-testid="code-builder-create" onClick={createTask} disabled={!instruction.trim() || busy} className="inline-flex items-center gap-2 rounded-md bg-gold px-4 py-2.5 text-xs font-medium text-black disabled:cursor-not-allowed disabled:opacity-40"><Play className="h-4 w-4" />Analyze & prepare</button>
+            <div className="flex items-center gap-2 text-sm text-white/55"><ShieldCheck className="h-4 w-4 text-gold" />No production writes before explicit approval.</div>
+            <button data-testid="code-builder-create" onClick={createTask} disabled={!instruction.trim() || busy} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-gold px-5 py-2.5 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"><Play className="h-4 w-4" />{busy ? 'Preparing…' : 'Analyze & prepare'}</button>
           </div>
         </section>
 
@@ -242,6 +361,16 @@ export default function CodeBuilder() {
                 <p className="mt-2 text-xs leading-relaxed text-white/40">Results produced only after the approved patch is applied. Rollback information is preserved when verification fails.</p>
                 {verification && <><p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-white/35">Build / tests</p><pre className="mt-2 max-h-80 overflow-auto rounded-lg border border-white/[0.07] bg-black/25 p-4 text-[11px] leading-relaxed text-white/65">{pretty(verification)}</pre></>}
                 {task?.rollback_result && <><p className="mt-4 text-[10px] uppercase tracking-[0.16em] text-white/35">Rollback</p><pre className="mt-2 max-h-80 overflow-auto rounded-lg border border-white/[0.07] bg-black/25 p-4 text-[11px] leading-relaxed text-white/65">{pretty(task.rollback_result)}</pre></>}
+              </section>}
+
+              {resultStatus && <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-5" data-testid="code-builder-result-summary">
+                <h3 className="font-display text-2xl text-white">{resultStatus}</h3>
+                <p className="mt-2 text-base leading-relaxed text-white/65">{task.phase === 'completed' ? 'The approved changes passed the configured verification pipeline.' : task.error_message || 'The task lifecycle has ended. Review the details below for the final outcome.'}</p>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg bg-white/[0.035] p-4"><p className="text-sm font-semibold text-white">Files changed</p><p className="mt-1 text-base text-white/70">{task.changed_paths?.length || taskResult.changed_paths?.length || 'None reported'}</p></div>
+                  <div className="rounded-lg bg-white/[0.035] p-4"><p className="text-sm font-semibold text-white">Validation</p><p className="mt-1 text-base text-white/70">{verification?.success === true ? 'Passed' : verification ? 'Needs attention' : 'Not run'}</p></div>
+                </div>
+                <details className="mt-5 rounded-lg border border-white/[0.07] bg-black/20 p-4"><summary className="cursor-pointer text-base font-semibold text-white/80">View technical details</summary><pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-white/60">{pretty(taskResult) || pretty(task.rollback_result) || 'No additional result details.'}</pre></details>
               </section>}
             </div>
 
