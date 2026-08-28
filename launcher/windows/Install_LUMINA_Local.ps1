@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Windows.Forms
 
 $repoUrl = 'https://github.com/koulierakis/lumina-ai-studio.git'
 $branch = 'install/local-windows-lumina-v2'
@@ -39,7 +40,7 @@ try {
     if (-not $python) { throw 'Python 3.11 or newer was not found.' }
 
     if (Test-Path $target) {
-        Write-Status "Existing LUMINA_LOCAL found. Updating safely..."
+        Write-Status 'Existing LUMINA_LOCAL found. Updating safely...'
         Push-Location $target
         git fetch origin $branch
         if ($LASTEXITCODE -ne 0) { throw 'git fetch failed.' }
@@ -75,12 +76,12 @@ try {
 
     Write-Status 'Creating desktop shortcuts...'
     $shell = New-Object -ComObject WScript.Shell
-    $startScript = Join-Path $target 'launcher\windows\Start_LUMINA.vbs'
-    $stopScript = Join-Path $target 'launcher\windows\Stop_LUMINA.vbs'
+    $startScript = Join-Path $target 'launcher\windows\Start_LUMINA_Local.ps1'
+    $stopScript = Join-Path $target 'launcher\windows\Stop_LUMINA_Local.ps1'
 
     $startShortcut = $shell.CreateShortcut((Join-Path $desktop 'LUMINA AI Studio.lnk'))
-    $startShortcut.TargetPath = 'wscript.exe'
-    $startShortcut.Arguments = '"' + $startScript + '"'
+    $startShortcut.TargetPath = 'powershell.exe'
+    $startShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $startScript + '"'
     $startShortcut.WorkingDirectory = $target
     $icon = Join-Path $target 'frontend\public\favicon.ico'
     if (Test-Path $icon) { $startShortcut.IconLocation = $icon }
@@ -88,14 +89,13 @@ try {
     $startShortcut.Save()
 
     $stopShortcut = $shell.CreateShortcut((Join-Path $desktop 'Close LUMINA.lnk'))
-    $stopShortcut.TargetPath = 'wscript.exe'
-    $stopShortcut.Arguments = '"' + $stopScript + '"'
+    $stopShortcut.TargetPath = 'powershell.exe'
+    $stopShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $stopScript + '"'
     $stopShortcut.WorkingDirectory = $target
     $stopShortcut.Description = 'Stop LUMINA AI Studio local services'
     $stopShortcut.Save()
 
-    $urlFile = Join-Path $desktop 'LUMINA Document Studio.url'
-    Set-Content -Path $urlFile -Value "[InternetShortcut]`r`nURL=http://localhost:3000/studio/documents`r`n"
+    Set-Content -Path (Join-Path $desktop 'LUMINA Document Studio.url') -Value "[InternetShortcut]`r`nURL=http://localhost:3000/studio/documents`r`n"
 
     Write-Status 'Running LUMINA doctor...'
     Push-Location $target
@@ -103,11 +103,11 @@ try {
     Pop-Location
 
     Write-Status 'Starting LUMINA locally...'
-    Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $startScript + '"') -WorkingDirectory $target
+    Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',$startScript) -WorkingDirectory $target
 
     Write-Status 'Waiting for frontend...'
     $ready = $false
-    for ($i = 0; $i -lt 90; $i++) {
+    for ($i = 0; $i -lt 120; $i++) {
         try {
             $response = Invoke-WebRequest -Uri 'http://localhost:3000/' -UseBasicParsing -TimeoutSec 2
             if ($response.StatusCode -eq 200) { $ready = $true; break }
@@ -118,10 +118,9 @@ try {
 
     Write-Status 'LUMINA is ready.'
     Start-Process 'http://localhost:3000/studio/documents'
-    [System.Windows.Forms.MessageBox]::Show('LUMINA AI Studio installed successfully.\n\nDesktop shortcut: LUMINA AI Studio\nDocument Studio: http://localhost:3000/studio/documents', 'LUMINA') | Out-Null
+    [System.Windows.Forms.MessageBox]::Show("LUMINA AI Studio installed successfully.`n`nDesktop shortcut: LUMINA AI Studio`nDocument Studio: http://localhost:3000/studio/documents", 'LUMINA') | Out-Null
 }
 catch {
-    Add-Type -AssemblyName System.Windows.Forms
     $msg = $_.Exception.Message + "`n`nInstall log:`n" + $log
     Write-Status ('ERROR: ' + $_.Exception.Message)
     [System.Windows.Forms.MessageBox]::Show($msg, 'LUMINA Installation Error') | Out-Null
