@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -48,12 +49,20 @@ def test_build_command_uses_json_dir_model_and_agent(
     assert "--auto" not in command
 
 
-def test_auto_approval_requires_explicit_lumina_opt_in(
+def test_auto_approval_requires_explicit_lumina_opt_in_and_disposable_workspace(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(KiloAdapterError, match="explicit LUMINA configuration opt-in"):
         _adapter(monkeypatch, auto=False).build_command(
+            prompt="Fix the repository",
+            repository_root=tmp_path,
+            auto_approve=True,
+            disposable_workspace=True,
+        )
+
+    with pytest.raises(KiloAdapterError, match="disposable sandbox workspace"):
+        _adapter(monkeypatch, auto=True).build_command(
             prompt="Fix the repository",
             repository_root=tmp_path,
             auto_approve=True,
@@ -63,6 +72,7 @@ def test_auto_approval_requires_explicit_lumina_opt_in(
         prompt="Fix the repository",
         repository_root=tmp_path,
         auto_approve=True,
+        disposable_workspace=True,
     )
     assert "--auto" in allowed
 
@@ -82,12 +92,15 @@ def test_attached_file_cannot_escape_repository(
         )
 
 
-def test_run_parses_json_events_without_shell(
+def test_run_parses_json_events_without_shell_and_scrubs_secrets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = _adapter(monkeypatch)
     captured = {}
+    monkeypatch.setenv("GITHUB_TOKEN", "must-not-leak")
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
 
     def fake_run(command, **kwargs):
         captured["command"] = tuple(command)
@@ -116,6 +129,28 @@ def test_run_parses_json_events_without_shell(
     assert captured["shell"] is False
     assert captured["stdin"] is not None
     assert captured["cwd"] == tmp_path.resolve()
+    assert "PATH" in captured["env"]
+    assert "GITHUB_TOKEN" not in captured["env"]
+    assert "OPENAI_API_KEY" not in captured["env"]
+
+
+def test_configuration_can_explicitly_pass_required_provider_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("shutil.which", lambda _binary: "/usr/local/bin/kilo")
+    adapter = KiloAdapter(
+        KiloAdapterConfiguration(environment={"OLLAMA_HOST": "http://127.0.0.1:11434"})
+    )
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    adapter.run(prompt="Inspect repository", repository_root=tmp_path)
+    assert captured["env"]["OLLAMA_HOST"] == "http://127.0.0.1:11434"
 
 
 def test_nonzero_exit_is_rejected(
