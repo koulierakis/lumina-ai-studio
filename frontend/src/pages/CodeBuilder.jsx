@@ -195,11 +195,6 @@ export default function CodeBuilder() {
     if (!task?.task_id) return;
     window.localStorage.setItem('lumina_code_builder_task_id', task.task_id);
     window.localStorage.setItem('lumina_code_builder_task', JSON.stringify(task));
-    if (task.review_result?.status === 'unavailable' || /ollama|model/i.test(task.error_message || '')) {
-      setModelStatus('unavailable');
-    } else if (task.review_result?.status === 'completed') {
-      setModelStatus('ready');
-    }
   }, [task]);
 
   useEffect(() => {
