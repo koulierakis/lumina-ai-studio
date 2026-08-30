@@ -29,10 +29,10 @@ describe('DocumentRichEditor editability lifecycle', () => {
   test('becomes editable when initialization finishes without remounting Lexical', async () => {
     const props = { html: '<p></p>', onHtmlChange: jest.fn() };
     await act(async () => root.render(<DocumentRichEditor {...props} disabled />));
-    expect(host.querySelector('[contenteditable]')).toHaveAttribute('contenteditable', 'false');
+    expect(host.querySelector('[contenteditable]')?.getAttribute('contenteditable')).toBe('false');
 
     await act(async () => root.render(<DocumentRichEditor {...props} disabled={false} />));
-    expect(host.querySelector('[contenteditable]')).toHaveAttribute('contenteditable', 'true');
+    expect(host.querySelector('[contenteditable]')?.getAttribute('contenteditable')).toBe('true');
   });
 });
 
