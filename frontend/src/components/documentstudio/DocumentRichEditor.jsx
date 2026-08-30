@@ -35,6 +35,17 @@ export const INSERT_CLEAN_HTML_COMMAND = createCommand('INSERT_CLEAN_HTML_COMMAN
 export const INSERT_PAGE_BREAK_COMMAND = createCommand('INSERT_PAGE_BREAK_COMMAND');
 export const SET_EDITOR_HTML_COMMAND = createCommand('SET_EDITOR_HTML_COMMAND');
 
+export function plainTextClipboardHtml(value = '') {
+  const escaped = String(value).replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[character]));
+  return `<p>${escaped.replace(/\r?\n/g, '<br/>')}</p>`;
+}
+
 function Placeholder() {
   return <div className="pointer-events-none absolute left-0 top-0 text-neutral-400">Start typing your document…</div>;
 }
@@ -127,7 +138,7 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady, disable
       const text = clipboard?.getData('text/plain');
       if (!html && !text) return false;
       event.preventDefault();
-      editor.dispatchCommand(INSERT_CLEAN_HTML_COMMAND, html || `<p>${String(text).replace(/\n/g, '<br/>')}</p>`);
+      editor.dispatchCommand(INSERT_CLEAN_HTML_COMMAND, html || plainTextClipboardHtml(text));
       return true;
     }, COMMAND_PRIORITY_HIGH),
   ), [editor]);
