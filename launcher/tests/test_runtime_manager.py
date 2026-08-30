@@ -14,9 +14,10 @@ if str(LAUNCHER_ROOT) not in sys.path:
 from lumina import config as cfg_mod  # noqa: E402
 from lumina import process_manager as pm  # noqa: E402
 from lumina import readiness  # noqa: E402
+from lumina import services as services_mod  # noqa: E402
 from lumina import state as state_mod  # noqa: E402
 from lumina.config import ConfigError, load_config, save_config, validate_config  # noqa: E402
-from lumina.errors import AlreadyRunningError  # noqa: E402
+from lumina.errors import AlreadyRunningError, LauncherError  # noqa: E402
 from lumina.services import is_lumina_running, start_all  # noqa: E402
 
 
@@ -120,3 +121,36 @@ def test_frontend_readiness_falls_back_between_loopback_hosts(monkeypatch: pytes
     assert result["ok"] is True
     assert result["url"] == "http://localhost:3000/"
     assert calls == ["http://127.0.0.1:3000/", "http://localhost:3000/"]
+
+
+def test_frontend_command_launches_craco_directly(fake_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    craco_cli = fake_repo / "frontend" / "node_modules" / "@craco" / "craco" / "dist" / "bin" / "craco.js"
+    craco_cli.parent.mkdir(parents=True)
+    craco_cli.write_text("// stub\n", encoding="utf-8")
+    monkeypatch.setattr(services_mod, "detect_node", lambda: {"ok": True, "path": "/usr/bin/node", "detail": None})
+
+    cmd = services_mod._frontend_command(fake_repo)
+
+    assert cmd == ["/usr/bin/node", str(craco_cli), "start"]
+    assert "npm" not in " ".join(cmd).lower()
+
+
+def test_frontend_start_rejects_process_that_dies_after_ready(fake_repo: Path, monkeypatch: pytest.MonkeyPatch):
+    class FakeProc:
+        pid = 4242
+        returncode = 1
+
+        def poll(self):
+            return 1
+
+    cfg = validate_config({"frontend_host": "0.0.0.0", "remote_access": True})
+    monkeypatch.setattr(services_mod, "check_frontend", lambda *_a, **_k: {"ok": False})
+    monkeypatch.setattr(services_mod, "port_in_use", lambda *_a, **_k: False)
+    monkeypatch.setattr(services_mod, "_frontend_command", lambda _root: ["node", "craco.js", "start"])
+    monkeypatch.setattr(services_mod, "_open_log", lambda *_a, **_k: open(fake_repo / "frontend-test.log", "a", encoding="utf-8"))
+    monkeypatch.setattr(services_mod.subprocess, "Popen", lambda *_a, **_k: FakeProc())
+    monkeypatch.setattr(services_mod, "record_service", lambda *_a, **_k: None)
+    monkeypatch.setattr(services_mod, "wait_until", lambda *_a, **_k: True)
+
+    with pytest.raises(LauncherError, match="exited immediately"):
+        services_mod._start_frontend(fake_repo, cfg)
