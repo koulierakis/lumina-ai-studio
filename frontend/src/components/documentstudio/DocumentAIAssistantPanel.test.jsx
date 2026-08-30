@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import DocumentAIAssistantPanel from './DocumentAIAssistantPanel';
 import { documentApi } from '../../documents/model';
+import { apiGet } from '../../lib/api';
 
 jest.mock('../../documents/model', () => ({
   DOCUMENT_AI_PROVIDERS: ['ollama', 'groq'],
@@ -15,6 +16,10 @@ jest.mock('../../documents/model', () => ({
     create: jest.fn(),
   },
   friendlyDocumentAIError: (error) => error?.message || 'AI request failed.',
+}));
+
+jest.mock('../../lib/api', () => ({
+  apiGet: jest.fn(),
 }));
 
 function clickByText(container, text) {
@@ -38,6 +43,14 @@ describe('DocumentAIAssistantPanel', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    apiGet.mockResolvedValue({
+      default_provider: 'ollama',
+      any_ready: true,
+      providers: {
+        ollama: { available: true, ready: true, selected_document_model: 'qwen2.5-coder:7b' },
+        groq: { available: false, ready: false, error: 'Not configured' },
+      },
+    });
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -53,6 +66,14 @@ describe('DocumentAIAssistantPanel', () => {
       root.render(<DocumentAIAssistantPanel profileId="profile-1" onApplyPreview={onApplyPreview} onDocumentSaved={onDocumentSaved} onClose={() => {}} />);
     });
   }
+
+  test('shows provider readiness before generation', async () => {
+    await renderPanel();
+
+    expect(apiGet).toHaveBeenCalledWith('/documents/ai/providers/status');
+    expect(host.textContent).toContain('Ollama · qwen2.5-coder:7b · ready');
+    expect(host.textContent).toContain('Groq · Not configured');
+  });
 
   test('natural creation is preview-first and only applies after explicit user action', async () => {
     const preview = { document: { title: 'Business Nature', document_type: 'business_nature_statement', content_text: 'Draft content' }, generation: { metadata: { provider_used: 'ollama', validation_status: 'validated' } } };
