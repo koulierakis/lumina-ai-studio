@@ -26,16 +26,26 @@ def _placeholder(name: str) -> str:
     return f"[{name}]"
 
 
+def _extract_explicit_company(source: str) -> str:
+    """Return an explicit legal entity without swallowing surrounding prompt prose."""
+    suffix = r"(?:LLC|LTD|LIMITED|INC|CORP|SA|AG|LP|LLP|ΙΚΕ|ΑΕ|ΕΠΕ|I\.K\.E\.|A\.E\.)"
+    candidates = re.findall(
+        rf"(?<![\w])([A-ZΑ-ΩΆΈΉΊΌΎΏ][A-ZΑ-ΩΆΈΉΊΌΎΏ0-9&.,'’\-]*(?:\s+[A-ZΑ-ΩΆΈΉΊΌΎΏ0-9&.,'’\-]+){{0,8}}\s+{suffix})(?![\w])",
+        source,
+    )
+    if not candidates:
+        return ""
+    # Prefer the shortest matching legal entity. This avoids matching command
+    # wording preceding the company name when the prompt itself is uppercase.
+    return min((item.strip(" ,.") for item in candidates), key=len)
+
+
 def extract_fact_safe_smart_fields(
     prompt: str, profile: CompanyProfile, title: str = ""
 ) -> dict[str, Any]:
     """Extract only supplied/profile facts; represent missing values as placeholders."""
     source = f"{title} {prompt}".strip()
-    company_match = re.search(
-        r"([A-ZΑ-Ω][A-ZΑ-Ω0-9&.,'’\- ]+\b(?:LLC|LTD|LIMITED|INC|CORP|SA|AG|LP|LLP|ΙΚΕ|ΑΕ|ΕΠΕ))",
-        source,
-        re.IGNORECASE,
-    )
+    explicit_company = _extract_explicit_company(source)
     person_match = re.search(
         r"(?:Managing Member|authorized signatory|appointing|represented by|by|διαχειριστ(?:ής|η)|εξουσιοδοτημέν(?:ος|η) υπογράφων):?\s*([A-ZΑ-ΩΆΈΉΊΌΎΏ][A-Za-zΑ-Ωα-ωΆ-ώ'’\-]+(?:\s+[A-ZΑ-ΩΆΈΉΊΌΎΏ][A-Za-zΑ-Ωα-ωΆ-ώ'’\-]+){1,4})",
         source,
@@ -63,11 +73,12 @@ def extract_fact_safe_smart_fields(
 
     profile_company = str(getattr(profile, "company_name", "") or "").strip()
     company_name = (
-        company_match.group(1).strip(" ,.")
-        if company_match
-        else profile_company
-        if profile_company and profile_company.casefold() not in DEMO_COMPANY_NAMES
-        else _placeholder("COMPANY NAME")
+        explicit_company
+        or (
+            profile_company
+            if profile_company and profile_company.casefold() not in DEMO_COMPANY_NAMES
+            else _placeholder("COMPANY NAME")
+        )
     )
 
     explicit_person = person_match.group(1).strip() if person_match else ""
@@ -112,7 +123,7 @@ def extract_fact_safe_smart_fields(
     ).strip() or _placeholder("TAX NUMBER")
 
     legal_form = str(getattr(profile, "legal_form", "") or "").strip()
-    if not legal_form and company_match:
+    if not legal_form and explicit_company:
         legal_form = company_name.split()[-1]
     legal_form = legal_form or _placeholder("LEGAL FORM")
 
