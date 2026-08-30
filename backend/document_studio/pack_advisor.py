@@ -204,7 +204,7 @@ def _objective_category(objective: str) -> tuple[str, bool]:
     ):
         return "corporate", False
     if re.search(
-        r"(?<!\w)(?:consulting|agency|commission|confidential|nda|agreement|συμβουλευτικ(?:ή|ές)|αντιπροσώπευση|προμήθεια|εμπιστευτικότητα|εχεμύθεια|συμφωνία|σύμβαση)(?!\w)",
+        r"(?<!\w)(?:consulting|agency|commission|confidential|nda|agreement|συμβουλευτικ(?:ή|ές)|αντιπροσώπευση|προμήθεια|εμπιστευτικ\w*|εχεμύθ\w*|συμφωνία|σύμβαση)(?!\w)",
         normalized,
     ):
         return "legal", False
@@ -238,7 +238,7 @@ def _rules_for_objective(objective: str) -> tuple[str, tuple[RecommendationRule,
         normalized = objective.casefold()
         document_type, title = (
             ("nda", "Non-Disclosure Agreement")
-            if re.search(r"(?<!\w)(?:confidential|nda|non[- ]disclosure|εμπιστευτικότητα|εχεμύθεια)(?!\w)", normalized)
+            if re.search(r"(?<!\w)(?:confidential|nda|non[- ]disclosure|εμπιστευτικ\w*|εχεμύθ\w*)(?!\w)", normalized)
             else ("consulting_agreement", "Consulting Agreement")
             if re.search(r"consult|συμβουλευ", normalized)
             else ("agency_agreement", "Agency Agreement")
