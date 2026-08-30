@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import datetime
 from typing import Any
 
@@ -142,19 +143,33 @@ def extract_source_corporate_facts(
     return facts
 
 
+def _unicode_tokens(value: Any) -> str:
+    """Normalize multilingual fact text without discarding non-Latin alphabets."""
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    chars = [character if character.isalnum() else " " for character in normalized]
+    return " ".join("".join(chars).split())
+
+
 def _normalized_fact_value(field_name: str, value: Any) -> str:
     if isinstance(value, dict):
         value = value.get("name") or value.get("full_name") or value
-    text = re.sub(r"\s+", " ", str(value or "")).strip().casefold()
+    text = unicodedata.normalize("NFKC", str(value or "")).strip().casefold()
     if field_name == "registration_number":
-        return re.sub(r"[^a-z0-9]", "", text)
+        return "".join(character for character in text if character.isalnum())
     if field_name == "formation_date":
-        for date_format in ("%Y-%m-%d", "%d/%m/%Y", "%d %B %Y", "%d %b %Y"):
+        for date_format in (
+            "%Y-%m-%d",
+            "%d/%m/%Y",
+            "%d.%m.%Y",
+            "%d-%m-%Y",
+            "%d %B %Y",
+            "%d %b %Y",
+        ):
             try:
                 return datetime.strptime(text, date_format).date().isoformat()
             except ValueError:
                 continue
-    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+    return _unicode_tokens(text)
 
 
 def detect_source_fact_conflicts(
