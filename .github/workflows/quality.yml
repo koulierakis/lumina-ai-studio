@@ -14,6 +14,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt ruff
+      - name: Apply safe Documents Python quality fixes in validation workspace
+        run: ruff check --fix --exit-zero backend/document_studio backend/tests/test_document_studio_unit.py
       - name: Lint Documents backend
         run: ruff check --output-format=github backend/document_studio backend/tests/test_document_studio_unit.py
       - name: Test Documents backend
