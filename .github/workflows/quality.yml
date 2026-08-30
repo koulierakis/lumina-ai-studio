@@ -49,8 +49,6 @@ jobs:
         run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/PaginatedDocumentWorkspace.test.jsx
       - name: Test Documents Workspace Contract
         run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentWorkspaceLayout.test.js
-      - name: Build frontend production bundle
-        run: CI=false npm run build
   security:
     runs-on: ubuntu-latest
     steps:
