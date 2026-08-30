@@ -249,3 +249,40 @@ def test_natural_creation_uses_only_injected_provider_and_no_network():
 
     assert result.status == "created"
     assert len(provider.calls) == 1
+
+
+def test_greek_service_agreement_intent_is_classified_as_legal_document():
+    interpretation = interpret_natural_document_request(
+        "Δημιούργησε σύμβαση παροχής υπηρεσιών και άφησε την αμοιβή κενή.",
+        profile(),
+    )
+
+    assert interpretation["document_type"] == "service_agreement"
+    assert interpretation["category"] == "Legal"
+    assert interpretation["intentional_blank_fields"] == ["FEE"]
+    assert interpretation["review_status"] == "LEGAL_REVIEW_RECOMMENDED"
+
+
+def test_greek_invoice_extracts_explicit_amount_without_promoting_it_to_verified():
+    interpretation = interpret_natural_document_request(
+        "Δημιούργησε τιμολόγιο. Ποσό: EUR 5.000.",
+        profile(),
+    )
+
+    assert interpretation["document_type"] == "invoice"
+    assert interpretation["user_supplied_facts"]["amount"] == "EUR 5.000"
+
+
+def test_greek_ambiguous_agreement_requires_clarification():
+    interpretation = interpret_natural_document_request("Δημιούργησε μια σύμβαση", profile())
+
+    assert interpretation["status"] == "needs_clarification"
+
+
+def test_greek_official_document_request_is_template_only_without_source():
+    interpretation = interpret_natural_document_request(
+        "Δημιούργησε επίσημο πιστοποιητικό γέννησης",
+        profile(),
+    )
+
+    assert interpretation["official_document_safety"] == "template_only"
