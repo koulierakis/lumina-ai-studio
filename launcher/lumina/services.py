@@ -136,6 +136,24 @@ def _start_backend(repo_root: Path, cfg: dict[str, Any]) -> None:
         raise StartupTimeoutError("Backend")
 
 
+def _frontend_command(repo_root: Path) -> list[str]:
+    """Launch CRACO directly so the tracked PID is the long-lived Node process.
+
+    `npm start` can leave a short-lived npm wrapper as the tracked PID while the
+    actual CRACO dev server continues as a child. In Codespaces that made the
+    launcher clear the frontend PID as stale and lose ownership of port 3000.
+    """
+    node = detect_node()
+    if not node["ok"]:
+        raise DependencyMissingError(node["detail"] or "Node.js is required.")
+    craco_cli = repo_root / "frontend" / "node_modules" / "@craco" / "craco" / "dist" / "bin" / "craco.js"
+    if not craco_cli.is_file():
+        raise DependencyMissingError(
+            "CRACO is not installed in frontend/node_modules. Run 'npm ci' in frontend before starting LUMINA."
+        )
+    return [node["path"], str(craco_cli), "start"]
+
+
 def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
     host, port = cfg["frontend_host"], int(cfg["frontend_port"])
     probe = _probe_host(host)
@@ -144,9 +162,8 @@ def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
         if owns_process("frontend", pid, repo_root=repo_root): return
         raise PortInUseError("frontend", port)
     if port_in_use(probe, port): raise PortInUseError("frontend", port)
-    npm = detect_npm()
-    if not npm["ok"]: raise DependencyMissingError(npm["detail"] or "npm is required.")
-    cmd = [npm["path"], "start"]
+
+    cmd = _frontend_command(repo_root)
     log_handle = _open_log("frontend", repo_root)
     env = os.environ.copy()
     env["BROWSER"] = "none"
@@ -158,10 +175,42 @@ def _start_frontend(repo_root: Path, cfg: dict[str, Any]) -> None:
         env["REACT_APP_BACKEND_URL"] = ""
     else:
         env.setdefault("REACT_APP_BACKEND_URL", f"http://{cfg['backend_host']}:{cfg['backend_port']}")
-    proc = subprocess.Popen(cmd, cwd=str(repo_root / "frontend"), stdout=log_handle, stderr=subprocess.STDOUT, env=env, creationflags=_creation_flags(), shell=False)
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(repo_root / "frontend"),
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        env=env,
+        creationflags=_creation_flags(),
+        shell=False,
+    )
     record_service("frontend", proc.pid, cmd, repo_root=repo_root)
-    if not wait_until(lambda: bool(check_frontend(probe, port).get("ok")), timeout=cfg["startup_timeout_seconds"], interval=cfg["readiness_poll_interval_seconds"], label="Frontend"):
+
+    ready = wait_until(
+        lambda: proc.poll() is None and bool(check_frontend(probe, port).get("ok")),
+        timeout=cfg["startup_timeout_seconds"],
+        interval=cfg["readiness_poll_interval_seconds"],
+        label="Frontend",
+    )
+    if not ready:
         raise StartupTimeoutError("Frontend")
+
+    # A dev server can become reachable briefly and then die during post-start
+    # initialization. Do not report a successful LUMINA start until it remains
+    # alive and reachable through a short stabilization window.
+    stabilization_deadline = time.time() + 3.0
+    while time.time() < stabilization_deadline:
+        if proc.poll() is not None:
+            raise LauncherError(
+                f"Frontend exited immediately after becoming ready (exit code {proc.returncode}). "
+                f"See {logs_dir(repo_root) / 'frontend.log'}."
+            )
+        if not check_frontend(probe, port).get("ok"):
+            raise LauncherError(
+                f"Frontend became unreachable immediately after startup. See {logs_dir(repo_root) / 'frontend.log'}."
+            )
+        time.sleep(0.5)
 
 
 def _open_dashboard(repo_root: Path, cfg: dict[str, Any]) -> None:
