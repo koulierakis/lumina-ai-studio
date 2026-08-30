@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from document_studio.models import CompanyProfile, SourceCorporateFact
-from document_studio.source_facts import detect_source_fact_conflicts
+from document_studio.source_facts import (
+    detect_source_fact_conflicts,
+    extract_source_corporate_facts,
+)
 
 OWNER_EMAIL = "owner@example.com"
 
@@ -66,3 +69,25 @@ def test_european_dotted_formation_dates_compare_equally():
     )
 
     assert conflicts == []
+
+
+def test_greek_registry_labels_are_extracted_with_source_provenance():
+    source = """[[LUMINA_PAGE:1]]
+Επωνυμία: ΕΜΠΟΡΙΚΗ ΕΛΛΑΔΟΣ Ι.Κ.Ε.
+Νομική μορφή: Ιδιωτική Κεφαλαιουχική Εταιρεία
+Αριθμός ΓΕΜΗ: 123456789000
+Ημερομηνία σύστασης: 05.08.2026
+Έδρα: Ασκληπιού 10, Τρίκαλα
+Διαχειριστής: Ιωάννης Παπαδόπουλος
+"""
+
+    facts = extract_source_corporate_facts(source, "gemi-1", "gemi.pdf")
+    by_field = {item.field_name: item for item in facts}
+
+    assert by_field["company_name"].value == "ΕΜΠΟΡΙΚΗ ΕΛΛΑΔΟΣ Ι.Κ.Ε"
+    assert by_field["company_name"].verification_status == "VERIFIED"
+    assert by_field["registration_number"].value == "123456789000"
+    assert by_field["registered_office"].value == "Ασκληπιού 10, Τρίκαλα"
+    assert by_field["managers"].value == "Ιωάννης Παπαδόπουλος"
+    assert by_field["managers"].verification_status == "CANDIDATE"
+    assert by_field["registration_number"].source_page_or_location.startswith("page 1")
