@@ -1,6 +1,7 @@
 """Unit tests for LUMINA runtime manager (no live services required)."""
 from __future__ import annotations
 
+import io
 import json
 import sys
 from pathlib import Path
@@ -147,7 +148,7 @@ def test_frontend_start_rejects_process_that_dies_after_ready(fake_repo: Path, m
     monkeypatch.setattr(services_mod, "check_frontend", lambda *_a, **_k: {"ok": False})
     monkeypatch.setattr(services_mod, "port_in_use", lambda *_a, **_k: False)
     monkeypatch.setattr(services_mod, "_frontend_command", lambda _root: ["node", "craco.js", "start"])
-    monkeypatch.setattr(services_mod, "_open_log", lambda *_a, **_k: open(fake_repo / "frontend-test.log", "a", encoding="utf-8"))
+    monkeypatch.setattr(services_mod, "_open_log", lambda *_a, **_k: io.StringIO())
     monkeypatch.setattr(services_mod.subprocess, "Popen", lambda *_a, **_k: FakeProc())
     monkeypatch.setattr(services_mod, "record_service", lambda *_a, **_k: None)
     monkeypatch.setattr(services_mod, "wait_until", lambda *_a, **_k: True)
