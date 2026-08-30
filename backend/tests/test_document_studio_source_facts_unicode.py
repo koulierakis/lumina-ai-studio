@@ -3,6 +3,8 @@ from __future__ import annotations
 from document_studio.models import CompanyProfile, SourceCorporateFact
 from document_studio.source_facts import detect_source_fact_conflicts
 
+OWNER_EMAIL = "owner@example.com"
+
 
 def fact(field_name: str, value: str, source_id: str) -> SourceCorporateFact:
     return SourceCorporateFact(
@@ -33,7 +35,7 @@ def test_greek_company_names_are_not_collapsed_to_empty_normalization():
 
 
 def test_equivalent_greek_company_name_does_not_create_false_conflict():
-    profile = CompanyProfile(company_name="Εμπορική Ελλάδος ΙΚΕ")
+    profile = CompanyProfile(owner_email=OWNER_EMAIL, company_name="Εμπορική Ελλάδος ΙΚΕ")
 
     conflicts = detect_source_fact_conflicts(
         [fact("company_name", "ΕΜΠΟΡΙΚΗ   ΕΛΛΑΔΟΣ ΙΚΕ", "source-a")],
@@ -44,7 +46,7 @@ def test_equivalent_greek_company_name_does_not_create_false_conflict():
 
 
 def test_greek_registered_office_conflict_is_detected_against_profile():
-    profile = CompanyProfile(registered_office="Ασκληπιού 10, Τρίκαλα")
+    profile = CompanyProfile(owner_email=OWNER_EMAIL, registered_office="Ασκληπιού 10, Τρίκαλα")
 
     conflicts = detect_source_fact_conflicts(
         [fact("registered_office", "Καρανάσιου 20, Τρίκαλα", "source-a")],
@@ -56,7 +58,7 @@ def test_greek_registered_office_conflict_is_detected_against_profile():
 
 
 def test_european_dotted_formation_dates_compare_equally():
-    profile = CompanyProfile(formation_date="05.08.2026")
+    profile = CompanyProfile(owner_email=OWNER_EMAIL, formation_date="05.08.2026")
 
     conflicts = detect_source_fact_conflicts(
         [fact("formation_date", "05/08/2026", "source-a")],
