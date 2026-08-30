@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 from document_studio.ollama_adapter import OllamaDocumentAdapter
@@ -59,7 +60,7 @@ def test_generation_uses_native_ollama_api(monkeypatch):
     captured = {}
 
     def handler(request):
-        captured.update(request.read() and __import__("json").loads(request.content.decode("utf-8")))
+        captured.update(json.loads(request.content.decode("utf-8")))
         return httpx.Response(
             200,
             json={"model": "qwen2.5-coder:7b", "response": "Document draft"},
@@ -79,6 +80,46 @@ def test_generation_uses_native_ollama_api(monkeypatch):
     assert result.content == "Document draft"
     assert captured["model"] == "qwen2.5-coder:7b"
     assert captured["stream"] is False
+
+
+def test_structured_generation_sends_explicit_schema_contract(monkeypatch):
+    monkeypatch.setenv("OLLAMA_DOCUMENT_MODEL", "qwen2.5-coder:7b")
+    captured = {}
+    response_payload = {
+        "title": "NDA",
+        "document_type": "nda",
+        "category": "Legal",
+        "language": "en",
+        "content": "Draft",
+        "claims": [],
+        "unresolved_fields": [],
+    }
+
+    def handler(request):
+        captured.update(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "model": "qwen2.5-coder:7b",
+                "response": json.dumps(response_payload),
+            },
+        )
+
+    client = httpx.AsyncClient(
+        base_url="http://ollama.test", transport=httpx.MockTransport(handler)
+    )
+    adapter = OllamaDocumentAdapter(client=client, ollama_url="http://ollama.test")
+
+    try:
+        result = run(adapter.generate_structured_document('{"request":"Create NDA"}'))
+    finally:
+        run(client.aclose())
+
+    assert result.success is True
+    assert captured["format"] == "json"
+    assert "document_type" in captured["system"]
+    assert "unresolved_fields" in captured["system"]
+    assert "verified, user, generated" in captured["system"]
 
 
 def test_generation_handles_missing_model(monkeypatch):
