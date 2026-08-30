@@ -4,7 +4,9 @@ import io
 import zipfile
 
 from document_studio.models import CompanyProfile, CorporateDocument
+from document_studio.pdf_extraction import extract_pdf_text
 from document_studio.service import render_docx_bytes, render_pdf_bytes
+from document_studio.source_facts import extract_source_corporate_facts
 
 
 def _greek_document() -> CorporateDocument:
@@ -57,6 +59,27 @@ def test_greek_pdf_export_produces_valid_pdf_without_unicode_font_failure():
     assert exported.startswith(b"%PDF-")
     assert len(exported) > 1000
     assert b"%%EOF" in exported[-1024:]
+
+
+def test_greek_pdf_export_can_be_reimported_with_unicode_and_page_provenance():
+    exported = render_pdf_bytes(_greek_document(), _profile())
+    extracted = extract_pdf_text(exported)
+
+    assert "[[LUMINA_PAGE:1]]" in extracted
+    assert "ΕΜΠΟΡΙΚΗ ΕΛΛΑΔΟΣ ΙΚΕ" in extracted
+    assert "Αριθμός ΓΕΜΗ" in extracted
+    assert "Τρίκαλα" in extracted
+
+    facts = extract_source_corporate_facts(
+        extracted,
+        source_document_id="roundtrip-pdf",
+        source_document_name="εταιρική-δήλωση.pdf",
+    )
+    by_name = {fact.field_name: fact for fact in facts}
+    assert by_name["company_name"].value == "ΕΜΠΟΡΙΚΗ ΕΛΛΑΔΟΣ ΙΚΕ"
+    assert by_name["company_name"].source_page_or_location.startswith("page 1")
+    assert by_name["registration_number"].value == "123456789000"
+    assert by_name["registered_office"].value == "Ασκληπιού 10, Τρίκαλα"
 
 
 def test_greek_docx_export_preserves_unicode_in_word_xml():
