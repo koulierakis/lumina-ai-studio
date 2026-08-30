@@ -170,3 +170,39 @@ def test_pack_advisor_has_no_provider_or_network_dependency(monkeypatch):
     result = advise_documents("Open a bank account", rich_profile())
 
     assert result.recommendations
+
+
+def test_greek_banking_objective_maps_to_banking_pack():
+    result = advise_documents(
+        "Χρειάζομαι πλήρες πακέτο για άνοιγμα τραπεζικού λογαριασμού και KYC",
+        rich_profile(),
+    )
+
+    assert result.objective_category == "banking"
+    assert result.total_required == 6
+    assert {item.document_type for item in result.recommendations} >= {
+        "company_profile",
+        "source_of_funds_declaration",
+        "kyc_declaration",
+        "ubo_declaration",
+    }
+
+
+def test_greek_confidentiality_objective_maps_to_nda():
+    result = advise_documents(
+        "Θέλω σύμβαση εμπιστευτικότητας για συνεργασία",
+        rich_profile(),
+    )
+
+    assert result.objective_category == "legal"
+    assert result.recommendations[0].document_type == "nda"
+
+
+def test_greek_corporate_objective_maps_to_resolution():
+    result = advise_documents(
+        "Προετοίμασε εταιρική απόφαση για το διοικητικό συμβούλιο",
+        rich_profile(),
+    )
+
+    assert result.objective_category == "corporate"
+    assert result.recommendations[0].document_type == "corporate_resolution"
