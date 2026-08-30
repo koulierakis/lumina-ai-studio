@@ -84,11 +84,14 @@ let webpackConfig = {
       ...jestConfig,
       moduleNameMapper: {
         ...(jestConfig.moduleNameMapper || {}),
-        // Lexical 0.45 publishes public CommonJS wrappers at the package root,
-        // while Jest 27 (bundled by react-scripts 5) does not reliably resolve
-        // the package `exports` subpaths. Point Jest at those wrappers only;
-        // webpack/runtime resolution remains unchanged.
-        '^@lexical/react/(.*)$': '<rootDir>/node_modules/@lexical/react/$1.js',
+        // Jest 27 (react-scripts 5) does not reliably understand Lexical 0.45's
+        // conditional package exports. ReactProviderExtension is an irregular
+        // export whose CommonJS bundle is prefixed with "Lexical"; keep this
+        // specific rule before the generic Lexical* plugin mapping.
+        '^@lexical/react/ReactProviderExtension$':
+          '<rootDir>/node_modules/@lexical/react/dist/LexicalReactProviderExtension.js',
+        '^@lexical/react/(Lexical.*)$':
+          '<rootDir>/node_modules/@lexical/react/dist/$1.js',
       },
     }),
   },
