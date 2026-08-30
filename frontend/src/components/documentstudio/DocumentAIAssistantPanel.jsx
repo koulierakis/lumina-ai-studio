@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronUp, FileText, Save, Sparkles, XCircle } from 'lucide-react';
 import {
   DOCUMENT_AI_PROVIDERS,
   documentApi,
   friendlyDocumentAIError,
 } from '../../documents/model';
+import { apiGet } from '../../lib/api';
 
 const DEFAULT_DOCUMENT_TYPES = [
   'nda', 'consulting_agreement', 'company_profile', 'board_resolution',
@@ -22,6 +23,29 @@ function ProviderSelect({ value, onChange, label = 'Provider' }) {
         ))}
       </select>
     </label>
+  );
+}
+
+function ProviderReadiness({ payload, loading, onRefresh }) {
+  const providers = payload?.providers || {};
+  return (
+    <section className="doc-ai-provider-readiness" aria-label="AI provider readiness">
+      <div className="doc-ai-preview-heading">
+        <strong>AI readiness</strong>
+        <button type="button" onClick={onRefresh} disabled={loading}>{loading ? 'Checking…' : 'Refresh'}</button>
+      </div>
+      {DOCUMENT_AI_PROVIDERS.map((name) => {
+        const status = providers[name] || {};
+        const ready = Boolean(status.ready ?? status.available);
+        const model = status.selected_structured_document_model || status.selected_document_model;
+        return (
+          <div key={name} className={`doc-ai-pack-summary ${ready ? 'complete' : 'failed'}`}>
+            {ready ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
+            <span><strong>{name === 'groq' ? 'Groq' : 'Ollama'}</strong>{model ? ` · ${model}` : ''} · {ready ? 'ready' : (status.error || 'unavailable')}</span>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
@@ -94,12 +118,27 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
   const [packPreview, setPackPreview] = useState(null);
   const [loadingAction, setLoadingAction] = useState('');
   const [error, setError] = useState('');
+  const [providerStatus, setProviderStatus] = useState(null);
+  const [providerStatusLoading, setProviderStatusLoading] = useState(false);
 
   const recommendations = useMemo(() => advisor?.recommendations || [], [advisor?.recommendations]);
   const documentTypes = useMemo(() => [...new Set([
     ...recommendations.map((item) => item.document_type), ...DEFAULT_DOCUMENT_TYPES,
   ])], [recommendations]);
   const requiredTypes = recommendations.filter((item) => item.priority === 'required').map((item) => item.document_type);
+
+  async function refreshProviderStatus() {
+    setProviderStatusLoading(true);
+    try {
+      setProviderStatus(await apiGet('/documents/ai/providers/status'));
+    } catch (caught) {
+      setProviderStatus({ providers: {}, any_ready: false });
+    } finally {
+      setProviderStatusLoading(false);
+    }
+  }
+
+  useEffect(() => { refreshProviderStatus(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function toggleType(type) {
     setSelectedTypes((current) => current.includes(type) ? current.filter((item) => item !== type) : [...current, type]);
@@ -109,7 +148,7 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
     setLoadingAction(action);
     setError('');
     try { return await operation(); }
-    catch (caught) { setError(friendlyDocumentAIError(caught)); return null; }
+    catch (caught) { setError(friendlyDocumentAIError(caught)); await refreshProviderStatus(); return null; }
     finally { setLoadingAction(''); }
   }
 
@@ -170,6 +209,7 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
         <div><Sparkles size={18} /><strong>AI Assistance</strong><span>Preview before applying</span></div>
         <button type="button" onClick={onClose} aria-label="Close AI assistance"><ChevronUp size={18} /></button>
       </div>
+      <ProviderReadiness payload={providerStatus} loading={providerStatusLoading} onRefresh={refreshProviderStatus} />
       {error && <div className="doc-ai-error" role="alert"><XCircle size={16} />{error}</div>}
       <div className="doc-ai-grid">
         <section className="doc-ai-section">
