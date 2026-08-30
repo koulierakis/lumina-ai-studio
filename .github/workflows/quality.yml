@@ -33,8 +33,16 @@ jobs:
       - run: npm ci
       - name: Test Documents AI Assistant
         run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentAIAssistantPanel.test.jsx
-      - name: Test Documents Rich Editor
-        run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentRichEditor.test.jsx
+      - name: Test Rich Editor editability lifecycle
+        run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentRichEditor.test.jsx -t "becomes editable"
+      - name: Test Rich Editor sanitization
+        run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentRichEditor.test.jsx -t "sanitizes dangerous"
+      - name: Test Rich Editor plain text paste
+        run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentRichEditor.test.jsx -t "plain text paste"
+      - name: Test Rich Editor legacy page break
+        run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentRichEditor.test.jsx -t "legacy page break"
+      - name: Test Rich Editor page flow model
+        run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentRichEditor.test.jsx -t "default A4|Letter and landscape|custom margins|page count increases|manual page break|zoom does not|20-page"
       - name: Test Documents Pagination
         run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/PaginatedDocumentWorkspace.test.jsx
       - name: Test Documents Workspace Contract
@@ -44,8 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
       - name: Scan current release tree for secrets
         run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --source=/repo --no-git --redact --exit-code=1
       - uses: returntocorp/semgrep-action@v1
