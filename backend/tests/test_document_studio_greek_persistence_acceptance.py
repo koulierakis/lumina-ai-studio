@@ -13,6 +13,15 @@ def run(coro):
     return asyncio.run(coro)
 
 
+async def _load_versions(document_id: str, owner: str) -> list[dict]:
+    return [
+        item
+        async for item in document_router.versions_coll.find(
+            {"document_id": document_id, "owner_email": owner}, {"_id": 0}
+        ).sort("version_number", 1)
+    ]
+
+
 def test_greek_document_save_reopen_edit_and_version_round_trip(tmp_path):
     provider = SQLitePersistenceProvider(tmp_path / "greek-document-roundtrip.db")
     run(provider.initialize())
@@ -74,11 +83,7 @@ def test_greek_document_save_reopen_edit_and_version_round_trip(tmp_path):
     assert "ΙΩΑΝΝΗΣ ΚΟΥΛΙΕΡΑΚΗΣ" in reopened_again.content_text
     assert "ΙΩΑΝΝΗΣ ΚΟΥΛΙΕΡΑΚΗΣ" in reopened_again.searchable_text
 
-    versions = run(
-        document_router.versions_coll.find(
-            {"document_id": created.id, "owner_email": owner}, {"_id": 0}
-        ).to_list(length=10)
-    )
+    versions = run(_load_versions(created.id, owner))
     assert [item["version_number"] for item in versions] == [1, 2]
     assert "ΕΜΠΟΡΙΚΗ ΕΛΛΑΔΟΣ ΙΚΕ" in versions[0]["content_text"]
     assert "ΙΩΑΝΝΗΣ ΚΟΥΛΙΕΡΑΚΗΣ" in versions[1]["content_text"]
