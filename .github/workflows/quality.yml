@@ -15,11 +15,11 @@ jobs:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt ruff
       - name: Apply safe Documents Python quality fixes in validation workspace
-        run: ruff check --fix --exit-zero backend/document_studio backend/tests/test_document_studio_unit.py
+        run: ruff check --fix --exit-zero backend/document_studio backend/tests/test_document_studio_unit.py backend/tests/test_document_studio_import_hardening.py
       - name: Lint Documents backend
-        run: ruff check --output-format=github backend/document_studio backend/tests/test_document_studio_unit.py
+        run: ruff check --output-format=github backend/document_studio backend/tests/test_document_studio_unit.py backend/tests/test_document_studio_import_hardening.py
       - name: Test Documents backend
-        run: python -m pytest backend/tests/test_document_studio_unit.py -q
+        run: python -m pytest backend/tests/test_document_studio_unit.py backend/tests/test_document_studio_import_hardening.py -q
   frontend:
     runs-on: ubuntu-latest
     defaults:
