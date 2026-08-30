@@ -30,50 +30,62 @@ SUPPORTED_FACT_FIELDS = {
 EXPLICIT_FACT_PATTERNS: tuple[tuple[str, str, float], ...] = (
     (
         "company_name",
-        r"^(?:legal company name|legal name|company name|registered name)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:legal company name|legal name|company name|registered name|επωνυμία|εταιρική επωνυμία|νομική επωνυμία)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.99,
     ),
     (
         "legal_form",
-        r"^(?:legal form|legal status|entity type|company type)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:legal form|legal status|entity type|company type|νομική μορφή|εταιρική μορφή)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.98,
     ),
     (
         "jurisdiction",
-        r"^(?:jurisdiction|country of incorporation)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:jurisdiction|country of incorporation|δικαιοδοσία|χώρα σύστασης|χώρα εγγραφής)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.98,
     ),
     (
         "registration_number",
-        r"^(?:(?:company )?(?:registration|registry) (?:number|no\.?|#)|company number|reg\.? no\.?)\s*(?::|\||\t|\s{1,})\s*([A-Z]{1,6}[ .\-/]*\d[A-Z0-9 .\-/]*)$",
+        r"^(?:(?:company )?(?:registration|registry) (?:number|no\.?|#)|company number|reg\.? no\.?|αριθμός γεμη|αρ\.\s*γεμη|γεμη|αριθμός μητρώου|αριθμός εταιρείας)\s*(?::|\||\t|\s{1,})\s*([A-ZΑ-Ω0-9][A-ZΑ-Ω0-9 .\-/]*)$",
         0.99,
     ),
     (
         "formation_date",
-        r"^(?:incorporation date|date of incorporation|date of registration|formed on|incorporated)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:incorporation date|date of incorporation|date of registration|formed on|incorporated|ημερομηνία σύστασης|ημερομηνία ίδρυσης|ημερομηνία εγγραφής)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.98,
     ),
     (
         "registered_office",
-        r"^(?:registered office|registered address)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:registered office|registered address|έδρα|καταστατική έδρα|εγγεγραμμένη έδρα|διεύθυνση έδρας)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.98,
     ),
     (
         "principal_office",
-        r"^(?:principal office|principal address|business address|principal place of business)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:principal office|principal address|business address|principal place of business|κύρια εγκατάσταση|κύρια διεύθυνση|διεύθυνση δραστηριότητας)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.97,
     ),
-    ("directors", r"^(?:director|directors)\s*(?::|\||\t|\s{2,})\s*(.+)$", 0.92),
-    ("managers", r"^(?:manager|managers)\s*(?::|\||\t|\s{2,})\s*(.+)$", 0.90),
-    ("members", r"^(?:member|members|shareholder|shareholders)\s*(?::|\||\t|\s{2,})\s*(.+)$", 0.90),
+    (
+        "directors",
+        r"^(?:director|directors|μέλος διοικητικού συμβουλίου|μέλη διοικητικού συμβουλίου|διοικητικό συμβούλιο)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        0.92,
+    ),
+    (
+        "managers",
+        r"^(?:manager|managers|διαχειριστής|διαχειρίστρια|διαχειριστές)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        0.90,
+    ),
+    (
+        "members",
+        r"^(?:member|members|shareholder|shareholders|εταίρος|εταίροι|μέτοχος|μέτοχοι)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        0.90,
+    ),
     (
         "beneficial_owners",
-        r"^(?:ultimate beneficial owner|beneficial owner|beneficial owners|ubo|ubos)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:ultimate beneficial owner|beneficial owner|beneficial owners|ubo|ubos|πραγματικός δικαιούχος|πραγματικοί δικαιούχοι|τελικός πραγματικός δικαιούχος)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.90,
     ),
     (
         "authorized_signatories",
-        r"^(?:authorized signatory|authorized signatories)\s*(?::|\||\t|\s{2,})\s*(.+)$",
+        r"^(?:authorized signatory|authorized signatories|εξουσιοδοτημένος υπογράφων|εξουσιοδοτημένη υπογράφουσα|εξουσιοδοτημένοι υπογράφοντες)\s*(?::|\||\t|\s{2,})\s*(.+)$",
         0.92,
     ),
 )
