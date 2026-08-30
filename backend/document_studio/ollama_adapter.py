@@ -21,6 +21,23 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_DOCUMENT_MODEL = "qwen2.5-coder:7b"
 AVAILABILITY_TIMEOUT_SECONDS = 10.0
 MAX_GENERATION_TIMEOUT_SECONDS = 180.0
+STRUCTURED_DOCUMENT_SYSTEM_PROMPT = """You are LUMINA Document Intelligence.
+Return exactly one valid JSON object and nothing else.
+The object MUST contain exactly these top-level keys:
+- title: non-empty string
+- document_type: non-empty string; preserve the document_type provided in context exactly
+- category: non-empty string
+- language: non-empty language code/string
+- content: non-empty plain document text
+- claims: JSON array of objects, each with exactly field_name, value, origin
+- unresolved_fields: JSON array of placeholder names
+For every claims item, origin MUST be exactly one of: verified, user, generated.
+Use origin=verified only when the exact value exists in context.verified_facts.
+Use origin=user only when the exact value exists in context.user_supplied_facts.
+Never invent legal identity, registration, ownership, banking, financial, regulatory, source-of-funds, or source-of-wealth facts.
+When required information is unavailable, use a square-bracket placeholder in content and list the same placeholder name in unresolved_fields.
+Do not return Markdown fences, HTML, comments, explanations, or any text outside the JSON object.
+"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,11 +205,7 @@ class OllamaDocumentAdapter:
         return await self._generate(
             model=self.structured_document_model,
             prompt=prompt,
-            system_prompt=(
-                "You are LUMINA Document Intelligence. Return exactly one valid JSON object. "
-                "Never return HTML, Markdown, commentary, or facts not supplied by the user or "
-                "verified profile."
-            ),
+            system_prompt=STRUCTURED_DOCUMENT_SYSTEM_PROMPT,
             timeout_seconds=timeout_seconds,
             output_format="json",
             options={"temperature": 0.15, "top_p": 0.8, "num_predict": 3500},
