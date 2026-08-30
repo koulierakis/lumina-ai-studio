@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import importlib
 import re
+from pathlib import Path
 from typing import Annotated
 
 from auth import require_owner
@@ -16,6 +17,17 @@ from .models import CorporateDocument
 from .source_facts import extract_source_corporate_facts
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def resolve_document_mime(content_type: str | None, filename: str | None) -> str:
+    """Normalize browser upload MIME values without treating DOCX bytes as plain/binary text."""
+    mime = str(content_type or "").strip().lower()
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix == ".docx" and mime in {"", "application/octet-stream", "application/zip", DOCX_MIME}:
+        return DOCX_MIME
+    return mime
 
 
 def html_to_plain_text(markup: str) -> str:
@@ -57,12 +69,19 @@ def prepare_import_content(
 ) -> tuple[str, str, str, str, bool]:
     """Return HTML, visible text, fact-source text, extraction method, OCR flag."""
     service = importlib.import_module("document_studio.service")
-    extracted = service.extract_text_from_upload(data, mime, filename)
 
-    if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        content_html = extracted if extracted.lstrip().startswith("<") else _safe_text_html(title, extracted)
+    if mime == DOCX_MIME:
+        # Never fall back to decoding DOCX ZIP/XML bytes as latin-1. That legacy path
+        # is exactly what can produce scrambled-looking characters in the editor.
+        content_html = service._parse_docx_to_html(data)
+        if not content_html:
+            raise ValueError("The Word document is damaged or cannot be parsed safely.")
         content_text = html_to_plain_text(content_html)
+        if not content_text:
+            raise ValueError("The Word document does not contain readable document content.")
         return content_html, content_text, content_text, "docx_structure", False
+
+    extracted = service.extract_text_from_upload(data, mime, filename)
 
     if mime == "application/pdf":
         fact_source = extracted
@@ -89,7 +108,8 @@ async def import_document_hardened(
     owner: str = Depends(require_owner),
 ) -> CorporateDocument:
     document_router = importlib.import_module("document_studio.router")
-    mime = (file.content_type or "").lower()
+    original_name = file.filename or "document"
+    mime = resolve_document_mime(file.content_type, original_name)
     if mime not in document_router.ALLOWED_DOCUMENT_MIMES:
         raise HTTPException(400, "Unsupported document type")
 
@@ -98,11 +118,13 @@ async def import_document_hardened(
     if not data or len(data) > document_router.MAX_DOCUMENT_BYTES:
         raise HTTPException(400, "Document must be between 1 byte and 50 MB")
 
-    original_name = file.filename or "document"
     doc_title = title.strip() or original_name
-    content_html, content_text, fact_source, extraction_method, ocr_applied = prepare_import_content(
-        data, mime, original_name, doc_title
-    )
+    try:
+        content_html, content_text, fact_source, extraction_method, ocr_applied = prepare_import_content(
+            data, mime, original_name, doc_title
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     filename, _, size = save_bytes(data, mime, kind="reference")
     media = MediaAsset(
