@@ -10,6 +10,7 @@ from .safe_smart_fields import extract_fact_safe_smart_fields
 # Bootstrap them first so PDF export is safe on Windows, Linux and macOS.
 ensure_pdf_font_aliases()
 
+from .import_hardening import router as import_hardening_router  # noqa: E402
 from .provider_status import router as provider_status_router  # noqa: E402
 from .router import configure_document_studio_router, router  # noqa: E402
 
@@ -34,6 +35,17 @@ def _extract_text_from_upload(data: bytes, mime: str, filename: str = "document"
 _service_module.extract_text_from_upload = _extract_text_from_upload
 _router_module.extract_text_from_upload = _extract_text_from_upload
 
+# Replace only the legacy POST /api/documents/import route. Keeping one route for
+# the path avoids ambiguous matching/OpenAPI while leaving the rest of the router untouched.
+router.routes[:] = [
+    route
+    for route in router.routes
+    if not (
+        getattr(route, "path", None) == "/api/documents/import"
+        and "POST" in (getattr(route, "methods", set()) or set())
+    )
+]
+router.routes.extend(import_hardening_router.routes)
 router.include_router(provider_status_router)
 
 __all__ = ["configure_document_studio_router", "router"]
