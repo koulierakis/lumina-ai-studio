@@ -154,9 +154,10 @@ function EditorBridge({ html, onHtmlChange, editorApiRef, onEditorReady, disable
 
 const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtmlChange, disabled, className = '', onEditorReady, onSelectionContextChange }, ref) {
   const editorApiRef = useRef(null);
+  const initialEditable = useRef(!disabled);
   const initialConfig = useMemo(() => ({
     namespace: 'LuminaDocumentStudioEditor',
-    editable: !disabled,
+    editable: initialEditable.current,
     nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode, PageBreakNode],
     onError(error) {
       throw error;
@@ -169,7 +170,7 @@ const DocumentRichEditor = forwardRef(function DocumentRichEditor({ html, onHtml
       list: { ul: 'list-disc pl-6 my-3', ol: 'list-decimal pl-6 my-3', listitem: 'my-1' },
       link: 'text-blue-700 underline',
     },
-  }), [disabled]);
+  }), []);
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
