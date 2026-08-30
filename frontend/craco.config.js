@@ -82,17 +82,10 @@ let webpackConfig = {
   jest: {
     configure: (jestConfig) => ({
       ...jestConfig,
-      moduleNameMapper: {
-        ...(jestConfig.moduleNameMapper || {}),
-        // Jest 27 (react-scripts 5) does not reliably understand Lexical 0.45's
-        // conditional package exports. ReactProviderExtension is an irregular
-        // export whose CommonJS bundle is prefixed with "Lexical"; keep this
-        // specific rule before the generic Lexical* plugin mapping.
-        '^@lexical/react/ReactProviderExtension$':
-          '<rootDir>/node_modules/@lexical/react/dist/LexicalReactProviderExtension.js',
-        '^@lexical/react/(Lexical.*)$':
-          '<rootDir>/node_modules/@lexical/react/dist/$1.js',
-      },
+      // react-scripts 5 ships Jest 27, whose resolver predates the conditional
+      // exports used by Lexical 0.45. Delegate @lexical/* subpaths to Node's
+      // standards-compliant resolver without changing production webpack.
+      resolver: path.resolve(__dirname, 'jest.lexical-resolver.js'),
     }),
   },
   webpack: {
