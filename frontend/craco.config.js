@@ -2,9 +2,12 @@
 const path = require("path");
 require("dotenv").config();
 
-// Check if we're in development/preview mode (not production build)
-// Craco sets NODE_ENV=development for start, NODE_ENV=production for build
-const isDevServer = process.env.NODE_ENV !== "production";
+// Visual editing is a dev-server-only concern. NODE_ENV is not guaranteed to
+// be initialized before CRACO loads this file, so derive the mode from the
+// actual CRACO command instead of treating an undefined NODE_ENV as dev.
+const isDevServer = process.argv.some((arg) => /(^|[\\/])craco(?:\.js)?$/.test(arg))
+  ? process.argv.includes("start")
+  : process.argv.some((arg) => arg === "start");
 
 // Environment variable overrides
 const config = {
