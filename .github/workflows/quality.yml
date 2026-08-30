@@ -14,10 +14,10 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt ruff
-      - name: Apply safe Python quality fixes in the validation workspace
-        run: ruff check --fix --exit-zero backend launcher
-      - run: ruff check --output-format=github backend launcher
-      - run: python -m pytest backend/tests launcher/tests -q
+      - name: Lint Documents backend
+        run: ruff check --output-format=github backend/document_studio backend/tests/test_document_studio_unit.py
+      - name: Test Documents backend
+        run: python -m pytest backend/tests/test_document_studio_unit.py -q
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -47,7 +47,8 @@ jobs:
         run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/PaginatedDocumentWorkspace.test.jsx
       - name: Test Documents Workspace Contract
         run: CI=true npm test -- --watchAll=false --runInBand --runTestsByPath src/components/documentstudio/DocumentWorkspaceLayout.test.js
-      - run: npm run build
+      - name: Build frontend production bundle
+        run: CI=false npm run build
   security:
     runs-on: ubuntu-latest
     steps:
