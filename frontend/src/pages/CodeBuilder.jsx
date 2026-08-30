@@ -42,6 +42,27 @@ function phaseLabel(phase) {
   return String(phase || 'unknown').replaceAll('_', ' ');
 }
 
+function getProgressPercentage(phase) {
+  if (phase === 'completed') return 100;
+  if (TERMINAL_PHASES.has(phase)) return 0;
+  switch (phase) {
+    case 'queued':
+      return 5;
+    case 'analyzing':
+      return 15;
+    case 'awaiting_approval':
+      return 50;
+    case 'approved':
+      return 55;
+    case 'executing':
+      return 70;
+    case 'rolling_back':
+      return 60;
+    default:
+      return 0;
+  }
+}
+
 function StatusPill({ phase }) {
   const terminal = TERMINAL_PHASES.has(phase);
   const good = phase === 'completed' || phase === 'rolled_back';
@@ -50,6 +71,30 @@ function StatusPill({ phase }) {
       {terminal ? (good ? <CheckCircle2 className="h-3.5 w-3.5" /> : <CircleAlert className="h-3.5 w-3.5" />) : <Loader2 className="h-3.5 w-3.5" />}
       {phaseLabel(phase)}
     </span>
+  );
+}
+
+function ElapsedTime({ startedAt, createdAt }) {
+  const now = typeof window !== 'undefined' ? Date.now() / 1000 : 0;
+  const start = startedAt !== null && startedAt !== undefined ? startedAt : createdAt;
+  if (start == null) return '';
+  const diff = Math.max(0, now - start);
+  const minutes = Math.floor(diff / 60);
+  const seconds = Math.floor(diff % 60);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function ProgressInfo({ phase }) {
+  const percentage = getProgressPercentage(phase);
+  if (percentage === 0 && TERMINAL_PHASES.has(phase)) return null;
+  const barWidth = `${percentage}%`;
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-2 h-1.5 rounded-full bg-white/10 overflow-hidden shrink-0">
+        <span className={`h-full rounded-full bg-gold transition-colors ease-out duration-200 ${percentage > 0 ? '' : 'opacity-0'}`} style={{ width: barWidth }} />
+      </span>
+      {percentage > 0 && <span className="text-[10px] text-white/45">{percentage}%</span>}
+    </div>
   );
 }
 
@@ -295,7 +340,16 @@ export default function CodeBuilder() {
             <h2 className="mt-2 font-display text-4xl tracking-tight text-white sm:text-5xl">Code Builder</h2>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/50">Analyze, plan and review proposed repository changes before any production file is written. Approval is the transaction boundary.</p>
           </div>
-          {task && <div className="flex items-center gap-2"><StatusPill phase={task.phase} /><button onClick={() => refresh()} className="rounded-md border border-white/10 p-2 text-white/55 hover:text-white" title="Refresh"><RefreshCw className="h-4 w-4" /></button></div>}
+          {task && (
+    <div className="flex items-center gap-2">
+      <StatusPill phase={task.phase} />
+      <ProgressInfo phase={task.phase} />
+      <ElapsedTime startedAt={task.started_at_epoch} createdAt={task.created_at_epoch} />
+      <button data-testid="code-builder-refresh" onClick={refresh} title="Refresh task status" className="inline-flex items-center gap-2 rounded-border px-2 py-1 text-xs text-white/60 hover:text-white hover:bg-gold/10">
+        <RefreshCw className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  )}
         </header>
 
         <section className="mt-8 rounded-xl border border-white/[0.08] bg-white/[0.02] p-5">
