@@ -74,11 +74,20 @@ function StatusPill({ phase }) {
   );
 }
 
-function ElapsedTime({ startedAt, createdAt }) {
-  const now = typeof window !== 'undefined' ? Date.now() / 1000 : 0;
+function ElapsedTime({ startedAt, createdAt, finishedAt, phase }) {
+  const [now, setNow] = useState(() => (typeof window !== 'undefined' ? Date.now() / 1000 : 0));
   const start = startedAt !== null && startedAt !== undefined ? startedAt : createdAt;
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || TERMINAL_PHASES.has(phase)) return undefined;
+    setNow(Date.now() / 1000);
+    const timer = window.setInterval(() => setNow(Date.now() / 1000), 1000);
+    return () => window.clearInterval(timer);
+  }, [phase]);
+
   if (start == null) return '';
-  const diff = Math.max(0, now - start);
+  const end = finishedAt !== null && finishedAt !== undefined ? finishedAt : now;
+  const diff = Math.max(0, end - start);
   const minutes = Math.floor(diff / 60);
   const seconds = Math.floor(diff % 60);
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
@@ -196,14 +205,15 @@ export default function CodeBuilder() {
     }
   };
 
-  const refresh = useCallback(async (taskId = task?.task_id) => {
-    if (!taskId) return;
+  const refresh = useCallback(async (taskId) => {
+    const resolvedTaskId = typeof taskId === 'string' ? taskId : task?.task_id;
+    if (!resolvedTaskId) return;
     try {
-      const detail = await apiGet(`/code-builder/tasks/${taskId}`, { retry: false });
+      const detail = await apiGet(`/code-builder/tasks/${resolvedTaskId}`, { retry: false });
       setTask(detail);
       setError('');
     } catch (err) {
-      setError(err?.message || 'Could not refresh Code Builder task.');
+      setError(err?.responseData?.detail?.message || err?.message || 'Could not refresh Code Builder task.');
     }
   }, [task?.task_id]);
 
@@ -344,8 +354,8 @@ export default function CodeBuilder() {
     <div className="flex items-center gap-2">
       <StatusPill phase={task.phase} />
       <ProgressInfo phase={task.phase} />
-      <ElapsedTime startedAt={task.started_at_epoch} createdAt={task.created_at_epoch} />
-      <button data-testid="code-builder-refresh" onClick={refresh} title="Refresh task status" className="inline-flex items-center gap-2 rounded-border px-2 py-1 text-xs text-white/60 hover:text-white hover:bg-gold/10">
+      <ElapsedTime startedAt={task.started_at_epoch} createdAt={task.created_at_epoch} finishedAt={task.finished_at_epoch} phase={task.phase} />
+      <button data-testid="code-builder-refresh" onClick={() => refresh()} title="Refresh task status" className="inline-flex items-center gap-2 rounded-border px-2 py-1 text-xs text-white/60 hover:text-white hover:bg-gold/10">
         <RefreshCw className="h-3.5 w-3.5" />
       </button>
     </div>
