@@ -79,6 +79,19 @@ let webpackConfig = {
       },
     },
   },
+  jest: {
+    configure: (jestConfig) => ({
+      ...jestConfig,
+      moduleNameMapper: {
+        ...(jestConfig.moduleNameMapper || {}),
+        // Lexical 0.45 moved React entry points behind package exports under
+        // dist/. Jest 27 (bundled by react-scripts 5) does not understand
+        // those subpath exports reliably, while webpack does. Resolve the
+        // CommonJS wrappers explicitly for tests without changing runtime.
+        '^@lexical/react/(.*)$': '<rootDir>/node_modules/@lexical/react/dist/$1.js',
+      },
+    }),
+  },
   webpack: {
     alias: {
       '@': path.resolve(__dirname, 'src'),
@@ -86,15 +99,15 @@ let webpackConfig = {
     configure: (webpackConfig) => {
 
       // Add ignored patterns to reduce watched directories
-        webpackConfig.watchOptions = {
-          ...webpackConfig.watchOptions,
-          ignored: [
-            '**/node_modules/**',
-            '**/.git/**',
-            '**/build/**',
-            '**/dist/**',
-            '**/coverage/**',
-            '**/public/**',
+      webpackConfig.watchOptions = {
+        ...webpackConfig.watchOptions,
+        ignored: [
+          '**/node_modules/**',
+          '**/.git/**',
+          '**/build/**',
+          '**/dist/**',
+          '**/coverage/**',
+          '**/public/**',
         ],
       };
 
@@ -118,7 +131,7 @@ webpackConfig.devServer = (devServerConfig) => {
         middlewares = originalSetupMiddlewares(middlewares, devServer);
       }
 
-      // Setup health endpoints
+      // Setup health check endpoints
       setupHealthEndpoints(devServer, healthPluginInstance);
 
       return middlewares;
