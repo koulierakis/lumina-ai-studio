@@ -1,7 +1,8 @@
 """Lazy, bounded Ollama adapter owned by Document Studio.
 
-This module intentionally talks to Ollama directly instead of importing the
-Code Builder subsystem. Documents must remain independently runnable.
+Production uses Ollama's HTTP API directly. Optional service/service_factory
+arguments are retained only as a compatibility seam for existing unit tests and
+legacy callers; no Code Builder import is required.
 """
 
 from __future__ import annotations
@@ -9,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -18,6 +21,11 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_DOCUMENT_MODEL = "qwen2.5-coder:7b"
 AVAILABILITY_TIMEOUT_SECONDS = 10.0
 MAX_GENERATION_TIMEOUT_SECONDS = 180.0
+
+
+@dataclass(frozen=True, slots=True)
+class OllamaClientConfiguration:
+    base_url: str
 
 
 class DocumentGenerationResult(BaseModel):
@@ -36,11 +44,15 @@ class OllamaDocumentAdapter:
         self,
         *,
         client: httpx.AsyncClient | None = None,
+        service: Any | None = None,
+        service_factory: Callable[[OllamaClientConfiguration], Any] | None = None,
         ollama_url: str | None = None,
     ) -> None:
         self.ollama_url = (ollama_url or os.getenv("OLLAMA_URL", DEFAULT_OLLAMA_URL)).rstrip("/")
         self._client = client
         self._owns_client = client is None
+        self._service = service
+        self._service_factory = service_factory
 
     @property
     def document_model(self) -> str:
@@ -55,6 +67,11 @@ class OllamaDocumentAdapter:
         if self._client is None:
             self._client = httpx.AsyncClient(base_url=self.ollama_url)
         return self._client
+
+    def _get_service(self) -> Any | None:
+        if self._service is None and self._service_factory is not None:
+            self._service = self._service_factory(OllamaClientConfiguration(base_url=self.ollama_url))
+        return self._service
 
     @staticmethod
     def _bounded_timeout(timeout_seconds: float) -> float:
@@ -78,35 +95,56 @@ class OllamaDocumentAdapter:
     async def check_availability(self) -> dict[str, Any]:
         started = time.monotonic()
         try:
-            client = self._get_client()
-            version_response, tags_response = await asyncio.gather(
-                client.get("/api/version", timeout=AVAILABILITY_TIMEOUT_SECONDS),
-                client.get("/api/tags", timeout=AVAILABILITY_TIMEOUT_SECONDS),
-            )
-            version_response.raise_for_status()
-            tags_response.raise_for_status()
-            version_payload = version_response.json()
-            tags_payload = tags_response.json()
-            installed_models = [
-                str(item.get("name") or item.get("model") or "").strip()
-                for item in tags_payload.get("models", [])
-                if isinstance(item, dict) and (item.get("name") or item.get("model"))
-            ]
+            service = self._get_service()
+            if service is not None:
+                health = await asyncio.wait_for(
+                    service.check_connection(include_models=True),
+                    timeout=AVAILABILITY_TIMEOUT_SECONDS,
+                )
+                installed_models = [str(model.name) for model in health.installed_models]
+                version = health.version
+                base_url = health.base_url
+                response_time_ms = health.response_time_ms
+                service_error = health.error
+                available = bool(health.available)
+            else:
+                client = self._get_client()
+                version_response, tags_response = await asyncio.gather(
+                    client.get("/api/version", timeout=AVAILABILITY_TIMEOUT_SECONDS),
+                    client.get("/api/tags", timeout=AVAILABILITY_TIMEOUT_SECONDS),
+                )
+                version_response.raise_for_status()
+                tags_response.raise_for_status()
+                version_payload = version_response.json()
+                tags_payload = tags_response.json()
+                installed_models = [
+                    str(item.get("name") or item.get("model") or "").strip()
+                    for item in tags_payload.get("models", [])
+                    if isinstance(item, dict) and (item.get("name") or item.get("model"))
+                ]
+                version = version_payload.get("version")
+                base_url = self.ollama_url
+                response_time_ms = max(round((time.monotonic() - started) * 1000), 0)
+                service_error = None
+                available = True
+
             document_installed = self._model_matches(installed_models, self.document_model)
             structured_installed = self._model_matches(installed_models, self.structured_document_model)
             return {
-                "available": True,
-                "ollama_reachable": True,
-                "base_url": self.ollama_url,
-                "version": version_payload.get("version"),
+                "available": available,
+                "ollama_reachable": available,
+                "base_url": base_url,
+                "version": version,
                 "installed_models": installed_models,
                 "selected_document_model": self.document_model,
                 "selected_structured_document_model": self.structured_document_model,
                 "model_installed": document_installed,
                 "structured_model_installed": structured_installed,
-                "ready": document_installed and structured_installed,
-                "response_time_ms": max(round((time.monotonic() - started) * 1000), 0),
-                "error": None if document_installed and structured_installed else "Required Ollama model is not installed",
+                "ready": available and document_installed and structured_installed,
+                "response_time_ms": response_time_ms,
+                "error": service_error if service_error else (
+                    None if document_installed and structured_installed else "Required Ollama model is not installed"
+                ),
             }
         except (TimeoutError, httpx.TimeoutException):
             return self._unavailable_status("Ollama availability check timed out")
@@ -172,28 +210,44 @@ class OllamaDocumentAdapter:
     ) -> DocumentGenerationResult:
         started_at = time.monotonic()
         bounded_timeout = self._bounded_timeout(timeout_seconds)
-        payload: dict[str, Any] = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "options": options,
-        }
-        if system_prompt:
-            payload["system"] = system_prompt
-        if output_format:
-            payload["format"] = output_format
-
         try:
-            response = await self._get_client().post(
-                "/api/generate", json=payload, timeout=bounded_timeout
-            )
-            if response.status_code == 404:
-                return self._failure(started_at, model, f"Ollama model is not installed: {model}")
-            response.raise_for_status()
-            data = response.json()
-            content = data.get("response")
-            response_model = data.get("model") or model
-            if not isinstance(content, str) or not content.strip():
+            service = self._get_service()
+            if service is not None:
+                response = await asyncio.wait_for(
+                    service.generate(
+                        model=model,
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                        timeout_seconds=bounded_timeout,
+                        output_format=output_format,
+                        options=options,
+                    ),
+                    timeout=bounded_timeout,
+                )
+                content = getattr(response, "content", None)
+                response_model = getattr(response, "model", None)
+            else:
+                payload: dict[str, Any] = {
+                    "model": model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": options,
+                }
+                if system_prompt:
+                    payload["system"] = system_prompt
+                if output_format:
+                    payload["format"] = output_format
+                http_response = await self._get_client().post(
+                    "/api/generate", json=payload, timeout=bounded_timeout
+                )
+                if http_response.status_code == 404:
+                    return self._failure(started_at, model, f"Ollama model is not installed: {model}")
+                http_response.raise_for_status()
+                data = http_response.json()
+                content = data.get("response")
+                response_model = data.get("model") or model
+
+            if not isinstance(content, str) or not content.strip() or not response_model:
                 return self._failure(started_at, model, "Malformed Ollama response")
             return DocumentGenerationResult(
                 content=content,
@@ -201,7 +255,7 @@ class OllamaDocumentAdapter:
                 elapsed_seconds=max(time.monotonic() - started_at, 0.0),
                 success=True,
             )
-        except (TimeoutError, httpx.TimeoutException):
+        except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
             return self._failure(started_at, model, f"Generation timed out after {bounded_timeout:g}s")
         except httpx.ConnectError:
             return self._failure(started_at, model, "Ollama is unavailable")
@@ -221,8 +275,11 @@ class OllamaDocumentAdapter:
         )
 
     async def close(self) -> None:
+        if self._service is not None and hasattr(self._service, "close"):
+            await self._service.close()
         if self._client is not None and self._owns_client:
             await self._client.aclose()
+        self._service = None
         self._client = None
 
 
