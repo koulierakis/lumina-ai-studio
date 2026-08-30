@@ -105,3 +105,18 @@ def test_readiness_helpers_handle_failures(monkeypatch: pytest.MonkeyPatch):
     assert readiness.check_frontend("localhost", 3000)["ok"] is False
     ollama = readiness.check_ollama("127.0.0.1", 11434, "qwen2.5-coder:7b")
     assert ollama["online"] is False
+
+
+def test_frontend_readiness_falls_back_between_loopback_hosts(monkeypatch: pytest.MonkeyPatch):
+    calls: list[str] = []
+
+    def fake_http_ok(url: str, timeout: float = 3.0) -> bool:
+        calls.append(url)
+        return url == "http://localhost:3000/"
+
+    monkeypatch.setattr(readiness, "http_ok", fake_http_ok)
+    result = readiness.check_frontend("127.0.0.1", 3000)
+
+    assert result["ok"] is True
+    assert result["url"] == "http://localhost:3000/"
+    assert calls == ["http://127.0.0.1:3000/", "http://localhost:3000/"]

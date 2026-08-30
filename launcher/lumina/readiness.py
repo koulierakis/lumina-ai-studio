@@ -53,10 +53,27 @@ def check_backend(host: str, port: int, timeout: float = 3.0) -> dict[str, Any]:
         return {"ok": False, "url": url, "status_code": None, "error": str(exc), "payload": {}}
 
 
+def _frontend_probe_hosts(host: str) -> list[str]:
+    """Return safe loopback fallbacks for local frontend readiness checks."""
+    candidates = [host]
+    if host == "localhost":
+        candidates.append("127.0.0.1")
+    elif host == "127.0.0.1":
+        candidates.append("localhost")
+    elif host in {"0.0.0.0", "::", "[::]"}:
+        candidates.extend(["127.0.0.1", "localhost"])
+    return list(dict.fromkeys(candidates))
+
+
 def check_frontend(host: str, port: int, timeout: float = 3.0) -> dict[str, Any]:
-    url = f"http://{host}:{port}/"
-    ok = http_ok(url, timeout=timeout)
-    return {"ok": ok, "url": url}
+    attempted_urls: list[str] = []
+    for probe_host in _frontend_probe_hosts(host):
+        url = f"http://{probe_host}:{port}/"
+        attempted_urls.append(url)
+        if http_ok(url, timeout=timeout):
+            return {"ok": True, "url": url, "attempted_urls": attempted_urls}
+    primary_url = attempted_urls[0] if attempted_urls else f"http://{host}:{port}/"
+    return {"ok": False, "url": primary_url, "attempted_urls": attempted_urls}
 
 
 def check_ollama(host: str, port: int, model: str, timeout: float = 4.0) -> dict[str, Any]:
