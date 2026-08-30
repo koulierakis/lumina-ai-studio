@@ -156,8 +156,10 @@ def extract_source_corporate_facts(
 
 
 def _unicode_tokens(value: Any) -> str:
-    """Normalize multilingual fact text without discarding non-Latin alphabets."""
-    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    """Normalize multilingual fact text without losing letters; ignore accents for comparisons."""
+    normalized = unicodedata.normalize("NFKD", str(value or "")).casefold()
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    normalized = unicodedata.normalize("NFKC", normalized)
     chars = [character if character.isalnum() else " " for character in normalized]
     return " ".join("".join(chars).split())
 
