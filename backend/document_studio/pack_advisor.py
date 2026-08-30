@@ -187,15 +187,26 @@ def _banking_rules(enhanced: bool) -> tuple[RecommendationRule, ...]:
 
 def _objective_category(objective: str) -> tuple[str, bool]:
     normalized = " ".join(objective.casefold().split())
-    enhanced = bool(re.search(r"\b(?:enhanced|edd|comprehensive|complete)\b", normalized))
+    enhanced = bool(
+        re.search(
+            r"(?<!\w)(?:enhanced|edd|comprehensive|complete|ενισχυμέν(?:ο|η|ησ)|πλήρ(?:ες|η)|ολοκληρωμέν(?:ο|η))(?!\w)",
+            normalized,
+        )
+    )
     if re.search(
-        r"\b(?:bank account|banking|kyc|know your customer|due diligence|onboarding)\b",
+        r"(?<!\w)(?:bank account|banking|kyc|know your customer|due diligence|onboarding|τραπεζικ(?:ό|ος|ή)|τραπεζικό λογαριασμό|άνοιγμα λογαριασμού|δέουσα επιμέλεια)(?!\w)",
         normalized,
     ):
         return "banking", enhanced
-    if re.search(r"\b(?:board|shareholder|governance|corporate resolution)\b", normalized):
+    if re.search(
+        r"(?<!\w)(?:board|shareholder|governance|corporate resolution|διοικητικό συμβούλιο|μέτοχ(?:ος|οι|ων)|εταιρική διακυβέρνηση|εταιρική απόφαση)(?!\w)",
+        normalized,
+    ):
         return "corporate", False
-    if re.search(r"\b(?:consulting|agency|commission|confidential|nda|agreement)\b", normalized):
+    if re.search(
+        r"(?<!\w)(?:consulting|agency|commission|confidential|nda|agreement|συμβουλευτικ(?:ή|ές)|αντιπροσώπευση|προμήθεια|εμπιστευτικότητα|εχεμύθεια|συμφωνία|σύμβαση)(?!\w)",
+        normalized,
+    ):
         return "legal", False
     return "general", False
 
@@ -227,13 +238,13 @@ def _rules_for_objective(objective: str) -> tuple[str, tuple[RecommendationRule,
         normalized = objective.casefold()
         document_type, title = (
             ("nda", "Non-Disclosure Agreement")
-            if re.search(r"\b(?:confidential|nda|non[- ]disclosure)\b", normalized)
+            if re.search(r"(?<!\w)(?:confidential|nda|non[- ]disclosure|εμπιστευτικότητα|εχεμύθεια)(?!\w)", normalized)
             else ("consulting_agreement", "Consulting Agreement")
-            if "consult" in normalized
+            if re.search(r"consult|συμβουλευ", normalized)
             else ("agency_agreement", "Agency Agreement")
-            if "agency" in normalized
+            if re.search(r"agency|αντιπροσώπ", normalized)
             else ("commission_agreement", "Commission Agreement")
-            if "commission" in normalized
+            if re.search(r"commission|προμήθεια", normalized)
             else ("memorandum", "Business Memorandum")
         )
         return category, (
