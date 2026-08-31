@@ -322,10 +322,17 @@ code_builder_backup_service = BackupService(
 
 code_builder_ollama_service = OllamaService()
 
+# Planning model strategy: every planning request runs on the fast primary
+# model first; the stronger model is used only as a one-shot fallback when the
+# primary model cannot produce a valid, usable plan (see
+# PlanningService.create_normalized_change_plan).
+CODE_BUILDER_FALLBACK_MODEL = "qwen2.5-coder:7b"
+
 code_builder_planning_service = PlanningService(
     ollama_service=code_builder_ollama_service,
     configuration=PlanningConfiguration(
         model=str(runtime_config["preferred_ollama_model"]),
+        fallback_model=CODE_BUILDER_FALLBACK_MODEL,
         context_window=int(runtime_config["code_builder_num_ctx"]),
         maximum_output_tokens=int(runtime_config["code_builder_num_predict"]),
         input_token_safety_margin=0,

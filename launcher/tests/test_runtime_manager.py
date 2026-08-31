@@ -38,7 +38,7 @@ def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_validate_config_defaults():
     data = validate_config({})
     assert data["backend_port"] == 8000
-    assert data["preferred_ollama_model"] == "qwen2.5-coder:7b"
+    assert data["preferred_ollama_model"] == "qwen2.5-coder:1.5b"
 
 
 def test_invalid_config_falls_back(fake_repo: Path):

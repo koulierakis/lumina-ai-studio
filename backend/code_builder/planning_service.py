@@ -44,6 +44,7 @@ from . import models as code_builder_models
 from .ollama_service import (
     OllamaConfigurationError,
     OllamaModelNotFoundError,
+    OllamaRequestCancelledError,
     OllamaResponseValidationError,
     OllamaService,
     OllamaServiceError,
@@ -62,7 +63,10 @@ LOGGER = logging.getLogger(__name__)
 
 UTC = timezone.utc
 
-DEFAULT_PLANNING_MODEL: Final[str] = "qwen2.5-coder:7b"
+DEFAULT_PLANNING_MODEL: Final[str] = "qwen2.5-coder:1.5b"
+FALLBACK_PLANNING_MODEL: Final[str] = "qwen2.5-coder:7b"
+"""Stronger fallback model used only when the primary model cannot
+produce a valid, usable plan within the permitted repair attempts."""
 DEFAULT_MAX_CONTEXT_FILES: Final[int] = 80
 DEFAULT_MAX_CONTEXT_CHARACTERS: Final[int] = 180_000
 DEFAULT_MAX_FILE_SUMMARY_CHARACTERS: Final[int] = 4_000
@@ -321,6 +325,12 @@ class PlanningConfiguration:
     """Runtime configuration for change-plan generation."""
 
     model: str = DEFAULT_PLANNING_MODEL
+    fallback_model: str | None = None
+    """Optional stronger model used only after the primary model fails.
+
+    When ``None`` the module-level ``FALLBACK_PLANNING_MODEL`` is used.
+    Explicitly set to an empty string to disable fallback entirely.
+    """
     maximum_context_files: int = DEFAULT_MAX_CONTEXT_FILES
     maximum_context_characters: int = DEFAULT_MAX_CONTEXT_CHARACTERS
     maximum_file_summary_characters: int = (
@@ -2795,8 +2805,15 @@ class PlanningService:
         user_prompt: str,
         repair_instruction: str | None = None,
         timeout_seconds: float | None = None,
+        model_override: str | None = None,
     ) -> GeneratedChangePlan:
         """Request and validate a structured change plan from Ollama."""
+
+        effective_model = (
+            model_override
+            if model_override is not None
+            else self.configuration.model
+        )
 
         effective_prompt = user_prompt
 
@@ -2818,7 +2835,7 @@ class PlanningService:
             # The response is expanded into the canonical schema immediately
             # afterwards and still passes all repository/path validation.
             result = await self.ollama_service.generate_structured(
-                model=self.configuration.model,
+                model=effective_model,
                 prompt=effective_prompt,
                 system_prompt=system_prompt,
                 response_model=CompactGeneratedChangePlan,
@@ -2837,7 +2854,7 @@ class PlanningService:
         except OllamaModelNotFoundError as exc:
             raise PlanningGenerationError(
                 "The configured local Ollama planning model is not "
-                f"installed: {self.configuration.model}"
+                f"installed: {effective_model}"
             ) from exc
         except OllamaTimeoutError as exc:
             raise PlanningGenerationError(
@@ -2860,6 +2877,10 @@ class PlanningService:
             raise PlanningConfigurationError(
                 f"Invalid Ollama planning configuration: {exc}"
             ) from exc
+        except OllamaRequestCancelledError:
+            # Cancellation must never be wrapped into a retryable planning
+            # failure and must never trigger the fallback model.
+            raise
         except OllamaServiceError as exc:
             raise PlanningGenerationError(
                 f"Ollama could not generate the change plan: {exc}"
@@ -3361,6 +3382,7 @@ class PlanningService:
         repaired: bool,
         task_id: str | None = None,
         timeout_seconds: float | None = None,
+        model_override: str | None = None,
     ) -> NormalizedChangePlan:
         """Validate and normalize a generated plan against the repository."""
 
@@ -3626,7 +3648,11 @@ class PlanningService:
             repository_root=str(repository_root),
             repository_name=repository_name,
             analysis_id=analysis_id,
-            model=self.configuration.model,
+            model=(
+                model_override
+                if model_override is not None
+                else self.configuration.model
+            ),
             risk_level=calculated_risk,
             breaking_changes=breaking_changes,
             requires_user_action=requires_user_action,
@@ -3723,6 +3749,16 @@ class PlanningService:
         repair_instruction: str | None = None
         final_error: Exception | None = None
 
+        configured_fallback = self.configuration.fallback_model
+        if configured_fallback is None:
+            configured_fallback = FALLBACK_PLANNING_MODEL
+        fallback_model = (
+            configured_fallback.strip()
+            if isinstance(configured_fallback, str)
+            else ""
+        )
+        fallback_eligible = bool(fallback_model)
+        fallback_used = False
         maximum_attempts = (
             self.configuration.maximum_repair_attempts + 1
         )
@@ -3749,28 +3785,85 @@ class PlanningService:
                     repaired=repaired,
                 )
 
-            except (
-                PlanningValidationError,
-                PlanningPathError,
-            ) as exc:
+            except PlanningServiceError as exc:
+                if not isinstance(
+                    exc,
+                    (
+                        PlanningValidationError,
+                        PlanningPathError,
+                        PlanningGenerationError,
+                    ),
+                ):
+                    raise
+
                 final_error = exc
 
-                if attempt_index + 1 >= maximum_attempts:
+                if attempt_index + 1 < maximum_attempts:
+                    LOGGER.warning(
+                        "Generated change plan failed validation; requesting "
+                        "repair attempt %s of %s: %s",
+                        attempt_index + 1,
+                        self.configuration.maximum_repair_attempts,
+                        exc,
+                    )
+
+                    repair_instruction = (
+                        self._build_repair_instruction(
+                            error=exc
+                        )
+                    )
+                    continue
+
+                # The primary model has now consumed its full configured
+                # repair budget: one initial attempt plus every configured
+                # repair attempt. Only at this point may the fallback model
+                # be invoked, and it may be invoked at most once.
+                if not fallback_eligible:
                     break
 
                 LOGGER.warning(
-                    "Generated change plan failed validation; requesting "
-                    "repair attempt %s of %s: %s",
-                    attempt_index + 1,
-                    self.configuration.maximum_repair_attempts,
+                    "Planning with %s failed after %s attempt(s); retrying "
+                    "once with fallback model %s: %s",
+                    self.configuration.model,
+                    maximum_attempts,
+                    fallback_model,
                     exc,
                 )
 
-                repair_instruction = (
-                    self._build_repair_instruction(
-                        error=exc
+                try:
+                    generated_plan = await self._generate_raw_plan(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        repair_instruction=repair_instruction,
+                        timeout_seconds=timeout_seconds,
+                        model_override=fallback_model,
                     )
+                except PlanningServiceError as fallback_exc:
+                    # Exactly one fallback attempt is permitted. A failure
+                    # here ends planning; the loop must not continue.
+                    fallback_used = True
+                    if final_error is None:
+                        final_error = fallback_exc
+                    break
+
+                duration = time.monotonic() - started_at
+                fallback_used = True
+
+                return self.normalize_generated_plan(
+                    generated_plan=generated_plan,
+                    user_request=context.request,
+                    analysis=analysis,
+                    task_id=task_id,
+                    generation_duration_seconds=duration,
+                    repaired=True,
+                    model_override=fallback_model,
                 )
+
+        if fallback_used:
+            raise PlanningValidationError(
+                "The fallback planning model also failed to produce a "
+                "valid repository change plan."
+            ) from final_error
 
         if final_error is not None:
             raise PlanningValidationError(
@@ -4093,10 +4186,19 @@ class PlanningService:
             )
         )
 
+        # ChangePlan.task_id is a required UUID. Ad-hoc planning calls may
+        # omit a task id, so generate one here instead of failing model
+        # validation. Explicitly supplied task ids pass through unchanged.
+        plan_task_id = (
+            normalized_plan.task_id
+            if normalized_plan.task_id is not None
+            else str(uuid4())
+        )
+
         payload: dict[str, Any] = {
             "id": str(normalized_plan.plan_id),
             "plan_id": str(normalized_plan.plan_id),
-            "task_id": normalized_plan.task_id,
+            "task_id": plan_task_id,
             "title": normalized_plan.title,
             "name": normalized_plan.title,
             "summary": normalized_plan.summary,
@@ -4224,6 +4326,7 @@ def create_planning_service(
     *,
     ollama_service: OllamaService,
     model: str = DEFAULT_PLANNING_MODEL,
+    fallback_model: str | None = None,
     maximum_context_files: int = (
         DEFAULT_MAX_CONTEXT_FILES
     ),
@@ -4265,6 +4368,7 @@ def create_planning_service(
 
     configuration = PlanningConfiguration(
         model=model,
+        fallback_model=fallback_model,
         maximum_context_files=maximum_context_files,
         maximum_context_characters=(
             maximum_context_characters
@@ -4394,6 +4498,7 @@ __all__ = [
     "DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS",
     "DEFAULT_MAX_USER_REQUEST_CHARACTERS",
     "DEFAULT_PLANNING_MODEL",
+    "FALLBACK_PLANNING_MODEL",
     "DEFAULT_TEMPERATURE",
     "DEFAULT_TIMEOUT_SECONDS",
     "DEFAULT_TOP_P",

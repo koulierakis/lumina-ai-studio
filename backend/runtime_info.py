@@ -289,7 +289,7 @@ def build_installation_center(active_jobs: int = 0) -> dict[str, Any]:
 
 def check_ollama(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = cfg or load_runtime_config()
-    model = str(cfg.get("preferred_ollama_model") or "qwen2.5-coder:7b")
+    model = str(cfg.get("preferred_ollama_model") or "qwen2.5-coder:1.5b")
     host = cfg.get("ollama_host", "127.0.0.1")
     port = int(cfg.get("ollama_port", 11434))
     url = f"http://{host}:{port}/api/tags"

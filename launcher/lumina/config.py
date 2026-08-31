@@ -15,7 +15,7 @@ logger = logging.getLogger("lumina.launcher.config")
 
 DEFAULTS: dict[str, Any] = {
     "dashboard_auto_open": True,
-    "preferred_ollama_model": "qwen2.5-coder:7b",
+    "preferred_ollama_model": "qwen2.5-coder:1.5b",
     "backend_host": "127.0.0.1",
     "backend_port": 8000,
     "frontend_host": "localhost",
