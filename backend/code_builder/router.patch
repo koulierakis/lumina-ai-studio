@@ -1,0 +1,105 @@
+--- backend/code_builder/router.py
++++ backend/code_builder/router.py
+@@ -16,6 +16,7 @@
+ from contextlib import asynccontextmanager
+ from dataclasses import dataclass, field
+ from pathlib import Path
++import json
+ from typing import Annotated, Any, Final, Protocol, cast
+
+ from fastapi import (
+@@ -467,6 +468,7 @@
+         repr=False,
+     )
+
++    _save_callback: Callable[[], None] | None = field(default=None, repr=False)
++
+     def touch(self) -> None:
+         self.updated_at_epoch = time.time()
++        if self._save_callback:
++            self._save_callback()
+
+
+ class TaskStore:
+@@ -489,6 +491,9 @@
+         self._tasks: dict[str, StoredTask] = {}
+         self._idempotency_keys: dict[str, str] = {}
+         self._lock = threading.RLock()
++
++        self._db_path = Path(__file__).resolve().parents[2] / ".lumina-runtime" / "database" / "code_builder_tasks.json"
++        self._load_from_disk()
+
+     def create(
+@@ -528,6 +533,8 @@
+             self._tasks[
+                 stored_task.request.task_id
+             ] = stored_task
++            stored_task._save_callback = self._save_to_disk
++            self._save_to_disk()
+
+             return stored_task
+
+@@ -602,6 +609,7 @@
+                 del task.events[:overflow]
+
+             task.touch()
++            self._save_to_disk()
+
+     def remove(self, task_id: str) -> bool:
+         with self._lock:
+@@ -626,6 +634,8 @@
+                     key,
+                     None,
+                 )
++
++            self._save_to_disk()
+
+             return True
+
+@@ -653,6 +663,44 @@
+         for task_id in expired_task_ids:
+             self.remove(task_id)
+
++    def _save_to_disk(self) -> None:
++        try:
++            self._db_path.parent.mkdir(parents=True, exist_ok=True)
++
++            serializable_tasks = []
++            with self._lock:
++                for task in self._tasks.values():
++                    data = _serialize_value(task)
++                    if isinstance(data, dict):
++                        data.pop("execution_lock", None)
++                        data.pop("_save_callback", None)
++                        data["api_request"] = _serialize_value(task.api_request)
++                        data["request"] = _serialize_value(task.request)
++                    serializable_tasks.append(data)
++
++                with open(self._db_path, "w", encoding="utf-8") as f:
++                    json.dump(serializable_tasks, f, indent=2)
++        except Exception as exc:
++            logger.error("Failed to save TaskStore to disk: %s", exc)
++
++    def _load_from_disk(self) -> None:
++        try:
++            if not self._db_path.exists():
++                return
++            with open(self._db_path, "r", encoding="utf-8") as f:
++                data = json.load(f)
++
++            with self._lock:
++                for task_dict in data:
++                    # Note: Full reconstruction of nested models requires more parsing.
++                    # But this suffices for Phase 2: restart survivability.
++                    req = TaskRequest(**task_dict["request"])
++                    api_req = TaskCreateRequest(**task_dict["api_request"])
++                    task_dict["request"] = req
++                    task_dict["api_request"] = api_req
++                    task = StoredTask(**task_dict)
++                    task._save_callback = self._save_to_disk
++                    self._tasks[task.request.task_id] = task
++        except Exception as exc:
++            logger.error("Failed to load TaskStore from disk: %s", exc)
++
+
+ class CodeBuilderRouterDependencies:

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
 from code_builder.models import (
-    CodeSymbol,
     CodebaseAnalysis,
+    CodeSymbol,
     FileMetadata,
     FileRole,
     FileType,
@@ -84,8 +84,8 @@ def _analysis(extra_files: int = 0) -> CodebaseAnalysis:
         analysis_id=uuid4(),
         repository_root=str(Path.cwd()),
         repository_name="LUMINA",
-        started_at=datetime.now(timezone.utc),
-        completed_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
         statistics=RepositoryStatistics(
             total_files=len(files),
             indexed_files=len(files),
