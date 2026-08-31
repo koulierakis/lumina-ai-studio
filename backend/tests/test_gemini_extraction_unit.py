@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 from PIL import Image
-
 from providers.gemini_provider import _extract_image
 
 

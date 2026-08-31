@@ -1,7 +1,6 @@
 import asyncio
 
 import pytest
-
 from providers.base import (
     ErrorKind,
     GeneratedImage,

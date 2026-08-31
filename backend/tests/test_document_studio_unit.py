@@ -8,8 +8,6 @@ import zipfile
 from io import BytesIO
 
 import pytest
-from fastapi import HTTPException
-
 from document_studio.models import (
     CompanyProfile,
     CorporateDocument,
@@ -17,6 +15,7 @@ from document_studio.models import (
     EnterpriseDocumentTemplate,
 )
 from document_studio.service import (
+    _PDF_FONT_NAME,
     CHART_TYPES,
     CLAUSE_LIBRARY,
     COMPONENT_LIBRARY,
@@ -25,6 +24,8 @@ from document_studio.service import (
     EXPORT_FORMATS,
     SMART_TABLE_TYPES,
     TEMPLATES,
+    _export_blocks,
+    _register_pdf_fonts,
     analyze_document,
     apply_design_system,
     apply_document_operation,
@@ -47,10 +48,9 @@ from document_studio.service import (
     render_text_export,
     validate_merge_template,
 )
+from fastapi import HTTPException
 from persistence import SQLitePersistenceProvider
 from reportlab.pdfbase import pdfmetrics
-
-from document_studio.service import _PDF_FONT_NAME, _export_blocks, _register_pdf_fonts
 
 document_router = importlib.import_module("document_studio.router")
 
@@ -1788,11 +1788,11 @@ def test_pdf_export_continues_when_image_cannot_be_loaded():
     """Test 5: Missing image does not abort export."""
     profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
     document = _make_image_document(
-        f'<p>Before broken image</p>'
-        f'<figure style="text-align:center">'
-        f'<img src="data:image/png;base64,INVALID_BASE64_DATA" alt="Broken" style="width:45%" />'
-        f'</figure>'
-        f'<p>After broken image</p>'
+        '<p>Before broken image</p>'
+        '<figure style="text-align:center">'
+        '<img src="data:image/png;base64,INVALID_BASE64_DATA" alt="Broken" style="width:45%" />'
+        '</figure>'
+        '<p>After broken image</p>'
     )
 
     pdf = render_pdf_bytes(document, profile)
@@ -1883,11 +1883,11 @@ def test_docx_export_continues_when_image_cannot_be_loaded():
     """Test: Missing image does not abort DOCX export."""
     profile = CompanyProfile(owner_email="owner@example.com", company_name="Acme Global LLP")
     document = _make_image_document(
-        f'<p>Before broken image</p>'
-        f'<figure style="text-align:center">'
-        f'<img src="data:image/png;base64,INVALID" alt="Broken" style="width:45%" />'
-        f'</figure>'
-        f'<p>After broken image</p>'
+        '<p>Before broken image</p>'
+        '<figure style="text-align:center">'
+        '<img src="data:image/png;base64,INVALID" alt="Broken" style="width:45%" />'
+        '</figure>'
+        '<p>After broken image</p>'
     )
 
     docx = render_docx_bytes(document, profile)
@@ -2022,11 +2022,11 @@ def _build_docx(
 
     # Build root rels
     root_rels = (
-        f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        f'<Relationship Id="rId1" '
-        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
-        f'Target="word/document.xml"/></Relationships>'
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/></Relationships>'
     )
 
     # Assemble zip
@@ -2221,28 +2221,28 @@ def test_docx_import_preserves_text_table_and_image_order():
         f'<w:body>{body_xml}</w:body></w:document>'
     )
     rels_xml = (
-        f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        f'<Relationship Id="rIdImg1" '
-        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
-        f'Target="media/image1.png"/></Relationships>'
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rIdImg1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+        'Target="media/image1.png"/></Relationships>'
     )
     ct_xml = (
-        f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-        f'<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-        f'<Default Extension="xml" ContentType="application/xml"/>'
-        f'<Default Extension="png" ContentType="image/png"/>'
-        f'<Override PartName="/word/document.xml" '
-        f'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
-        f'</Types>'
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Default Extension="png" ContentType="image/png"/>'
+        '<Override PartName="/word/document.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        '</Types>'
     )
     root_rels = (
-        f'<?xml version="1.0" encoding="UTF-8"?>'
-        f'<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-        f'<Relationship Id="rId1" '
-        f'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
-        f'Target="word/document.xml"/></Relationships>'
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/></Relationships>'
     )
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
