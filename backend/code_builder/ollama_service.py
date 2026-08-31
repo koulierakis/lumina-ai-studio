@@ -31,6 +31,7 @@ import logging
 import math
 import random
 import re
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -1066,9 +1067,14 @@ def _validate_messages(
 class OllamaService:
     """Asynchronous local Ollama API service.
 
-    One service instance owns one reusable ``httpx.AsyncClient``. It should
-    be closed during FastAPI application shutdown or used as an async context
-    manager.
+    ``httpx.AsyncClient`` binds its connection pool to the event loop that
+    first uses it. Code Builder planning runs on a dedicated thread with a
+    fresh event loop per request, so a single eagerly-created client would be
+    reused on a closed loop and fail with "Event loop is closed". This service
+    therefore creates its HTTP client lazily, one per running event loop, and
+    closes them in :meth:`close`. A caller may still inject its own client,
+    which is then reused for every loop. Close the service during FastAPI
+    application shutdown or use it as an async context manager.
     """
 
     def __init__(
@@ -1085,31 +1091,55 @@ class OllamaService:
             else OllamaClientConfiguration()
         )
 
-        self._owns_client = client is None
+        self._injected_client = client
+        self._loop_clients: dict[int, httpx.AsyncClient] = {}
+        self._clients_lock = threading.Lock()
         self._closed = False
 
-        if client is None:
-            self._client = httpx.AsyncClient(
-                base_url=self.configuration.base_url,
-                timeout=self.configuration.timeouts.to_httpx_timeout(),
-                verify=self.configuration.verify_tls,
-                follow_redirects=(
-                    self.configuration.follow_redirects
-                ),
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "User-Agent": self.configuration.user_agent,
-                },
-                limits=httpx.Limits(
-                    max_connections=20,
-                    max_keepalive_connections=10,
-                    keepalive_expiry=30.0,
-                ),
-                trust_env=False,
-            )
-        else:
-            self._client = client
+    @property
+    def loop_client_count(self) -> int:
+        """Return how many loop-bound HTTP clients are currently held."""
+
+        return len(self._loop_clients)
+
+    def _client_for_current_loop(self) -> httpx.AsyncClient:
+        """Return the HTTP client bound to the current running loop.
+
+        A client is created on first use for the running event loop and
+        reused for every subsequent request on that same loop.
+        """
+
+        if self._injected_client is not None:
+            return self._injected_client
+
+        loop_key = id(asyncio.get_running_loop())
+
+        with self._clients_lock:
+            client = self._loop_clients.get(loop_key)
+
+            if client is None:
+                client = httpx.AsyncClient(
+                    base_url=self.configuration.base_url,
+                    timeout=self.configuration.timeouts.to_httpx_timeout(),
+                    verify=self.configuration.verify_tls,
+                    follow_redirects=(
+                        self.configuration.follow_redirects
+                    ),
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "User-Agent": self.configuration.user_agent,
+                    },
+                    limits=httpx.Limits(
+                        max_connections=20,
+                        max_keepalive_connections=10,
+                        keepalive_expiry=30.0,
+                    ),
+                    trust_env=False,
+                )
+                self._loop_clients[loop_key] = client
+
+        return client
 
     async def __aenter__(self) -> "OllamaService":
         """Enter the async context manager."""
@@ -1148,15 +1178,32 @@ class OllamaService:
             )
 
     async def close(self) -> None:
-        """Close the owned asynchronous HTTP client."""
+        """Close the HTTP clients owned by this service."""
 
         if self._closed:
             return
 
         self._closed = True
 
-        if self._owns_client:
-            await self._client.aclose()
+        if self._injected_client is not None:
+            await self._injected_client.aclose()
+            return
+
+        with self._clients_lock:
+            clients = list(self._loop_clients.values())
+            self._loop_clients.clear()
+
+        for client in clients:
+            try:
+                await client.aclose()
+            except Exception:
+                # A client may be bound to an event loop that has already
+                # closed (for example a finished planning worker thread).
+                # Shutdown must never fail because of such a client.
+                LOGGER.debug(
+                    "Skipped closing an Ollama HTTP client.",
+                    exc_info=True,
+                )
 
     async def _sleep_before_retry(
         self,
@@ -1316,7 +1363,7 @@ class OllamaService:
 
         for attempt in range(maximum_attempts):
             try:
-                response = await self._client.request(
+                response = await self._client_for_current_loop().request(
                     method=method,
                     url=endpoint.value,
                     json=(
