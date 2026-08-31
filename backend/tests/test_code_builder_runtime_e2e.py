@@ -188,3 +188,45 @@ def test_real_router_full_loop_reconnect_cancel_and_rollback(tmp_path: Path) -> 
             failed = client.get(f"/api/code-builder/tasks/{created}").json()
         assert failed["phase"] == "rolled_back"
         assert not (tmp_path / broken).exists()
+        assert failed["phase"] == "rolled_back"
+        assert not (tmp_path / broken).exists()
+
+
+def test_real_router_timeout_produces_terminal_timed_out_state(tmp_path: Path) -> None:
+    path = "timeout_created.py"
+    store = PersistentTaskStore(path=tmp_path / "timeout.db")
+    app, _, _ = _runtime_app(tmp_path, store, path, delay=1.0)
+
+    with TestClient(app) as client:
+        payload = {
+            "instruction": "Timeout runtime verification task.",
+            "target_paths": [path],
+            "require_approval": True,
+            "auto_start_after_approval": True,
+            "task_timeout_seconds": 0.5,
+            "build_policy": "disabled",
+            "backup_policy": "required",
+            "metadata": {"patch_operations": [{"operation": "create", "path": path, "content": "TIMEOUT_OK = True\n"}]},
+        }
+        created = client.post("/api/code-builder/tasks", json=payload, headers={"Idempotency-Key": "timeout-loop"})
+        assert created.status_code == 202
+        task_id = created.json()["task"]["task_id"]
+
+        detail = client.get(f"/api/code-builder/tasks/{task_id}").json()
+        for _ in range(80):
+            if detail["phase"] in {"timed_out", "completed", "failed", "rolled_back", "rollback_failed"}:
+                break
+            time.sleep(0.05)
+            detail = client.get(f"/api/code-builder/tasks/{task_id}").json()
+
+        assert detail["phase"] == "timed_out"
+        assert detail["result"] is not None
+        assert detail["result"]["status"] == "timed_out"
+        timeout_message = str(detail["result"].get("error_message", "")).lower()
+        assert "timed out" in timeout_message or "timeout" in timeout_message
+        assert not (tmp_path / path).exists()
+
+    restored = PersistentTaskStore(path=tmp_path / "timeout.db").get(task_id)
+    assert restored.phase is CodeBuilderTaskPhase.TIMED_OUT
+    assert restored.finished_at_epoch is not None
+
