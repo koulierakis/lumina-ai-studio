@@ -41,12 +41,26 @@ _PATH_KEYS: Final[frozenset[str]] = frozenset(
         "file",
         "file_path",
         "filepath",
+        "relative_path",
+        "previous_path",
         "target_path",
         "source_path",
         "destination_path",
         "new_path",
     }
 )
+
+# Small local models often emit synonymous operation names. Mapping them to
+# the canonical operation keeps identical semantics without expanding what the
+# patch engine executes: every mapped operation is still validated exactly like
+# its canonical form (allow-listed path, existence rules, dry-run).
+_OPERATION_ALIASES: Final[dict[str, str]] = {
+    "add": "create",
+    "add_file": "create",
+    "new": "create",
+    "new_file": "create",
+    "create_file": "create",
+}
 
 
 class AIPatchGenerationError(RuntimeError):
@@ -59,7 +73,10 @@ def _dump(value: Any) -> Any:
         try:
             return model_dump(mode="json")
         except TypeError:
-            return model_dump()
+            try:
+                return model_dump(exclude_none=True)
+            except TypeError:
+                return model_dump()
     if isinstance(value, Mapping):
         return {str(key): _dump(item) for key, item in value.items()}
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
@@ -80,10 +97,51 @@ def _normalize_relative_path(value: Any) -> str | None:
         return None
     return path.as_posix()
 
+def _coerce_repository_relative_path(raw: Any, root: Path) -> str | None:
+    """Normalize a model-provided path without widening the approved scope.
+
+    Small local models sometimes echo the repository root from the analysis
+    context and emit an absolute path even though the approved plan carries
+    repository-relative paths. An absolute path is accepted only when it
+    resolves inside the repository root, and the result must still pass the
+    approved-paths allowlist afterwards. Everything else stays refused.
+    """
+
+    normalized = _normalize_relative_path(raw)
+    if normalized is not None:
+        return normalized
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text or "\x00" in text:
+        return None
+    if text.startswith("/"):
+        # POSIX-style root-relative reference; Windows paths with a drive
+        # are handled by the absolute-path branch below.
+        return _normalize_relative_path(text.lstrip("/"))
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        return None
+    try:
+        resolved = candidate.resolve(strict=False)
+        relative = resolved.relative_to(root.resolve()).as_posix()
+    except (OSError, ValueError):
+        return None
+    return _normalize_relative_path(relative)
+
 
 def _collect_plan_paths(plan: Any) -> tuple[str, ...]:
     collected: list[str] = []
     seen: set[str] = set()
+
+    # Track list-valued boundary keys so nested mappings inside "files" and
+    # "steps" are walked with their item key. The planning service's models.py
+    # file changes carry their location under "relative_path" while plan steps
+    # use "file_paths"; without the boundary the step lists would surface bare
+    # step titles as fake paths and real file locations would be missed.
+    _FILE_LIST_KEYS: Final[frozenset[str]] = frozenset(
+        {"files", "file_paths", "filechanges", "changes", "steps"}
+    )
 
     def visit(value: Any, key: str | None = None) -> None:
         if isinstance(value, Mapping):
@@ -97,14 +155,7 @@ def _collect_plan_paths(plan: Any) -> tuple[str, ...]:
                             add(item)
                     else:
                         add(child_value)
-                elif normalized_key in {
-                    "paths",
-                    "files",
-                    "target_paths",
-                    "affected_files",
-                    "files_to_change",
-                    "changed_files",
-                }:
+                elif normalized_key in _FILE_LIST_KEYS:
                     if isinstance(child_value, Sequence) and not isinstance(
                         child_value, (str, bytes, bytearray)
                     ):
@@ -324,7 +375,8 @@ def _to_patch_request(
         if not isinstance(raw, Mapping):
             raise AIPatchGenerationError("AI returned a malformed patch operation.")
         operation = str(raw.get("operation") or "").strip()
-        path = _normalize_relative_path(raw.get("path"))
+        operation = _OPERATION_ALIASES.get(operation, operation)
+        path = _coerce_repository_relative_path(raw.get("path"), root)
         if operation not in ALLOWED_OPERATIONS or path is None:
             raise AIPatchGenerationError("AI returned an unsupported patch operation or path.")
         if path not in allowed_paths:
@@ -490,23 +542,33 @@ def generate_patch(
         timeout_seconds=timeout_seconds,
         cancellation_token=cancellation_token,
     )
-    patch = _to_patch_request(
-        first,
-        allowed_paths=allowed_paths,
-        root=root,
-        hashes=hashes,
-        allow_file_creation=creation_allowed,
-    )
-    validation = self.apply_patch(patch, dry_run=True)
-    if validation.successful:
-        return patch
 
-    # One bounded repair attempt. The model receives the deterministic dry-run
-    # error but still cannot write or expand its approved path scope.
+    validation_error: str | None = None
+    patch: PatchRequestPayload | None = None
+    try:
+        patch = _to_patch_request(
+            first,
+            allowed_paths=allowed_paths,
+            root=root,
+            hashes=hashes,
+            allow_file_creation=creation_allowed,
+        )
+        validation = self.apply_patch(patch, dry_run=True)
+        if validation.successful:
+            return patch
+        validation_error = validation.error or "Unknown validation failure"
+    except AIPatchGenerationError as exc:
+        # A structurally invalid first response consumes the same single
+        # bounded repair attempt as a dry-run validation failure.
+        validation_error = str(exc)
+
+    # One bounded repair attempt. The model receives the deterministic
+    # rejection reason but still cannot write or expand its approved path
+    # scope.
     repair_prompt = (
         prompt
         + "\n\nYOUR PREVIOUS PATCH FAILED THE DETERMINISTIC DRY-RUN VALIDATOR.\n"
-        + f"VALIDATION ERROR:\n{validation.error or 'Unknown validation failure'}\n"
+        + f"VALIDATION ERROR:\n{validation_error}\n"
         + "Return one corrected JSON patch. Do not expand the approved paths."
     )
     repaired = _request_structured_patch(
