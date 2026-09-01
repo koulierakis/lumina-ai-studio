@@ -34,6 +34,13 @@ def test_registry_reports_openhands_availability():
     assert options[1].experimental is True
 
 
+def test_registry_public_status_is_ui_ready():
+    payload = registry(True).public_status()
+    assert payload["default"] == "native"
+    assert payload["engines"][0] == {"name": "native", "available": True, "experimental": False}
+    assert payload["engines"][1] == {"name": "openhands", "available": True, "experimental": True}
+
+
 def test_registry_rejects_unavailable_openhands():
     with pytest.raises(RuntimeError):
         registry(False).validate_selection("openhands")
