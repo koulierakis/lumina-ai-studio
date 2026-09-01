@@ -13,10 +13,11 @@ Current experimental path:
 9. `CodingEngineRegistry` keeps the current native engine available while advertising OpenHands only when it is actually installed.
 10. The registry produces a UI-ready status payload and defaults missing engine selections to Native, protecting existing Code Builder behavior during migration.
 11. OpenHands execution is routed through one controlled registry entry point. Native execution deliberately remains owned by the existing Code Builder task service and is not replaced.
+12. OpenHands results now include a review-ready summary of changed files and diffs for the existing LUMINA approval UI.
 
 ## Next integration boundary
 
-Wire this controlled entry point into the existing Code Builder API/task lifecycle, then expose the selection in the existing UI. Preserve approval, backup, persistence, apply, rollback, and current native behavior.
+Wire this controlled entry point into the existing Code Builder API/task lifecycle, then expose the selection and returned change summary in the existing UI. Preserve approval, backup, persistence, apply, rollback, and current native behavior.
 
 ## Validation status
 
