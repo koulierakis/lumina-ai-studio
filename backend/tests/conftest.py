@@ -11,6 +11,7 @@ import pytest
 
 
 _SERVER_PROCESS: subprocess.Popen | None = None
+_SKIP_SERVER_ENV = "LUMINA_SKIP_TEST_SERVER"
 
 os.environ.setdefault("PYTHONPATH", str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("REACT_APP_BACKEND_URL", "http://127.0.0.1:8000")
@@ -25,6 +26,10 @@ os.environ.setdefault("MONGO_URL", "mongomock://localhost")
 os.environ.setdefault("DB_NAME", "lumina_test")
 
 
+def _skip_test_server() -> bool:
+    return os.getenv(_SKIP_SERVER_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _port_open(host: str = "127.0.0.1", port: int = 8000) -> bool:
     try:
         with socket.create_connection((host, port), timeout=0.25):
@@ -35,6 +40,8 @@ def _port_open(host: str = "127.0.0.1", port: int = 8000) -> bool:
 
 def pytest_sessionstart(session: pytest.Session) -> None:
     global _SERVER_PROCESS
+    if _skip_test_server():
+        return
     if _port_open():
         return
     backend_dir = Path(__file__).resolve().parents[1]
@@ -86,6 +93,8 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     global _SERVER_PROCESS
+    if _skip_test_server():
+        return
     if _SERVER_PROCESS and _SERVER_PROCESS.poll() is None:
         _SERVER_PROCESS.terminate()
         try:
