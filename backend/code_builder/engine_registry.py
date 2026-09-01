@@ -54,4 +54,7 @@ class CodingEngineRegistry:
 
     def execute_for_review(self, *, engine: str | None, repository_root: str | Path, instruction: str) -> dict[str, object]:
         result = self.execute(engine=engine, repository_root=repository_root, instruction=instruction)
-        return result.public_summary()
+        payload = result.public_summary()
+        payload["engine"] = OPENHANDS_ENGINE
+        payload["requires_approval"] = True
+        return payload
