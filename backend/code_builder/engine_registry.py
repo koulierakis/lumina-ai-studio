@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Final
 
 from .openhands_engine import OpenHandsEngine
@@ -30,6 +30,13 @@ class CodingEngineRegistry:
             CodingEngineOption(NATIVE_ENGINE, True, False),
             CodingEngineOption(OPENHANDS_ENGINE, openhands_status.available, True),
         )
+
+    def public_status(self) -> dict[str, object]:
+        options = self.options()
+        return {
+            "default": NATIVE_ENGINE,
+            "engines": [asdict(option) for option in options],
+        }
 
     def validate_selection(self, name: str) -> str:
         normalized = name.strip().lower()
