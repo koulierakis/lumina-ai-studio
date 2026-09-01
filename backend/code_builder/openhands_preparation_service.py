@@ -12,7 +12,16 @@ class OpenHandsScopeError(RuntimeError):
 
 
 def _normalize_relative(path: str) -> str:
-    value = str(path).replace("\\", "/").strip().lstrip("./")
+    value = str(path).replace("\\", "/").strip()
+    if not value:
+        raise OpenHandsScopeError(f"Unsafe repository path returned by OpenHands: {path!r}")
+
+    # Accept ordinary repository notation such as ./src/app.py, but never erase
+    # parent traversal. Using lstrip('./') here would incorrectly turn
+    # ../secret.txt into secret.txt before the security check.
+    while value.startswith("./"):
+        value = value[2:]
+
     candidate = PurePosixPath(value)
     if not value or candidate.is_absolute() or ".." in candidate.parts:
         raise OpenHandsScopeError(f"Unsafe repository path returned by OpenHands: {path!r}")
