@@ -1,5 +1,5 @@
 import React from 'react';
-import { act } from 'react';
+import { act } from 'react-dom/test-utils';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import WorkspaceCenter, { readRecentSearches } from './WorkspaceCenter';
