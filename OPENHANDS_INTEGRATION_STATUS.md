@@ -14,7 +14,7 @@ Implemented on the completion branch:
 10. Native Code Builder remains the default.
 11. OpenHands is an experimental second engine only when available.
 12. The controlled engine entry point returns review-ready changes.
-13. OpenHands results are explicitly marked as safe-mode, approval-required, and not applied.
+13. OpenHands results are explicitly marked safe-mode, not applied, and `awaiting_approval`.
 
 ## Next integration boundary
 
@@ -24,4 +24,4 @@ Connect this controlled path to the existing Code Builder API/task lifecycle and
 
 Isolated tests exist for sandbox isolation, secret exclusion, cleanup, engine selection, safe-mode status, review summaries, approval marking, unapplied proposals, empty tasks, and oversized diffs. The GitHub connector cannot execute repository tests. A real OpenHands task also requires OpenHands plus a configured model.
 
-Current checkpoint: the first safe OpenHands proposal path is implemented in code. It is NOT yet marked READY because runtime proof is still required.
+Current checkpoint: the first safe OpenHands proposal path is implemented in code and ends at the same conceptual approval boundary required by LUMINA. It is NOT yet marked READY because runtime proof is still required.
