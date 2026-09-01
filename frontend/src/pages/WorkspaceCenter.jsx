@@ -6,6 +6,16 @@ import { apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../lib/api';
 const safe = (error, fallback) => typeof error?.message === 'string' ? error.message : fallback;
 const Card = ({ children, className = '' }) => <div className={`lumina-glass rounded-xl p-5 ${className}`}>{children}</div>;
 
+export function readRecentSearches() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem('lumina_recent_searches') || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item) => typeof item === 'string' && item.trim()).slice(0, 5);
+  } catch {
+    return [];
+  }
+}
+
 function Projects() {
   const [projects, setProjects] = useState([]); const [name, setName] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [archived, setArchived] = useState(false); const navigate = useNavigate();
   const load = useCallback(async () => { setBusy(true); try { setProjects(await apiGet(`/projects?include_archived=${archived}`)); setError(''); } catch (e) { setError(safe(e, 'Projects are temporarily unavailable.')); } finally { setBusy(false); } }, [archived]);
@@ -17,7 +27,7 @@ function Projects() {
 }
 
 function SearchCenter() {
-  const [query, setQuery] = useState(''); const [results, setResults] = useState(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false); const [recent, setRecent] = useState(() => JSON.parse(localStorage.getItem('lumina_recent_searches') || '[]')); const timer = useRef(); const navigate = useNavigate();
+  const [query, setQuery] = useState(''); const [results, setResults] = useState(null); const [error, setError] = useState(''); const [loading, setLoading] = useState(false); const [recent, setRecent] = useState(readRecentSearches); const timer = useRef(); const navigate = useNavigate();
   useEffect(() => () => clearTimeout(timer.current), []);
   const run = (value) => { clearTimeout(timer.current); if (!value.trim()) return setResults(null); timer.current = setTimeout(async () => { setLoading(true); try { const data = await apiGet('/workspace/search', { params: { q: value } }); setResults(data); setError(''); const next = [value, ...recent.filter((item) => item !== value)].slice(0, 5); setRecent(next); localStorage.setItem('lumina_recent_searches', JSON.stringify(next)); } catch (e) { setError(safe(e, 'Search is temporarily unavailable.')); } finally { setLoading(false); } }, 250); };
   const groups = useMemo(() => results ? Object.entries(results).filter(([, items]) => items?.length) : [], [results]);
