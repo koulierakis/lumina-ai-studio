@@ -15,6 +15,11 @@ class FakeAdapter:
 class FakeExecutionService:
     def __init__(self, available):
         self.adapter = FakeAdapter(available)
+        self.calls = []
+
+    def execute(self, *, repository_root, instruction):
+        self.calls.append((repository_root, instruction))
+        return "result"
 
 
 def registry(available):
@@ -43,6 +48,11 @@ def test_registry_public_status_is_ui_ready():
     assert payload["default"] == "native"
     assert payload["engines"][0] == {"name": "native", "available": True, "experimental": False}
     assert payload["engines"][1] == {"name": "openhands", "available": True, "experimental": True}
+
+
+def test_registry_routes_openhands_execution():
+    item = registry(True)
+    assert item.execute_openhands(repository_root="repo", instruction="fix it") == "result"
 
 
 def test_registry_rejects_unavailable_openhands():
