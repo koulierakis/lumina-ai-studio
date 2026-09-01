@@ -14,7 +14,7 @@ Implemented on the completion branch:
 10. Native Code Builder remains the default.
 11. OpenHands is an experimental second engine only when available.
 12. The controlled engine entry point returns review-ready changes.
-13. OpenHands proposals are marked `awaiting_approval`, `applied: false`, and `can_apply: false`; only the existing LUMINA approval/apply layer may eventually apply them.
+13. OpenHands proposals explicitly report `awaiting_approval`, `applied: false`, `can_apply: false`, and `source_repository_unchanged: true`.
 
 ## Next integration boundary
 
