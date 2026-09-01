@@ -39,6 +39,9 @@ def test_preparation_payload_matches_existing_approval_contract():
     assert payload["status"] == "dry_run"
     assert payload["success"] is True
     assert payload["engine"] == "openhands"
+    assert payload["preparation_execution_completed"] is True
+    assert payload["runtime_validated"] is False
+    assert payload["ready"] is False
     assert payload["source_repository_unchanged"] is True
     assert payload["requires_approval"] is True
     assert payload["changed_paths"] == ["new.txt"]
@@ -47,6 +50,59 @@ def test_preparation_payload_matches_existing_approval_contract():
     assert payload["patch"]["operations"][0]["operation"] == "create"
     assert payload["patch"]["operations"][0]["path"] == "new.txt"
     assert payload["patch"]["operations"][0]["content"] == "hello\n"
+
+
+def test_dot_slash_path_is_normalized_in_review_payload():
+    registry = FakeRegistry(
+        changes=(
+            OpenHandsFileChange(
+                path="./src/demo.txt",
+                change_type="created",
+                diff="--- a/src/demo.txt\n+++ b/src/demo.txt\n",
+                content="ok\n",
+            ),
+        )
+    )
+    payload = OpenHandsPreparationService(registry).prepare(
+        task_id="task-normalized",
+        repository_root="repo",
+        instruction="fix it",
+        target_paths=("src",),
+        allow_file_creation=True,
+    )
+    assert payload["changed_paths"] == ["src/demo.txt"]
+    assert payload["plan"]["files"] == ["src/demo.txt"]
+
+
+def test_parent_traversal_from_agent_is_rejected_before_normalization():
+    registry = FakeRegistry(
+        changes=(
+            OpenHandsFileChange(
+                path="../secret.txt",
+                change_type="created",
+                diff="--- a/secret.txt\n+++ b/secret.txt\n",
+                content="bad\n",
+            ),
+        )
+    )
+    with pytest.raises(OpenHandsScopeError, match="Unsafe repository path"):
+        OpenHandsPreparationService(registry).prepare(
+            task_id="task-traversal",
+            repository_root="repo",
+            instruction="fix it",
+            allow_file_creation=True,
+        )
+
+
+def test_parent_traversal_in_user_target_is_rejected():
+    with pytest.raises(OpenHandsScopeError, match="Unsafe repository path"):
+        OpenHandsPreparationService(FakeRegistry()).prepare(
+            task_id="task-bad-target",
+            repository_root="repo",
+            instruction="fix it",
+            target_paths=("../outside",),
+            allow_file_creation=True,
+        )
 
 
 def test_out_of_scope_change_is_rejected():
