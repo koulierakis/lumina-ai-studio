@@ -8,7 +8,7 @@ Implemented on the completion branch:
 4. OpenHands autonomous work is permitted only inside the disposable copy.
 5. The real repository remains untouched during AI execution.
 6. Before/after file states are compared.
-7. Created, modified, and deleted files return as reviewable diffs; oversized diffs are shortened.
+7. Created, modified, and deleted files return as reviewable diffs; oversized diffs are shortened and excessively large change sets are rejected.
 8. Temporary work is cleaned up after execution.
 9. OpenHands availability and safe-mode status are reportable without a hard dependency.
 10. Native Code Builder remains the default.
@@ -22,6 +22,6 @@ Connect this controlled path to the existing Code Builder API/task lifecycle and
 
 ## Validation status
 
-Isolated tests exist for sandbox isolation, secret exclusion, cleanup, engine selection, safe-mode status, review summaries, approval marking, unapplied proposals, direct-apply prevention, empty tasks, and oversized diffs. The GitHub connector cannot execute repository tests. A real OpenHands task also requires OpenHands plus a configured model.
+Isolated tests exist for the new safety and routing behavior but have not been executed by the GitHub connector. A real OpenHands task also requires OpenHands plus a configured model.
 
 Current checkpoint: the first safe OpenHands proposal path is implemented in code and stops before application. It is NOT yet marked READY because runtime proof is still required.
