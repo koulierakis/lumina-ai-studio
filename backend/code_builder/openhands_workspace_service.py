@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Final
 
 _DEFAULT_IGNORES: Final[frozenset[str]] = frozenset({".git", ".lumina-runtime", ".pytest_cache", "__pycache__", "node_modules", "dist", "build", ".env", ".env.local", ".env.production"})
+_SECRET_PREFIXES: Final[tuple[str, ...]] = (".env.",)
 
 
 class OpenHandsWorkspaceError(RuntimeError):
@@ -38,12 +39,17 @@ class OpenHandsWorkspaceService:
             raise OpenHandsWorkspaceError(f"Repository directory does not exist: {source}")
         return source
 
+    def _ignore(self, _directory: str, names: list[str]) -> set[str]:
+        ignored = {name for name in names if name in self.ignored_names}
+        ignored.update(name for name in names if any(name.startswith(prefix) for prefix in _SECRET_PREFIXES))
+        return ignored
+
     def prepare(self, repository_root: str | os.PathLike[str]) -> DisposableOpenHandsWorkspace:
         source = self._resolve_source(repository_root)
         temp_parent = Path(tempfile.mkdtemp(prefix="lumina-openhands-"))
         destination = temp_parent / "workspace"
         try:
-            shutil.copytree(source, destination, ignore=shutil.ignore_patterns(*sorted(self.ignored_names)), symlinks=False)
+            shutil.copytree(source, destination, ignore=self._ignore, symlinks=False)
         except Exception as exc:
             shutil.rmtree(temp_parent, ignore_errors=True)
             raise OpenHandsWorkspaceError(f"Could not create disposable OpenHands workspace: {exc}") from exc
