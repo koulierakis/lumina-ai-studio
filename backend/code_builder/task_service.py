@@ -1227,6 +1227,11 @@ def _analyze_task(
     ``repository_root`` and ``files`` and therefore breaks planning.
     """
 
+    from . import task_service_engine_hooks as engine_hooks
+
+    if engine_hooks.should_bypass_native_analysis(context):
+        return engine_hooks.build_minimal_analysis(context)
+
     timeout_seconds = _remaining_stage_timeout(
         context,
         context.configuration.analysis_timeout_seconds,
@@ -1297,6 +1302,12 @@ def _create_plan(
     planning_service: PlanningService,
 ) -> Any:
     """Create and resolve the asynchronous PlanningService plan."""
+
+    from . import task_service_engine_hooks as engine_hooks
+
+    engine_plan = engine_hooks.prepare_or_reuse_plan(context)
+    if engine_plan is not None:
+        return engine_plan
 
     timeout_seconds = _remaining_stage_timeout(
         context,
@@ -1479,6 +1490,12 @@ def _generate_patch(
     patch_service: PatchService,
     ollama_service: OllamaService,
 ) -> Any:
+    from . import task_service_engine_hooks as engine_hooks
+
+    engine_patch = engine_hooks.prepared_patch_for_context(context)
+    if engine_patch is not None:
+        return engine_patch
+
     timeout_seconds = _remaining_stage_timeout(
         context,
         context.configuration.patch_timeout_seconds,
