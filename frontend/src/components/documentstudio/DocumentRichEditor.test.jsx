@@ -1,6 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import DocumentRichEditor from './DocumentRichEditor';
+import DocumentRichEditor, { plainTextClipboardHtml } from './DocumentRichEditor';
 import {
   calculateMeasuredPages,
   normalizeLegacyPageBreaks,
@@ -29,10 +29,10 @@ describe('DocumentRichEditor editability lifecycle', () => {
   test('becomes editable when initialization finishes without remounting Lexical', async () => {
     const props = { html: '<p></p>', onHtmlChange: jest.fn() };
     await act(async () => root.render(<DocumentRichEditor {...props} disabled />));
-    expect(host.querySelector('[contenteditable]')).toHaveAttribute('contenteditable', 'false');
+    expect(host.querySelector('[contenteditable]')?.getAttribute('contenteditable')).toBe('false');
 
     await act(async () => root.render(<DocumentRichEditor {...props} disabled={false} />));
-    expect(host.querySelector('[contenteditable]')).toHaveAttribute('contenteditable', 'true');
+    expect(host.querySelector('[contenteditable]')?.getAttribute('contenteditable')).toBe('true');
   });
 });
 
@@ -45,6 +45,15 @@ describe('DocumentRichEditor production foundation', () => {
     expect(html).not.toContain('<script>');
     expect(html).not.toContain('onclick');
     expect(html).not.toContain('javascript:');
+  });
+
+  test('plain text paste escapes markup instead of interpreting it as html', () => {
+    const html = plainTextClipboardHtml('<script>alert("x")</script>\nCompany & Co.');
+
+    expect(html).toContain('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;');
+    expect(html).toContain('Company &amp; Co.');
+    expect(html).toContain('<br/>');
+    expect(html).not.toContain('<script>');
   });
 
   test('legacy page break html imports into the structured marker', () => {
