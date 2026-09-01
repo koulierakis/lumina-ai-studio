@@ -54,3 +54,7 @@ class CodingEngineRegistry:
         if selected == OPENHANDS_ENGINE:
             return self.execute_openhands(repository_root=repository_root, instruction=instruction)
         raise RuntimeError("Native execution remains owned by the existing Code Builder task service.")
+
+    def execute_for_review(self, *, engine: str | None, repository_root: str | Path, instruction: str) -> dict[str, object]:
+        result = self.execute(engine=engine, repository_root=repository_root, instruction=instruction)
+        return result.public_summary()
