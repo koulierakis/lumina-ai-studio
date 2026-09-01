@@ -10,6 +10,7 @@ from .safe_smart_fields import extract_fact_safe_smart_fields
 # Bootstrap PDF font aliases before the export service is imported.
 ensure_pdf_font_aliases()
 
+from .import_route import router as hardened_import_router  # noqa: E402
 from .router import configure_document_studio_router, router  # noqa: E402
 
 _service_module = import_module(".service", __name__)
@@ -31,6 +32,18 @@ def _extract_text_from_upload(data: bytes, mime: str, filename: str = "document"
 
 _service_module.extract_text_from_upload = _extract_text_from_upload
 _router_module.extract_text_from_upload = _extract_text_from_upload
+
+# Replace only the legacy POST /api/documents/import route. All other Document
+# Studio routes keep their existing implementation and persistence lifecycle.
+router.routes[:] = [
+    route
+    for route in router.routes
+    if not (
+        getattr(route, "path", None) == "/api/documents/import"
+        and "POST" in (getattr(route, "methods", set()) or set())
+    )
+]
+router.routes.extend(hardened_import_router.routes)
 
 # Provider readiness is exposed through the same Document Studio API router.
 router.include_router(provider_status_router)
