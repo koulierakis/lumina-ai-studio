@@ -2,7 +2,7 @@
 
 Implemented on the completion branch:
 
-1. LUMINA prepares a lean disposable copy of the repository, excluding runtime/build/log/coverage/virtual-environment folders and dotenv secrets.
+1. LUMINA prepares a lean disposable copy of the repository, excluding runtime/build/log/temp/coverage/virtual-environment folders and dotenv secrets.
 2. Empty instructions are rejected before copy creation.
 3. OpenHands autonomous work is permitted only inside the disposable copy.
 4. The real repository remains untouched during AI execution.
