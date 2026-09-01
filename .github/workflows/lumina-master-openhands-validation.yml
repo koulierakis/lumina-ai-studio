@@ -21,6 +21,7 @@ on:
       - 'backend/tests/test_router_engine_bridge.py'
       - 'backend/tests/test_engine_http_routes.py'
       - 'backend/tests/test_engine_http_integration.py'
+      - 'backend/tests/test_code_builder_transaction_boundary.py'
       - 'backend/tests/conftest.py'
       - '.github/workflows/lumina-master-openhands-validation.yml'
   workflow_dispatch:
@@ -77,3 +78,4 @@ jobs:
           tests/test_router_engine_bridge.py
           tests/test_engine_http_routes.py
           tests/test_engine_http_integration.py
+          tests/test_code_builder_transaction_boundary.py
