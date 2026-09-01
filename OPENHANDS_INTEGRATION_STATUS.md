@@ -8,7 +8,7 @@ Implemented on the completion branch:
 4. OpenHands autonomous work is permitted only inside that copy.
 5. The real repository remains untouched during AI execution.
 6. Before/after file states are compared.
-7. Created, modified, and deleted files are returned with reviewable diffs.
+7. Created, modified, and deleted files are returned with reviewable diffs; oversized diffs are safely shortened for display.
 8. Temporary work is cleaned up after execution.
 9. OpenHands availability can be checked without making it a hard LUMINA dependency.
 10. Native Code Builder remains the safe default.
