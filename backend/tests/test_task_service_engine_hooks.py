@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from code_builder import task_service_engine_hooks as hooks
 
 
@@ -22,6 +24,18 @@ def context(tmp_path: Path, *, metadata=None, dry_run=True):
     )
 
 
+def approved_metadata(plan=None):
+    plan = plan or {"files": ["demo.txt"], "engine": "openhands"}
+    return {
+        "coding_engine": "openhands",
+        "approved_preparation_plan": plan,
+        "approved_preparation_task_id": "t1",
+        "approved_patch_operations": [
+            {"operation": "modify", "path": "demo.txt", "content": "new\n"}
+        ],
+    }
+
+
 def test_native_request_does_not_activate_hooks(tmp_path):
     c = context(tmp_path, metadata={})
     assert hooks.is_openhands_request(c) is False
@@ -40,20 +54,42 @@ def test_openhands_preparation_uses_minimal_analysis(tmp_path):
 
 def test_approved_openhands_execution_reuses_plan_without_new_agent_run(tmp_path):
     plan = {"files": ["demo.txt"], "engine": "openhands"}
+    c = context(tmp_path, metadata=approved_metadata(plan), dry_run=False)
+    assert hooks.should_bypass_native_analysis(c) is True
+    assert hooks.prepare_or_reuse_plan(c) == plan
+    assert hooks.prepared_patch_for_context(c) is None
+
+
+def test_approved_openhands_plan_cannot_be_replayed_for_another_task(tmp_path):
+    metadata = approved_metadata()
+    metadata["approved_preparation_task_id"] = "different-task"
+    c = context(tmp_path, metadata=metadata, dry_run=False)
+    with pytest.raises(RuntimeError, match="different task"):
+        hooks.should_bypass_native_analysis(c)
+
+
+def test_openhands_patch_operations_require_reviewed_plan(tmp_path):
     c = context(
         tmp_path,
         metadata={
             "coding_engine": "openhands",
-            "approved_preparation_plan": plan,
+            "approved_preparation_task_id": "t1",
             "approved_patch_operations": [
                 {"operation": "modify", "path": "demo.txt", "content": "new\n"}
             ],
         },
         dry_run=False,
     )
-    assert hooks.should_bypass_native_analysis(c) is True
-    assert hooks.prepare_or_reuse_plan(c) == plan
-    assert hooks.prepared_patch_for_context(c) is None
+    with pytest.raises(RuntimeError, match="without an approved preparation plan"):
+        hooks.prepare_or_reuse_plan(c)
+
+
+def test_approved_openhands_plan_requires_originating_task_id(tmp_path):
+    metadata = approved_metadata()
+    metadata.pop("approved_preparation_task_id")
+    c = context(tmp_path, metadata=metadata, dry_run=False)
+    with pytest.raises(RuntimeError, match="missing its originating task id"):
+        hooks.should_bypass_native_analysis(c)
 
 
 def test_prepared_patch_is_rehydrated_for_dry_run(tmp_path):
