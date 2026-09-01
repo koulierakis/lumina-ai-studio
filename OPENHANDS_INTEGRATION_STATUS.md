@@ -14,7 +14,7 @@ Implemented on the completion branch:
 10. Native Code Builder remains the default.
 11. OpenHands is an experimental second engine only when available.
 12. The controlled engine entry point returns review-ready changes.
-13. OpenHands results require approval and never auto-apply through this path.
+13. OpenHands results are explicitly marked as safe-mode, approval-required, and not applied.
 
 ## Next integration boundary
 
@@ -22,6 +22,6 @@ Connect this controlled path to the existing Code Builder API/task lifecycle and
 
 ## Validation status
 
-Isolated tests exist for sandbox isolation, secret exclusion, cleanup, engine selection, safe-mode status, review summaries, approval marking, empty tasks, and oversized diffs. The GitHub connector cannot execute the repository tests, so they remain unverified until run in a runtime environment. A real OpenHands task also requires OpenHands plus a configured model.
+Isolated tests exist for sandbox isolation, secret exclusion, cleanup, engine selection, safe-mode status, review summaries, approval marking, unapplied proposals, empty tasks, and oversized diffs. The GitHub connector cannot execute repository tests. A real OpenHands task also requires OpenHands plus a configured model.
 
 Current checkpoint: the first safe OpenHands proposal path is implemented in code. It is NOT yet marked READY because runtime proof is still required.
