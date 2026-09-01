@@ -115,10 +115,6 @@ def _coerce_repository_relative_path(raw: Any, root: Path) -> str | None:
     text = raw.strip()
     if not text or "\x00" in text:
         return None
-    if text.startswith("/"):
-        # POSIX-style root-relative reference; Windows paths with a drive
-        # are handled by the absolute-path branch below.
-        return _normalize_relative_path(text.lstrip("/"))
     candidate = Path(text)
     if not candidate.is_absolute():
         return None
@@ -376,7 +372,12 @@ def _to_patch_request(
             raise AIPatchGenerationError("AI returned a malformed patch operation.")
         operation = str(raw.get("operation") or "").strip()
         operation = _OPERATION_ALIASES.get(operation, operation)
-        path = _coerce_repository_relative_path(raw.get("path"), root)
+        raw_path = raw.get("path")
+        path = _coerce_repository_relative_path(raw_path, root)
+        if path is None and isinstance(raw_path, str) and raw_path.startswith("/"):
+            approved_root_relative = _normalize_relative_path(raw_path.lstrip("/"))
+            if approved_root_relative in allowed_paths:
+                path = approved_root_relative
         if operation not in ALLOWED_OPERATIONS or path is None:
             raise AIPatchGenerationError("AI returned an unsupported patch operation or path.")
         if path not in allowed_paths:
