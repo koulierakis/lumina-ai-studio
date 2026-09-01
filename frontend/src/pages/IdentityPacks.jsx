@@ -7,20 +7,27 @@ import { Plus, Trash2, Upload, Star, Check } from 'lucide-react';
 export default function IdentityPacks() {
   const [packs, setPacks] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
   const fileRef = useRef(null);
 
-  const load = async () => {
+  const load = async (preferredId = null) => {
     setLoading(true);
+    setLoadError('');
     try {
       const data = await apiGet('/identity-packs');
       setPacks(data);
-      if (!selected && data.length) {
-        setSelected(data[0]);
-        localStorage.setItem('lumina_active_pack', data[0].id);
-      }
+      const rememberedId = preferredId || selected?.id || localStorage.getItem('lumina_active_pack');
+      const nextSelected = data.find((pack) => pack.id === rememberedId) || data[0] || null;
+      setSelected(nextSelected);
+      if (nextSelected) localStorage.setItem('lumina_active_pack', nextSelected.id);
+      else localStorage.removeItem('lumina_active_pack');
+      return nextSelected;
+    } catch (err) {
+      setLoadError(err?.message || 'Identity Packs could not be loaded.');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -39,11 +46,9 @@ export default function IdentityPacks() {
       setNewName('');
       setCreating(false);
       toast.success('Identity Pack created');
-      await load();
-      setSelected(data);
-      localStorage.setItem('lumina_active_pack', data.id);
+      await load(data.id);
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Failed to create');
+      toast.error(err?.response?.data?.detail || err?.message || 'Failed to create');
     }
   };
 
@@ -57,7 +62,7 @@ export default function IdentityPacks() {
       setPacks((p) => p.map((x) => (x.id === data.id ? data : x)));
       toast.success('Reference photos added');
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Upload failed');
+      toast.error(err?.response?.data?.detail || err?.message || 'Upload failed');
     }
   };
 
@@ -77,10 +82,13 @@ export default function IdentityPacks() {
 
   const removePack = async (id) => {
     if (!window.confirm('Permanently delete this Identity Pack and its photos?')) return;
-    await apiDelete(`/identity-packs/${id}`);
-    if (selected?.id === id) setSelected(null);
-    toast.success('Pack deleted');
-    await load();
+    try {
+      await apiDelete(`/identity-packs/${id}`);
+      toast.success('Pack deleted');
+      await load();
+    } catch (err) {
+      toast.error(err?.message || 'Failed to delete Identity Pack');
+    }
   };
 
   const selectPack = (p) => {
@@ -127,7 +135,13 @@ export default function IdentityPacks() {
 
         <div className="px-2 pb-6 space-y-1">
           {loading && <div className="px-4 text-sm text-white/40">Loading…</div>}
-          {!loading && packs.length === 0 && (
+          {!loading && loadError && (
+            <div className="mx-2 rounded border border-red-400/20 bg-red-400/5 px-3 py-3" role="alert">
+              <p className="text-xs text-red-200">{loadError}</p>
+              <button onClick={() => load()} className="mt-2 text-xs text-gold">Retry</button>
+            </div>
+          )}
+          {!loading && !loadError && packs.length === 0 && (
             <div className="px-4 py-8 text-center">
               <p className="text-white/40 text-sm">No packs yet</p>
               <p className="text-white/30 text-xs mt-1">Create one to begin</p>
