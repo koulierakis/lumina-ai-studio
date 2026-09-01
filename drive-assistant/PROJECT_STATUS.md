@@ -21,6 +21,7 @@ Implemented and code-validated surfaces include browser GPS/watch mode, live bro
 - System Monitor actively probes routing, geocoding, weather, and OSM/Overpass availability instead of hard-coding remote services as READY.
 - The default/legacy repository branch can no longer deploy Drive Pages and overwrite the canonical Drive build. GitHub Pages deployment ownership is restricted to `feature/lumina-drive-assistant`.
 - The Drive Pages workflow syntax-checks all major JavaScript modules and smoke-gates GPS, voice APIs, routing/data providers, rerouting, Wake Lock, exact autocomplete routing, Free Drive normalization, walking router, verified safety layer, service-worker cache coherence, and required deployed assets before Pages deployment.
+- The master-completion runtime validator now includes a separate live-services smoke gate. It requires a real OSRM urban route with maneuver steps and a valid Open-Meteo current-conditions response in addition to the existing mobile feature gate and geocoding/POI production smoke. A passing automated gate still does **not** mark AI GPS READY.
 
 ## Data-source boundaries
 
