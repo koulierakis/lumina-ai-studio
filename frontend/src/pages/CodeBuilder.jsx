@@ -4,6 +4,7 @@ import { apiGet, apiPost } from '../lib/api';
 
 const TERMINAL_PHASES = new Set(['completed', 'failed', 'cancelled', 'timed_out', 'rolled_back', 'rollback_failed']);
 const DRAFT_STORAGE_KEY = 'lumina_code_builder_instruction';
+const ENGINE_STORAGE_KEY = 'lumina_code_builder_engine';
 
 function getSpeechRecognition() {
   if (typeof window === 'undefined') return null;
@@ -130,6 +131,8 @@ export default function CodeBuilder() {
   const [voiceState, setVoiceState] = useState('ready');
   const [voiceMessage, setVoiceMessage] = useState('');
   const [modelStatus, setModelStatus] = useState('unknown');
+  const [engineStatus, setEngineStatus] = useState({ default: 'native', engines: [{ name: 'native', available: true, experimental: false, safe_mode: true }], openhands_ready: false });
+  const [codingEngine, setCodingEngine] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem(ENGINE_STORAGE_KEY) || 'native' : 'native'));
   const recognitionRef = useRef(null);
   const voicePrefixRef = useRef('');
 
@@ -151,6 +154,30 @@ export default function CodeBuilder() {
   useEffect(() => {
     refreshModelStatus();
   }, [refreshModelStatus]);
+
+  const refreshEngineStatus = useCallback(async () => {
+    try {
+      const status = await apiGet('/code-builder/engines', { retry: false });
+      const engines = Array.isArray(status?.engines) && status.engines.length ? status.engines : [{ name: 'native', available: true, experimental: false, safe_mode: true }];
+      const normalized = { ...status, default: status?.default || 'native', engines };
+      setEngineStatus(normalized);
+      setCodingEngine((current) => {
+        const option = engines.find((item) => item.name === current);
+        return current === 'native' || option?.available ? current : 'native';
+      });
+    } catch {
+      setEngineStatus({ default: 'native', engines: [{ name: 'native', available: true, experimental: false, safe_mode: true }], openhands_ready: false });
+      setCodingEngine('native');
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshEngineStatus();
+  }, [refreshEngineStatus]);
+
+  useEffect(() => {
+    window.localStorage.setItem(ENGINE_STORAGE_KEY, codingEngine);
+  }, [codingEngine]);
 
   const toggleVoice = () => {
     if (voiceState === 'listening') {
@@ -271,6 +298,7 @@ export default function CodeBuilder() {
         backup_policy: 'required',
         build_policy: 'required',
         rollback_policy: 'on_any_failure',
+        metadata: { coding_engine: codingEngine },
       });
       setTask(response.task);
       setModelStatus(response.task?.review_result?.status === 'unavailable' ? 'unavailable' : 'ready');
@@ -378,6 +406,15 @@ export default function CodeBuilder() {
             </div>
           </div>
           {voiceMessage && <p data-testid="code-builder-voice-status" className="mt-2 text-sm text-white/55">{voiceMessage}</p>}
+          <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-white/[0.07] bg-black/15 px-4 py-3" data-testid="code-builder-engine-panel">
+            <label className="flex items-center gap-3 text-sm text-white/65" htmlFor="code-builder-engine">
+              <span className="font-semibold text-white/80">Coding engine</span>
+              <select id="code-builder-engine" data-testid="code-builder-engine" value={codingEngine} onChange={(event) => setCodingEngine(event.target.value)} disabled={busy} className="rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none focus:border-gold/40">
+                {engineStatus.engines.map((engine) => <option key={engine.name} value={engine.name} disabled={!engine.available}>{engine.name === 'native' ? 'Native' : 'OpenHands'}{engine.experimental ? ' · experimental' : ''}{!engine.available ? ' · unavailable' : ''}</option>)}
+              </select>
+            </label>
+            <span className="text-xs text-white/40">{codingEngine === 'openhands' ? (engineStatus.openhands_ready ? 'OpenHands runtime validated.' : 'OpenHands proposals still require approval and runtime validation.') : 'Native remains the default Code Builder engine.'}</span>
+          </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm text-white/55"><ShieldCheck className="h-4 w-4 text-gold" />No production writes before explicit approval.</div>
             <button data-testid="code-builder-create" onClick={createTask} disabled={!instruction.trim() || busy} className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-gold px-5 py-2.5 text-sm font-bold text-black disabled:cursor-not-allowed disabled:opacity-40"><Play className="h-4 w-4" />{busy ? 'Preparing…' : 'Analyze & prepare'}</button>

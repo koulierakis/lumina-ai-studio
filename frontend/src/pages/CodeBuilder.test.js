@@ -48,6 +48,9 @@ describe('Code Builder transactional workspace', () => {
     expect(page).toContain('data-testid="code-builder-cancel"');
     expect(page).toContain('Proposed diff');
     expect(page).toContain('No production writes before explicit approval.');
+    expect(page).toContain("apiGet('/code-builder/engines'");
+    expect(page).toContain('data-testid="code-builder-engine"');
+    expect(page).toContain("metadata: { coding_engine: codingEngine }");
   });
 });
 
@@ -121,6 +124,52 @@ describe('Code Builder voice composer', () => {
     });
     await act(async () => container.querySelector('[data-testid="code-builder-create"]').click());
     expect(apiPost).toHaveBeenCalledWith('/code-builder/tasks', expect.objectContaining({ instruction: 'Run the safe checks' }));
+  });
+
+  test('submits the explicitly selected OpenHands engine in task metadata', async () => {
+    apiGet.mockImplementation((url) => {
+      if (url === '/code-builder/engines') return Promise.resolve({
+        default: 'native',
+        openhands_ready: false,
+        engines: [
+          { name: 'native', available: true, experimental: false, safe_mode: true },
+          { name: 'openhands', available: true, experimental: true, safe_mode: true },
+        ],
+      });
+      if (url === '/code-builder/model-status') return Promise.resolve({ status: 'ready' });
+      return Promise.resolve({ items: [] });
+    });
+    await renderComposer();
+    const engine = container.querySelector('[data-testid="code-builder-engine"]');
+    const input = container.querySelector('[data-testid="code-builder-instruction"]');
+    await act(async () => {
+      engine.value = 'openhands';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+      setTextareaValue(input, 'Prepare a safe OpenHands proposal');
+    });
+    await act(async () => container.querySelector('[data-testid="code-builder-create"]').click());
+    expect(apiPost).toHaveBeenCalledWith('/code-builder/tasks', expect.objectContaining({
+      instruction: 'Prepare a safe OpenHands proposal',
+      metadata: { coding_engine: 'openhands' },
+      require_approval: true,
+    }));
+  });
+
+  test('falls back to Native when OpenHands is unavailable', async () => {
+    window.localStorage.setItem('lumina_code_builder_engine', 'openhands');
+    apiGet.mockImplementation((url) => {
+      if (url === '/code-builder/engines') return Promise.resolve({
+        default: 'native',
+        openhands_ready: false,
+        engines: [
+          { name: 'native', available: true, experimental: false, safe_mode: true },
+          { name: 'openhands', available: false, experimental: true, safe_mode: true },
+        ],
+      });
+      return Promise.resolve({ items: [] });
+    });
+    await renderComposer();
+    expect(container.querySelector('[data-testid="code-builder-engine"]').value).toBe('native');
   });
 
   test('handles microphone denial without breaking the composer', async () => {
