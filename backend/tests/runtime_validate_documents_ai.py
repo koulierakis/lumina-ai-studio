@@ -3,8 +3,8 @@
 Run from the repository root:
     python backend/tests/runtime_validate_documents_ai.py
 
-This script never marks Documents AI ready unless the focused automated suite
-passes and the configured provider status can be checked successfully.
+The automated gate can pass, but final READY remains false until the listed
+real Greek DOCX/PDF visual checks are completed by a human on the target runtime.
 """
 from __future__ import annotations
 
@@ -28,6 +28,12 @@ FOCUSED_TESTS = [
     "backend/tests/test_document_studio_source_facts_unicode.py",
     "backend/tests/test_natural_creation_foundation.py",
     "backend/tests/test_pack_advisor_foundation.py",
+]
+
+MANUAL_CHECKS = [
+    "Import one real Greek DOCX and visually verify headings/paragraphs.",
+    "Import one real Greek PDF with a text layer and verify Greek text.",
+    "Export one Greek document to PDF and visually verify Greek glyphs.",
 ]
 
 
@@ -67,27 +73,24 @@ def main() -> int:
     providers = asyncio.run(provider_status())
     payload = providers.get("payload") if providers.get("checked") else {}
     any_ready = bool(payload.get("any_ready")) if isinstance(payload, dict) else False
-    ready = bool(tests["passed"] and providers["checked"] and any_ready)
+    automated_gate_passed = bool(tests["passed"] and providers["checked"] and any_ready)
 
     report = {
         "focused_tests_passed": tests["passed"],
         "provider_status_checked": providers["checked"],
         "any_provider_ready": any_ready,
-        "documents_ai_ready": ready,
-        "manual_checks_still_required": [
-            "Import one real Greek DOCX and visually verify headings/paragraphs.",
-            "Import one real Greek PDF with a text layer and verify Greek text.",
-            "Export one Greek document to PDF and visually verify Greek glyphs.",
-        ],
+        "automated_gate_passed": automated_gate_passed,
+        "manual_checks_still_required": MANUAL_CHECKS,
+        "documents_ai_ready": False,
         "test_output": tests["stdout"],
         "test_errors": tests["stderr"],
         "provider_status": providers,
     }
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
-    print(f"\nDOCUMENTS AI AUTOMATED GATE: {'PASS' if ready else 'FAIL'}")
-    print("DOCUMENTS AI READY: NO" if ready else "DOCUMENTS AI READY: NO")
-    print("Reason: final READY also requires the listed real document visual checks.")
-    return 0 if ready else 1
+    print(f"\nDOCUMENTS AI AUTOMATED GATE: {'PASS' if automated_gate_passed else 'FAIL'}")
+    print("DOCUMENTS AI READY: NO")
+    print("Reason: final READY requires the listed real Greek document visual checks.")
+    return 0 if automated_gate_passed else 1
 
 
 if __name__ == "__main__":
