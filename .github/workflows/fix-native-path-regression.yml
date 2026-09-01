@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt
-      - name: Repair absolute-path coercion without widening repository scope
+      - name: Repair path handling without widening approved scope
         run: |
           python - <<'PY'
           import re
@@ -30,16 +30,23 @@ jobs:
 
           path = Path("backend/code_builder/patch_generation_service.py")
           text = path.read_text(encoding="utf-8")
-          pattern = re.compile(
+
+          shortcut = re.compile(
               r'    if text\.startswith\("/"\):\n'
               r'        # POSIX-style root-relative reference; Windows paths with a drive\n'
               r'        # are handled by the absolute-path branch below\.\n'
               r'        return _normalize_relative_path\(text\.lstrip\("/"\)\)\n'
           )
-          updated, count = pattern.subn("", text, count=1)
+          text, count = shortcut.subn("", text, count=1)
           if count != 1:
               raise SystemExit(f"Expected exactly one unsafe POSIX shortcut; found {count}. Refusing blind edit.")
-          path.write_text(updated, encoding="utf-8")
+
+          old = '''        operation = str(raw.get("operation") or "").strip()\n        operation = _OPERATION_ALIASES.get(operation, operation)\n        path = _coerce_repository_relative_path(raw.get("path"), root)\n        if operation not in ALLOWED_OPERATIONS or path is None:\n'''
+          new = '''        operation = str(raw.get("operation") or "").strip()\n        operation = _OPERATION_ALIASES.get(operation, operation)\n        raw_path = raw.get("path")\n        path = _coerce_repository_relative_path(raw_path, root)\n        if path is None and isinstance(raw_path, str) and raw_path.startswith("/"):\n            approved_root_relative = _normalize_relative_path(raw_path.lstrip("/"))\n            if approved_root_relative in allowed_paths:\n                path = approved_root_relative\n        if operation not in ALLOWED_OPERATIONS or path is None:\n'''
+          if old not in text:
+              raise SystemExit("Expected patch-operation path block was not found; refusing blind edit.")
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding="utf-8")
           PY
       - name: Compile repaired file
         run: python -m py_compile backend/code_builder/patch_generation_service.py
@@ -51,5 +58,5 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add backend/code_builder/patch_generation_service.py
           git diff --cached --quiet && exit 0
-          git commit -m "Fix native Code Builder absolute path coercion"
+          git commit -m "Fix native Code Builder path handling"
           git push origin HEAD:work/lumina-master-completion
