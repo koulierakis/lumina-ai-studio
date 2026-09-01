@@ -11,7 +11,10 @@ class OpenHandsFileChange:path:str;change_type:str;diff:str
 @dataclass(frozen=True,slots=True)
 class OpenHandsExecutionResult:
     run:OpenHandsRunResult;changes:tuple[OpenHandsFileChange,...]
-    def public_summary(self)->dict[str,object]:return{"successful":self.run.successful,"changed_files":len(self.changes),"changes":[{"path":i.path,"change_type":i.change_type,"diff":i.diff}for i in self.changes]}
+    def public_summary(self)->dict[str,object]:
+        counts={"created":0,"modified":0,"deleted":0}
+        for item in self.changes:counts[item.change_type]+=1
+        return{"successful":self.run.successful,"changed_files":len(self.changes),"change_counts":counts,"changes":[{"path":i.path,"change_type":i.change_type,"diff":i.diff}for i in self.changes]}
 class OpenHandsExecutionService:
     def __init__(self,adapter:OpenHandsAdapter|None=None,workspace_service:OpenHandsWorkspaceService|None=None)->None:self.adapter=adapter or OpenHandsAdapter();self.workspace_service=workspace_service or OpenHandsWorkspaceService()
     @staticmethod
