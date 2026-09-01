@@ -22,4 +22,4 @@ Connect the engine registry to the existing Code Builder API/task lifecycle and 
 
 ## Validation status
 
-Isolated tests have been added for the new safety and routing pieces. They have not been executed by the GitHub connector itself. A real OpenHands runtime test also still requires an environment where OpenHands is installed/configured and a suitable model is available. Do not mark OpenHands READY until both automated tests and a real runtime task pass.
+Isolated tests have been added for sandbox isolation, secret exclusion, cleanup, engine selection, review summaries, approval marking, empty tasks, and oversized diffs. They have not been executed by the GitHub connector itself. A real OpenHands runtime test also still requires an environment where OpenHands is installed/configured and a suitable model is available. Do not mark OpenHands READY until both automated tests and a real runtime task pass.
