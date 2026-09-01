@@ -20,6 +20,7 @@ Modules include:
 - task_service
 - persistent_task_store
 - task_engine_integration
+- engine_http_integration
 """
 
 __version__ = "1.4.0"
@@ -27,7 +28,9 @@ __version__ = "1.4.0"
 from .persistent_task_store import install_persistent_task_store
 from .patch_generation_service import install_ai_patch_generation
 from .task_engine_integration import install_task_engine_integration
+from .engine_http_integration import install_engine_http_routes
 
 install_persistent_task_store()
 install_ai_patch_generation()
 install_task_engine_integration()
+install_engine_http_routes()
