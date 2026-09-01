@@ -6,7 +6,9 @@ on:
       - work/lumina-master-completion
     paths:
       - 'backend/code_builder/openhands_*.py'
+      - 'backend/code_builder/task_service_engine_hooks.py'
       - 'backend/tests/test_openhands_*.py'
+      - 'backend/tests/test_task_service_engine_hooks.py'
       - 'backend/tests/conftest.py'
       - '.github/workflows/lumina-master-openhands-validation.yml'
   workflow_dispatch:
@@ -37,6 +39,7 @@ jobs:
           python -m py_compile backend/code_builder/openhands_change_capture_service.py
           python -m py_compile backend/code_builder/openhands_engine_service.py
           python -m py_compile backend/code_builder/openhands_proposal_service.py
+          python -m py_compile backend/code_builder/task_service_engine_hooks.py
       - name: Run focused OpenHands tests
         working-directory: backend
         run: >-
@@ -46,3 +49,4 @@ jobs:
           tests/test_openhands_change_capture_service.py
           tests/test_openhands_engine_service.py
           tests/test_openhands_proposal_service.py
+          tests/test_task_service_engine_hooks.py
