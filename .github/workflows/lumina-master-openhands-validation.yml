@@ -33,6 +33,7 @@ jobs:
           python -m py_compile backend/code_builder/openhands_workspace_service.py
           python -m py_compile backend/code_builder/openhands_change_capture_service.py
           python -m py_compile backend/code_builder/openhands_engine_service.py
+          python -m py_compile backend/code_builder/openhands_proposal_service.py
       - name: Run focused OpenHands tests
         working-directory: backend
         run: >-
@@ -41,3 +42,4 @@ jobs:
           tests/test_openhands_workspace_service.py
           tests/test_openhands_change_capture_service.py
           tests/test_openhands_engine_service.py
+          tests/test_openhands_proposal_service.py
