@@ -40,6 +40,10 @@ class CodeBuilderEnginePreparationService:
         repository_root: str | Path,
         instruction: str,
         native_prepare: NativePreparation,
+        target_paths: tuple[str, ...] = (),
+        excluded_paths: tuple[str, ...] = (),
+        allow_file_creation: bool = True,
+        allow_file_deletion: bool = False,
     ) -> Any:
         selected = self.registry.validate_selection(engine)
         if selected == NATIVE_ENGINE:
@@ -49,6 +53,10 @@ class CodeBuilderEnginePreparationService:
                 task_id=task_id,
                 repository_root=repository_root,
                 instruction=instruction,
+                target_paths=target_paths,
+                excluded_paths=excluded_paths,
+                allow_file_creation=allow_file_creation,
+                allow_file_deletion=allow_file_deletion,
             )
         raise EnginePreparationError(f"Unsupported coding engine: {selected}")
 
