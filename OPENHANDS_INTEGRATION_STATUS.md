@@ -11,8 +11,8 @@ Implemented on the completion branch:
 7. Temporary work is cleaned up after execution.
 8. OpenHands availability and safe-mode status are reportable without a hard dependency.
 9. Native Code Builder remains the default and is explicitly preserved; OpenHands is experimental and migration is parallel.
-10. Approval is mandatory for OpenHands proposals and a backup is required before any future apply path.
-11. Engine status explicitly reports `openhands_runtime_validated: false` and `openhands_ready: false` until real runtime proof exists.
+10. Approval is mandatory; any future apply path must preserve both backup and rollback capability.
+11. Engine status explicitly reports OpenHands as not runtime-validated and not ready.
 12. OpenHands proposals report `awaiting_approval`, `review_only: true`, `applied: false`, `can_apply: false`, `source_repository_unchanged: true`, and `next_action: review_changes`.
 
 ## Next integration boundary
