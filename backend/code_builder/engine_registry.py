@@ -43,3 +43,7 @@ class CodingEngineRegistry:
                 raise RuntimeError("OpenHands engine is not available on this machine.")
             return OPENHANDS_ENGINE
         raise ValueError(f"Unknown coding engine: {name}")
+
+    def execute_openhands(self, *, repository_root: str, instruction: str):
+        self.validate_selection(OPENHANDS_ENGINE)
+        return self.openhands.execute(repository_root=repository_root, instruction=instruction)
