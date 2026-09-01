@@ -22,12 +22,14 @@ function run(name) {
 
 const featureGate = run('mobile-feature-gate.mjs');
 const productionSmoke = run('production-smoke.mjs');
-const automatedGatePassed = featureGate.passed && productionSmoke.passed;
+const runtimeServicesSmoke = run('runtime-services-smoke.mjs');
+const automatedGatePassed = featureGate.passed && productionSmoke.passed && runtimeServicesSmoke.passed;
 
 const report = {
   mobile_only: true,
   feature_gate_passed: featureGate.passed,
   production_smoke_passed: productionSmoke.passed,
+  runtime_services_smoke_passed: runtimeServicesSmoke.passed,
   automated_gate_passed: automatedGatePassed,
   requires_real_driving_test: true,
   real_driving_checks: [
@@ -41,7 +43,7 @@ const report = {
     'local road-name, POI, speed-limit, camera and road-safety coverage',
   ],
   ai_gps_ready: false,
-  checks: [featureGate, productionSmoke],
+  checks: [featureGate, productionSmoke, runtimeServicesSmoke],
 };
 
 console.log(JSON.stringify(report, null, 2));
