@@ -15,11 +15,9 @@ class FakeAdapter:
 class FakeExecutionService:
     def __init__(self, available):
         self.adapter = FakeAdapter(available)
-        self.calls = []
 
     def execute(self, *, repository_root, instruction):
-        self.calls.append((repository_root, instruction))
-        return "result"
+        return (repository_root, instruction)
 
 
 def registry(available):
@@ -51,8 +49,12 @@ def test_registry_public_status_is_ui_ready():
 
 
 def test_registry_routes_openhands_execution():
-    item = registry(True)
-    assert item.execute_openhands(repository_root="repo", instruction="fix it") == "result"
+    assert registry(True).execute(engine="openhands", repository_root="repo", instruction="fix it") == ("repo", "fix it")
+
+
+def test_registry_does_not_replace_native_task_service():
+    with pytest.raises(RuntimeError, match="existing Code Builder task service"):
+        registry(True).execute(engine="native", repository_root="repo", instruction="fix it")
 
 
 def test_registry_rejects_unavailable_openhands():
