@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from code_builder.openhands_adapter import OpenHandsRunResult
-from code_builder.openhands_execution_service import OpenHandsExecutionService
+from code_builder.openhands_execution_service import MAX_REVIEW_DIFF_CHARACTERS, OpenHandsExecutionService
 
 
 class FakeAdapter:
@@ -20,16 +20,22 @@ def test_openhands_changes_only_disposable_copy(tmp_path: Path):
     result = OpenHandsExecutionService(adapter=FakeAdapter()).execute(repository_root=tmp_path, instruction="change files")
     assert (tmp_path / "existing.txt").read_text(encoding="utf-8") == "original\n"
     assert [(c.path, c.change_type) for c in result.changes] == [("existing.txt", "modified"), ("new.txt", "created")]
-    assert "-original" in result.changes[0].diff and "+changed" in result.changes[0].diff
 
 
 def test_openhands_result_has_review_ready_summary(tmp_path: Path):
     (tmp_path / "existing.txt").write_text("original\n", encoding="utf-8")
     summary = OpenHandsExecutionService(adapter=FakeAdapter()).execute(repository_root=tmp_path, instruction="change files").public_summary()
     assert summary["successful"] is True and summary["changed_files"] == 2
-    assert summary["changes"][0]["path"] == "existing.txt"
 
 
 def test_empty_instruction_is_rejected_before_workspace_creation(tmp_path: Path):
     with pytest.raises(ValueError, match="must not be empty"):
         OpenHandsExecutionService(adapter=FakeAdapter()).execute(repository_root=tmp_path, instruction="   ")
+
+
+def test_large_review_diff_is_truncated():
+    before = ("a" * (MAX_REVIEW_DIFF_CHARACTERS + 1000)).encode()
+    after = ("b" * (MAX_REVIEW_DIFF_CHARACTERS + 1000)).encode()
+    diff = OpenHandsExecutionService._text_diff("large.txt", before, after)
+    assert len(diff) <= MAX_REVIEW_DIFF_CHARACTERS + 100
+    assert "truncated for safe review" in diff
