@@ -79,22 +79,37 @@ BLANK_ALIASES = {
     "amount": ["AMOUNT"],
     "payment date": ["PAYMENT DATE"],
     "invoice number": ["INVOICE NUMBER"],
+    "μέρη": ["PARTY A", "PARTY B"],
+    "στοιχεία μερών": ["PARTY A", "PARTY B"],
+    "στοιχεία εταιρείας": ["COMPANY DETAILS"],
+    "δεύτερη εταιρεία": ["SECOND PARTY"],
+    "στοιχεία πελάτη": ["CLIENT DETAILS"],
+    "πελάτης": ["CLIENT"],
+    "πάροχος υπηρεσιών": ["SERVICE PROVIDER"],
+    "αμοιβή": ["FEE"],
+    "πρόγραμμα πληρωμών": ["PAYMENT SCHEDULE"],
+    "στοιχεία πληρωμής": ["PAYMENT DETAILS"],
+    "ημερομηνία ισχύος": ["EFFECTIVE DATE"],
+    "εφαρμοστέο δίκαιο": ["GOVERNING LAW"],
+    "ποσό": ["AMOUNT"],
+    "ημερομηνία πληρωμής": ["PAYMENT DATE"],
+    "αριθμός τιμολογίου": ["INVOICE NUMBER"],
 }
 
 DOCUMENT_TYPES: tuple[tuple[str, str, str, str], ...] = (
-    (r"\b(?:non[- ]disclosure|nda)\b", "nda", "Non-Disclosure Agreement", "Legal"),
-    (r"\bservice agreement\b", "service_agreement", "Service Agreement", "Legal"),
-    (r"\bpayment agreement\b", "payment_agreement", "Payment Agreement", "Legal"),
-    (r"\bconsulting agreement\b", "consulting_agreement", "Consulting Agreement", "Legal"),
-    (r"\bcommission agreement\b", "commission_agreement", "Commission Agreement", "Legal"),
-    (r"\binvoice\b", "invoice", "Invoice", "Commercial"),
+    (r"\b(?:non[- ]disclosure|nda|σύμβαση εμπιστευτικότητας|συμφωνία εχεμύθειας)\b", "nda", "Non-Disclosure Agreement", "Legal"),
+    (r"\b(?:service agreement|σύμβαση παροχής υπηρεσιών)\b", "service_agreement", "Service Agreement", "Legal"),
+    (r"\b(?:payment agreement|συμφωνία πληρωμής|σύμβαση πληρωμής)\b", "payment_agreement", "Payment Agreement", "Legal"),
+    (r"\b(?:consulting agreement|σύμβαση συμβουλευτικών υπηρεσιών)\b", "consulting_agreement", "Consulting Agreement", "Legal"),
+    (r"\b(?:commission agreement|σύμβαση προμήθειας|συμφωνία προμήθειας)\b", "commission_agreement", "Commission Agreement", "Legal"),
+    (r"\b(?:invoice|τιμολόγιο)\b", "invoice", "Invoice", "Commercial"),
     (
-        r"\bbusiness nature\b",
+        r"\b(?:business nature|φύση (?:της )?επιχείρησης|περιγραφή επιχειρηματικής δραστηριότητας)\b",
         "business_nature_operating_model",
         "Business Nature & Operating Model Statement",
         "Banking/KYC",
     ),
-    (r"\b(?:board|corporate) resolution\b", "board_resolution", "Board Resolution", "Corporate"),
+    (r"\b(?:(?:board|corporate) resolution|απόφαση διοικητικού συμβουλίου|εταιρική απόφαση)\b", "board_resolution", "Board Resolution", "Corporate"),
 )
 
 PROFILE_FACT_FIELDS = (
@@ -131,23 +146,27 @@ def _classify_request(request: str, requested_type: str | None = None) -> dict[s
 
 def _requested_blanks(request: str) -> list[str]:
     lowered = request.casefold()
-    if not re.search(r"\b(?:leave|keep)\b.{0,120}\bblank\b", lowered):
+    asks_for_blank = re.search(r"\b(?:leave|keep)\b.{0,120}\bblank\b", lowered) or re.search(
+        r"\b(?:άφησε|αφήστε|κρατήστε|κράτησε)\b.{0,120}\b(?:κενό|κενά|κενή|κενές)\b",
+        lowered,
+    )
+    if not asks_for_blank:
         return []
     fields: list[str] = []
     for phrase, aliases in BLANK_ALIASES.items():
-        if re.search(rf"\b{re.escape(phrase)}\b", lowered):
+        if re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", lowered):
             fields.extend(aliases)
     return list(dict.fromkeys(fields))
 
 
 def _user_supplied_facts(request: str, intentional_blanks: list[str]) -> dict[str, Any]:
     patterns = {
-        "commission_percentage": r"\bcommission(?:\s+(?:percentage|rate))?\s*(?:is|of|:)\s*(\d+(?:\.\d+)?\s*%)",
-        "invoice_number": r"\binvoice\s+(?:number|no\.?|#)\s*(?:is|:)?\s*([A-Z0-9][A-Z0-9./-]+)",
-        "payment_date": r"\bpayment\s+date\s+(?:is|:|of)\s*([A-Za-z0-9, /-]+?)(?:[.;]|$)",
-        "amount": r"\bamount\s*(?:is|:|of)\s*((?:EUR|USD|GBP|€|\$|£)\s*[\d,.]+|[\d,.]+\s*(?:EUR|USD|GBP))",
-        "client": r"\bclient\s*:\s*([^\n.;]+)",
-        "service_description": r"\bservice\s*:\s*([^\n.;]+)",
+        "commission_percentage": r"\b(?:commission|προμήθεια)(?:\s+(?:percentage|rate|ποσοστό))?\s*(?:is|of|:|είναι)?\s*(\d+(?:[.,]\d+)?\s*%)",
+        "invoice_number": r"\b(?:invoice\s+(?:number|no\.?|#)|αριθμός\s+τιμολογίου)\s*(?:is|:|είναι)?\s*([A-ZΑ-Ω0-9][A-ZΑ-Ω0-9./-]+)",
+        "payment_date": r"\b(?:payment\s+date|ημερομηνία\s+πληρωμής)\s*(?:is|:|of|είναι)?\s*([A-Za-zΑ-Ωα-ωΆ-ώ0-9, ./-]+?)(?:[.;]|$)",
+        "amount": r"\b(?:amount|ποσό)\s*(?:is|:|of|είναι)?\s*((?:EUR|USD|GBP|€|\$|£)\s*[\d,.]+|[\d,.]+\s*(?:EUR|USD|GBP|€))",
+        "client": r"\b(?:client|πελάτης)\s*:\s*([^\n.;]+)",
+        "service_description": r"\b(?:service|υπηρεσία)\s*:\s*([^\n.;]+)",
     }
     facts: dict[str, Any] = {}
     blank_keys = {field.replace(" ", "_") for field in intentional_blanks}
@@ -157,7 +176,7 @@ def _user_supplied_facts(request: str, intentional_blanks: list[str]) -> dict[st
         match = re.search(pattern, request, re.IGNORECASE)
         if match:
             value = match.group(1).strip().rstrip(".;")
-            if value.casefold() not in {"blank", "unknown", "unresolved", "not provided"}:
+            if value.casefold() not in {"blank", "unknown", "unresolved", "not provided", "κενό", "άγνωστο"}:
                 facts[field_name] = value
     return facts
 
@@ -169,7 +188,11 @@ def interpret_natural_document_request(
     clean = " ".join(str(request or "").split())
     if not clean:
         raise InvalidNaturalCreationRequest("A document objective is required")
-    if re.fullmatch(r"(?:please\s+)?create\s+(?:an?\s+)?agreement[.!]?", clean, re.I):
+    if re.fullmatch(r"(?:please\s+)?create\s+(?:an?\s+)?agreement[.!]?", clean, re.I) or re.fullmatch(
+        r"(?:παρακαλώ\s+)?(?:δημιούργησε|δημιουργήστε|φτιάξε|φτιάξτε)\s+(?:μία|μια)?\s*(?:συμφωνία|σύμβαση)[.!]?",
+        clean,
+        re.I,
+    ):
         return {
             "status": "needs_clarification",
             "clarification_question": (
@@ -181,11 +204,11 @@ def interpret_natural_document_request(
     classification = _classify_request(clean, requested_type)
     official_template = bool(
         re.search(
-            r"\b(?:birth certificate|death certificate|passport|court order|police certificate|government certificate|official certificate)\b",
+            r"\b(?:birth certificate|death certificate|passport|court order|police certificate|government certificate|official certificate|πιστοποιητικό γέννησης|πιστοποιητικό θανάτου|διαβατήριο|δικαστική απόφαση|αστυνομικό πιστοποιητικό|κρατικό πιστοποιητικό|επίσημο πιστοποιητικό)\b",
             clean,
             re.I,
         )
-    ) and not re.search(r"\b(?:authentic source|uploaded source|source document)\b", clean, re.I)
+    ) and not re.search(r"\b(?:authentic source|uploaded source|source document|αυθεντική πηγή|ανεβασμένο έγγραφο|έγγραφο πηγής)\b", clean, re.I)
     intentional = _requested_blanks(clean)
     legal_draft = classification["category"] in {"Legal", "Corporate"}
     return {
