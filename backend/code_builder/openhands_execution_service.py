@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from .openhands_adapter import OpenHandsAdapter,OpenHandsRunResult
 from .openhands_workspace_service import OpenHandsWorkspaceService
-MAX_REVIEW_DIFF_CHARACTERS=500_000
-MAX_CHANGED_FILES=500
+MAX_REVIEW_DIFF_CHARACTERS=500_000;MAX_CHANGED_FILES=500
 @dataclass(frozen=True,slots=True)
 class OpenHandsFileChange:path:str;change_type:str;diff:str
 @dataclass(frozen=True,slots=True)
