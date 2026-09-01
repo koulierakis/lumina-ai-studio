@@ -26,10 +26,7 @@ class OpenHandsExecutionResult:
         return {
             "successful": self.run.successful,
             "changed_files": len(self.changes),
-            "changes": [
-                {"path": item.path, "change_type": item.change_type, "diff": item.diff}
-                for item in self.changes
-            ],
+            "changes": [{"path": item.path, "change_type": item.change_type, "diff": item.diff} for item in self.changes],
         }
 
 
@@ -58,10 +55,13 @@ class OpenHandsExecutionService:
         return "".join(difflib.unified_diff(old, new, fromfile=f"a/{path}", tofile=f"b/{path}"))
 
     def execute(self, *, repository_root: str | Path, instruction: str) -> OpenHandsExecutionResult:
+        normalized_instruction = instruction.strip()
+        if not normalized_instruction:
+            raise ValueError("OpenHands instruction must not be empty.")
         workspace = self.workspace_service.prepare(repository_root)
         try:
             before = self._files(workspace.workspace_root)
-            run = self.adapter.run(prompt=instruction, workspace_root=workspace.workspace_root, disposable_workspace=True)
+            run = self.adapter.run(prompt=normalized_instruction, workspace_root=workspace.workspace_root, disposable_workspace=True)
             after = self._files(workspace.workspace_root)
             changes: list[OpenHandsFileChange] = []
             for path in sorted(set(before) | set(after)):
