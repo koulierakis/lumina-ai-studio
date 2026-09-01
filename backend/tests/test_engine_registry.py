@@ -5,7 +5,7 @@ class FakeAdapter:
     def __init__(self,available):self.available=available
     def is_available(self):return self.available
 class FakeResult:
-    def public_summary(self):return{"successful":True,"changed_files":1,"changes":[]}
+    def public_summary(self):return{"successful":True,"changed_files":1,"change_counts":{"created":0,"modified":1,"deleted":0},"changes":[]}
 class FakeExecutionService:
     def __init__(self,available):self.adapter=FakeAdapter(available)
     def execute(self,*,repository_root,instruction):return FakeResult()
@@ -13,7 +13,7 @@ def registry(available):return CodingEngineRegistry(OpenHandsEngine(FakeExecutio
 def test_registry_keeps_native_default():assert registry(False).validate_selection(None)=="native"
 def test_registry_reports_openhands_safe_mode():assert registry(True).options()[1].safe_mode is True
 def test_review_waits_for_approval_and_keeps_source_unchanged():
-    p=registry(True).execute_for_review(engine="openhands",repository_root="repo",instruction="fix it");assert p["status"]=="awaiting_approval"and p["can_apply"]is False and p["source_repository_unchanged"]is True
+    p=registry(True).execute_for_review(engine="openhands",repository_root="repo",instruction="fix it");assert p["status"]=="awaiting_approval"and p["review_only"]is True and p["source_repository_unchanged"]is True and"Review"in p["message"]
 def test_registry_does_not_replace_native_task_service():
     with pytest.raises(RuntimeError,match="existing Code Builder task service"):registry(True).execute(engine="native",repository_root="repo",instruction="fix it")
 def test_registry_rejects_unavailable_openhands():
