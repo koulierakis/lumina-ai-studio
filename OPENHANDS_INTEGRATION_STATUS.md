@@ -4,7 +4,7 @@ Implemented on the completion branch:
 
 1. LUMINA can prepare a disposable copy of the repository.
 2. Empty instructions are rejected before copy creation.
-3. Runtime folders and common `.env` secret files are excluded from the OpenHands copy.
+3. Runtime folders and dotenv secret files are excluded from the OpenHands copy.
 4. OpenHands autonomous work is permitted only inside that copy.
 5. The real repository remains untouched during AI execution.
 6. Before/after file states are compared.
