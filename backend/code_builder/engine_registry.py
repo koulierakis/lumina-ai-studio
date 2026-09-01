@@ -48,3 +48,9 @@ class CodingEngineRegistry:
     def execute_openhands(self, *, repository_root: str | Path, instruction: str):
         self.validate_selection(OPENHANDS_ENGINE)
         return self.openhands.execute(repository_root=repository_root, instruction=instruction)
+
+    def execute(self, *, engine: str | None, repository_root: str | Path, instruction: str):
+        selected = self.validate_selection(engine)
+        if selected == OPENHANDS_ENGINE:
+            return self.execute_openhands(repository_root=repository_root, instruction=instruction)
+        raise RuntimeError("Native execution remains owned by the existing Code Builder task service.")
