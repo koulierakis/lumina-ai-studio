@@ -570,7 +570,20 @@ class UnifiedDiff(StrictModel):
 
 
 class ProposedFileChange(StrictModel):
-    """One file change proposed by the Code Builder."""
+    """One file change proposed by the Code Builder.
+
+    File contents are byte-significant text.  Unlike normal labels and paths,
+    ``old_content`` and ``new_content`` must never be globally stripped because
+    trailing newlines and indentation are part of the proposed patch.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        validate_assignment=True,
+        str_strip_whitespace=False,
+        use_enum_values=False,
+        populate_by_name=True,
+    )
 
     change_id: UUID = Field(default_factory=uuid4)
     relative_path: str = Field(min_length=1)
@@ -588,6 +601,40 @@ class ProposedFileChange(StrictModel):
     approved: bool = False
     protected: bool = False
     protection_reason: str | None = None
+
+    @field_validator("relative_path", "previous_path")
+    @classmethod
+    def normalize_change_paths(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.replace("\\", "/").strip()
+        if not normalized:
+            raise ValueError("Change path cannot be empty.")
+        candidate = Path(normalized)
+        if candidate.is_absolute() or any(part == ".." for part in candidate.parts):
+            raise ValueError("Change path must stay inside the repository.")
+        return Path(*candidate.parts).as_posix()
+
+    @field_validator("summary", "reason")
+    @classmethod
+    def normalize_required_labels(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("Proposal summary and reason cannot be empty.")
+        return normalized
+
+    @field_validator("protection_reason")
+    @classmethod
+    def normalize_optional_label(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        return normalized or None
+
+    @field_validator("dependencies")
+    @classmethod
+    def normalize_dependencies(cls, value: list[str]) -> list[str]:
+        return [item.strip() for item in value if item.strip()]
 
     @model_validator(mode="after")
     def validate_change_payload(self) -> "ProposedFileChange":
