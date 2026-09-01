@@ -1,0 +1,55 @@
+name: LUMINA Master Drive Validation
+
+on:
+  push:
+    branches:
+      - work/lumina-master-completion
+    paths:
+      - 'drive-assistant/**'
+      - '.github/workflows/lumina-master-drive-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-gates:
+    name: Mobile source and lifecycle gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax check core Drive JavaScript
+        run: |
+          node --check drive-assistant/app-v2.js
+          node --check drive-assistant/drive-completion.js
+          node --check drive-assistant/map-poi-layer.js
+          node --check drive-assistant/map-labels.js
+          node --check drive-assistant/google-places.js
+          node --check drive-assistant/session-bootstrap.js
+      - name: Mobile feature gate
+        run: node drive-assistant/tests/mobile-feature-gate.mjs
+      - name: Mobile lifecycle gate
+        run: node drive-assistant/tests/mobile-lifecycle-gate.mjs
+
+  live-services:
+    name: Live routing, search, POI and weather smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Production search and POI smoke
+        run: node drive-assistant/tests/production-smoke.mjs
+      - name: Routing and weather smoke
+        run: node drive-assistant/tests/runtime-services-smoke.mjs
