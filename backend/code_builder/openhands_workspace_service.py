@@ -12,31 +12,21 @@ from typing import Final
 _DEFAULT_IGNORES: Final[frozenset[str]] = frozenset({".git", ".lumina-runtime", ".pytest_cache", "__pycache__", "node_modules", "dist", "build", ".env", ".env.local", ".env.production"})
 _SECRET_PREFIXES: Final[tuple[str, ...]] = (".env.",)
 
-
-class OpenHandsWorkspaceError(RuntimeError):
-    """Raised when a safe disposable workspace cannot be prepared."""
-
+class OpenHandsWorkspaceError(RuntimeError): pass
 
 @dataclass(frozen=True, slots=True)
 class DisposableOpenHandsWorkspace:
     source_root: Path
     workspace_root: Path
-
-    def cleanup(self) -> None:
-        shutil.rmtree(self.workspace_root.parent, ignore_errors=True)
-
+    def cleanup(self) -> None: shutil.rmtree(self.workspace_root.parent, ignore_errors=True)
 
 class OpenHandsWorkspaceService:
-    """Creates an isolated copy of a repository for autonomous agent work."""
-
-    def __init__(self, *, ignored_names: frozenset[str] = _DEFAULT_IGNORES) -> None:
-        self.ignored_names = ignored_names
+    def __init__(self, *, ignored_names: frozenset[str] = _DEFAULT_IGNORES) -> None: self.ignored_names = ignored_names
 
     @staticmethod
     def _resolve_source(repository_root: str | os.PathLike[str]) -> Path:
         source = Path(repository_root).expanduser().resolve()
-        if not source.is_dir():
-            raise OpenHandsWorkspaceError(f"Repository directory does not exist: {source}")
+        if not source.is_dir(): raise OpenHandsWorkspaceError(f"Repository directory does not exist: {source}")
         return source
 
     def _ignore(self, _directory: str, names: list[str]) -> set[str]:
