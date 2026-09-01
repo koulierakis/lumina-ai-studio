@@ -6,6 +6,7 @@ on:
       - work/lumina-master-completion
     paths:
       - 'ops/add-code-builder-engine-selector.py'
+      - '.github/workflows/apply-code-builder-engine-selector.yml'
   workflow_dispatch:
 
 permissions:
