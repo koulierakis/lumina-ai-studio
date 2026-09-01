@@ -25,38 +25,24 @@ jobs:
       - name: Repair absolute-path coercion without widening repository scope
         run: |
           python - <<'PY'
+          import re
           from pathlib import Path
 
           path = Path("backend/code_builder/patch_generation_service.py")
           text = path.read_text(encoding="utf-8")
-          old = '''    if text.startswith("/"):
-              # POSIX-style root-relative reference; Windows paths with a drive
-              # are handled by the absolute-path branch below.
-              return _normalize_relative_path(text.lstrip("/"))
-          candidate = Path(text)
-          if not candidate.is_absolute():
-              return None
-          try:
-              resolved = candidate.resolve(strict=False)
-              relative = resolved.relative_to(root.resolve()).as_posix()
-          except (OSError, ValueError):
-              return None
-          return _normalize_relative_path(relative)
-          '''
-          new = '''    candidate = Path(text)
-          if not candidate.is_absolute():
-              return None
-          try:
-              resolved = candidate.resolve(strict=False)
-              relative = resolved.relative_to(root.resolve()).as_posix()
-          except (OSError, ValueError):
-              return None
-          return _normalize_relative_path(relative)
-          '''
-          if old not in text:
-              raise SystemExit("Expected path-coercion block was not found; refusing an unsafe blind edit.")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          pattern = re.compile(
+              r'    if text\.startswith\("/"\):\n'
+              r'        # POSIX-style root-relative reference; Windows paths with a drive\n'
+              r'        # are handled by the absolute-path branch below\.\n'
+              r'        return _normalize_relative_path\(text\.lstrip\("/"\)\)\n'
+          )
+          updated, count = pattern.subn("", text, count=1)
+          if count != 1:
+              raise SystemExit(f"Expected exactly one unsafe POSIX shortcut; found {count}. Refusing blind edit.")
+          path.write_text(updated, encoding="utf-8")
           PY
+      - name: Compile repaired file
+        run: python -m py_compile backend/code_builder/patch_generation_service.py
       - name: Run focused Native Code Builder regression tests
         run: python -m pytest backend/tests/test_code_builder_ai_patch_generation.py -q
       - name: Commit verified repair
