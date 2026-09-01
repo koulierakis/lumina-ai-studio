@@ -72,7 +72,7 @@ def make_service(root: Path, path: str) -> TaskService:
     )
 
 
-def test_preparation_generates_diff_without_writing_then_approval_applies(tmp_path: Path) -> None:
+def test_preparation_generates_diff_then_approval_applies_and_backup_rolls_back(tmp_path: Path) -> None:
     relative = "backend/prepared_boundary.py"
     (tmp_path / "backend").mkdir()
     payload = TaskCreateRequest(
@@ -121,6 +121,21 @@ def test_preparation_generates_diff_without_writing_then_approval_applies(tmp_pa
     assert service.planning_service.call_count == 1
     assert stored.request.metadata["approved_preparation_plan"]["title"] == "Prepared change"
     assert (tmp_path / relative).read_text(encoding="utf-8") == "BOUNDARY = 'approved'\n"
+
+    # The same real backup produced by TaskService must be sufficient to undo
+    # the approved write. This proves the transaction boundary end-to-end
+    # without relying on an AI model or a fake rollback result.
+    backup = stored.result.backup
+    assert backup is not None
+    backup_id = getattr(backup, "backup_id", None)
+    if backup_id is None and isinstance(backup, dict):
+        backup_id = backup.get("backup_id")
+    assert backup_id
+
+    rollback = BackupService(tmp_path).rollback(str(backup_id))
+    assert relative in rollback.removed_files
+    assert not (tmp_path / relative).exists()
+    assert rollback.safety_backup_id is not None
 
 
 class ReviewOllamaService:
