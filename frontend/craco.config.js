@@ -42,6 +42,12 @@ if (config.enableHealthCheck) {
 
 let webpackConfig = {
   eslint: { configure: { extends: ["plugin:react-hooks/recommended"], rules: { "react-hooks/rules-of-hooks": "error", "react-hooks/exhaustive-deps": "warn" } } },
+  jest: {
+    configure: (jestConfig) => ({
+      ...jestConfig,
+      resolver: path.resolve(__dirname, 'jest.lexical-resolver.js'),
+    }),
+  },
   webpack: {
     alias: { '@': path.resolve(__dirname, 'src') },
     configure: (webpackConfig) => {
