@@ -16,13 +16,18 @@ class FakeAdapter:
 def test_openhands_changes_only_disposable_copy(tmp_path: Path):
     (tmp_path / "existing.txt").write_text("original\n", encoding="utf-8")
     service = OpenHandsExecutionService(adapter=FakeAdapter())
-
     result = service.execute(repository_root=tmp_path, instruction="change files")
-
     assert (tmp_path / "existing.txt").read_text(encoding="utf-8") == "original\n"
-    assert [(c.path, c.change_type) for c in result.changes] == [
-        ("existing.txt", "modified"),
-        ("new.txt", "created"),
-    ]
+    assert [(c.path, c.change_type) for c in result.changes] == [("existing.txt", "modified"), ("new.txt", "created")]
     assert "-original" in result.changes[0].diff
     assert "+changed" in result.changes[0].diff
+
+
+def test_openhands_result_has_review_ready_summary(tmp_path: Path):
+    (tmp_path / "existing.txt").write_text("original\n", encoding="utf-8")
+    result = OpenHandsExecutionService(adapter=FakeAdapter()).execute(repository_root=tmp_path, instruction="change files")
+    summary = result.public_summary()
+    assert summary["successful"] is True
+    assert summary["changed_files"] == 2
+    assert summary["changes"][0]["path"] == "existing.txt"
+    assert summary["changes"][0]["change_type"] == "modified"
