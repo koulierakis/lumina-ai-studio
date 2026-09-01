@@ -12,10 +12,11 @@ Current experimental path:
 8. `OpenHandsEngine` provides a small optional engine boundary and availability status.
 9. `CodingEngineRegistry` keeps the current native engine available while advertising OpenHands only when it is actually installed.
 10. The registry produces a UI-ready status payload and defaults missing engine selections to Native, protecting existing Code Builder behavior during migration.
+11. OpenHands execution can now be routed through the registry, giving the existing Code Builder one controlled entry point for the new engine.
 
 ## Next integration boundary
 
-Wire the engine registry into the existing Code Builder API/task lifecycle, then expose the selection in the existing UI. Preserve approval, backup, persistence, apply, rollback, and current native behavior.
+Wire the registry into the existing Code Builder API/task lifecycle, then expose the selection in the existing UI. Preserve approval, backup, persistence, apply, rollback, and current native behavior.
 
 ## Validation status
 
