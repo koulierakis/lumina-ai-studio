@@ -13,7 +13,8 @@ Implemented on the completion branch:
 9. OpenHands availability can be checked without making it a hard LUMINA dependency.
 10. Native Code Builder remains the safe default.
 11. OpenHands is exposed as an experimental second engine only when available.
-12. A controlled engine entry point returns a review-ready change summary for later approval UI integration.
+12. A controlled engine entry point returns a review-ready change summary.
+13. Every OpenHands review result is explicitly marked `requires_approval: true`; this path does not auto-apply AI edits.
 
 ## Next integration boundary
 
