@@ -9,11 +9,12 @@ Current experimental path:
 5. It returns a reviewable list of created, modified, and deleted files with unified text diffs.
 6. The disposable copy is removed after execution.
 7. The real repository is not modified by this path.
-8. `OpenHandsEngine` now provides a small optional engine boundary and availability status for later Code Builder task integration.
+8. `OpenHandsEngine` provides a small optional engine boundary and availability status.
+9. `CodingEngineRegistry` keeps the current native engine available while advertising OpenHands only when it is actually installed.
 
 ## Next integration boundary
 
-Wire `OpenHandsEngine` into the existing Code Builder task lifecycle as an optional engine, preserving the current approval, backup, persistence, apply, rollback, and UI layers.
+Wire the engine registry into the existing Code Builder task/API lifecycle, then expose the selection in the existing UI. Preserve approval, backup, persistence, apply, rollback, and current native behavior.
 
 ## Validation status
 
