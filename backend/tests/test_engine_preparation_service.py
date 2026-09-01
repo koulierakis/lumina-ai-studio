@@ -12,19 +12,23 @@ class FakeRegistry:
 
 
 class FakeOpenHandsPreparation:
-    def prepare(self, *, task_id, repository_root, instruction):
+    def __init__(self):
+        self.last_kwargs = None
+
+    def prepare(self, **kwargs):
+        self.last_kwargs = kwargs
         return {
-            "task_id": task_id,
+            "task_id": kwargs["task_id"],
             "engine": "openhands",
             "plan": {"files": ["demo.txt"]},
             "patch": {"operations": [{"operation": "create", "path": "demo.txt", "content": "ok\n"}]},
         }
 
 
-def service():
+def service(openhands=None):
     return CodeBuilderEnginePreparationService(
         registry=FakeRegistry(),
-        openhands=FakeOpenHandsPreparation(),
+        openhands=openhands or FakeOpenHandsPreparation(),
     )
 
 
@@ -49,6 +53,25 @@ def test_openhands_engine_uses_openhands_preparation():
     )
     assert result["engine"] == "openhands"
     assert result["patch"]["operations"][0]["path"] == "demo.txt"
+
+
+def test_openhands_engine_preserves_task_scope_and_file_permissions():
+    fake = FakeOpenHandsPreparation()
+    service(fake).prepare(
+        engine="openhands",
+        task_id="t-scope",
+        repository_root="repo",
+        instruction="fix only backend",
+        target_paths=("backend",),
+        excluded_paths=("backend/secrets",),
+        allow_file_creation=False,
+        allow_file_deletion=True,
+        native_prepare=lambda: pytest.fail("native preparation should not run"),
+    )
+    assert fake.last_kwargs["target_paths"] == ("backend",)
+    assert fake.last_kwargs["excluded_paths"] == ("backend/secrets",)
+    assert fake.last_kwargs["allow_file_creation"] is False
+    assert fake.last_kwargs["allow_file_deletion"] is True
 
 
 def test_approval_metadata_matches_existing_task_service_contract():
