@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install focused test dependencies
-        run: python -m pip install --disable-pip-version-check pytest pytest-xdist pydantic
+        run: python -m pip install --disable-pip-version-check pytest pytest-xdist pydantic fastapi httpx
       - name: Compile OpenHands integration
         run: |
           python -m py_compile backend/code_builder/openhands_adapter.py
@@ -43,6 +43,7 @@ jobs:
           python -m py_compile backend/code_builder/openhands_engine_service.py
           python -m py_compile backend/code_builder/openhands_proposal_service.py
           python -m py_compile backend/code_builder/task_service_engine_hooks.py
+          python -m py_compile backend/code_builder/engine_preparation_service.py
           python -m py_compile backend/code_builder/task_service.py
       - name: Run focused OpenHands tests
         working-directory: backend
