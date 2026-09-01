@@ -44,6 +44,7 @@ def main() -> int:
             f"Create a new text file named {PROBE_PATH} containing exactly "
             "LUMINA_OPENHANDS_RUNTIME_OK followed by a newline. Do not modify any other file."
         ),
+        "target_paths": [PROBE_PATH],
         "require_approval": True,
         "auto_start_after_approval": False,
         "allow_file_creation": True,
@@ -76,19 +77,24 @@ def main() -> int:
     patch = preparation.get("patch") or {}
     operations = patch.get("operations") or []
     metadata = preparation.get("metadata") or {}
+    operation_paths = [str(item.get("path")) for item in operations if isinstance(item, dict)]
 
     result = {
         "task_id": task_id,
         "phase": phase,
         "engine": metadata.get("coding_engine"),
         "runtime_validated_for_task": metadata.get("runtime_validated_for_task"),
+        "scope_enforced": metadata.get("scope_enforced"),
         "operation_count": len(operations),
+        "operation_paths": operation_paths,
         "source_repository_unchanged": not probe.exists(),
         "ready": (
             phase == "awaiting_approval"
             and metadata.get("coding_engine") == "openhands"
             and metadata.get("runtime_validated_for_task") is True
+            and metadata.get("scope_enforced") is True
             and len(operations) >= 1
+            and set(operation_paths) == {PROBE_PATH}
             and not probe.exists()
         ),
     }
