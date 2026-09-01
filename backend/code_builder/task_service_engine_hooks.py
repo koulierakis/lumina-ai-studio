@@ -1,13 +1,13 @@
 """Optional coding-engine hooks for the existing TaskService pipeline.
 
-The native TaskService remains the default.  These helpers activate only when a
-request explicitly carries ``metadata.coding_engine == 'openhands'``.  OpenHands
+The native TaskService remains the default. These helpers activate only when a
+request explicitly carries ``metadata.coding_engine == 'openhands'``. OpenHands
 owns proposal preparation only; LUMINA keeps approval, backup, patch apply,
 build validation and rollback.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -32,9 +32,50 @@ def is_openhands_preparation(context: Any) -> bool:
     return is_openhands_request(context) and bool(_metadata(context).get(_PREPARATION_FLAG))
 
 
-def has_approved_openhands_plan(context: Any) -> bool:
+def require_approved_openhands_execution(context: Any) -> Mapping[str, Any]:
+    """Validate that an approved OpenHands proposal belongs to this exact task.
+
+    Approval metadata is replay-sensitive. A proposal prepared for task A must
+    never be reusable as an execution payload for task B. Approved patch
+    operations are therefore accepted only when the reviewed plan and the
+    originating task id are present together and match the current request.
+    """
+    if not is_openhands_request(context):
+        raise RuntimeError("OpenHands approval validation requires an OpenHands request.")
+
     metadata = _metadata(context)
-    return is_openhands_request(context) and isinstance(metadata.get("approved_preparation_plan"), Mapping)
+    approved_plan = metadata.get("approved_preparation_plan")
+    if not isinstance(approved_plan, Mapping):
+        raise RuntimeError("OpenHands execution requires an approved preparation plan.")
+
+    approved_task_id = str(metadata.get("approved_preparation_task_id", "")).strip()
+    current_task_id = str(getattr(getattr(context, "request", None), "task_id", "")).strip()
+    if not approved_task_id:
+        raise RuntimeError("OpenHands approved plan is missing its originating task id.")
+    if not current_task_id or approved_task_id != current_task_id:
+        raise RuntimeError(
+            "OpenHands approved plan belongs to a different task and cannot be replayed."
+        )
+
+    approved_operations = metadata.get("approved_patch_operations")
+    if (
+        not isinstance(approved_operations, Sequence)
+        or isinstance(approved_operations, (str, bytes, bytearray))
+        or not approved_operations
+    ):
+        raise RuntimeError("OpenHands approved plan has no approved patch operations.")
+
+    return approved_plan
+
+
+def has_approved_openhands_plan(context: Any) -> bool:
+    if not is_openhands_request(context):
+        return False
+    metadata = _metadata(context)
+    if not isinstance(metadata.get("approved_preparation_plan"), Mapping):
+        return False
+    require_approved_openhands_execution(context)
+    return True
 
 
 def should_bypass_native_analysis(context: Any) -> bool:
@@ -45,7 +86,7 @@ def build_minimal_analysis(context: Any) -> dict[str, Any]:
     """Return the minimum analysis contract required by TaskService.
 
     OpenHands inspects the disposable repository itself during preparation, so
-    running the native repository+LLM analysis before it is redundant.  The
+    running the native repository+LLM analysis before it is redundant. The
     approved execution path also reuses the already reviewed plan/patch.
     """
     repository_root = Path(context.configuration.repository_root).resolve()
@@ -67,8 +108,21 @@ def prepare_or_reuse_plan(context: Any) -> Any | None:
 
     metadata = _metadata(context)
     approved_plan = metadata.get("approved_preparation_plan")
+    approved_operations = metadata.get("approved_patch_operations")
+
+    # An execution payload must never be accepted without the reviewed plan it
+    # came from. This blocks direct metadata injection of patch operations.
+    if (
+        approved_operations is not None
+        and not isinstance(approved_plan, Mapping)
+        and not is_openhands_preparation(context)
+    ):
+        raise RuntimeError(
+            "OpenHands patch operations cannot execute without an approved preparation plan."
+        )
+
     if isinstance(approved_plan, Mapping) and not is_openhands_preparation(context):
-        return dict(approved_plan)
+        return dict(require_approved_openhands_execution(context))
 
     if not is_openhands_preparation(context):
         return None
