@@ -26,11 +26,8 @@ class CodingEngineRegistry:
         self.openhands = openhands or OpenHandsEngine()
 
     def options(self) -> tuple[CodingEngineOption, ...]:
-        openhands_status = self.openhands.status()
-        return (
-            CodingEngineOption(NATIVE_ENGINE, True, False),
-            CodingEngineOption(OPENHANDS_ENGINE, openhands_status.available, True),
-        )
+        status = self.openhands.status()
+        return (CodingEngineOption(NATIVE_ENGINE, True, False), CodingEngineOption(OPENHANDS_ENGINE, status.available, True))
 
     def public_status(self) -> dict[str, object]:
         return {"default": NATIVE_ENGINE, "engines": [asdict(option) for option in self.options()]}
