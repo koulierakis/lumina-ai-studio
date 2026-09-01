@@ -64,6 +64,7 @@ class OpenHandsPreparationService:
             instruction=constrained_instruction,
         )
 
+        normalized_changed_paths: list[str] = []
         for change in result.changes:
             path = _normalize_relative(change.path)
             if normalized_targets and not any(_is_within(path, target) for target in normalized_targets):
@@ -76,22 +77,26 @@ class OpenHandsPreparationService:
                 raise OpenHandsScopeError(f"OpenHands proposed file creation but creation is disabled: {path}")
             if change.change_type == "deleted" and not allow_file_deletion:
                 raise OpenHandsScopeError(f"OpenHands proposed file deletion but deletion is disabled: {path}")
+            normalized_changed_paths.append(path)
 
         patch_request = build_patch_request_from_openhands(result, dry_run=True)
         review = result.public_summary()
-        changed_paths = [change.path for change in result.changes]
 
         return {
             "task_id": task_id,
             "status": "dry_run",
             "success": True,
             "engine": OPENHANDS_ENGINE,
-            "runtime_validated": True,
+            # This proves only that this individual sandbox preparation completed.
+            # It does not declare the global OpenHands integration production-ready.
+            "preparation_execution_completed": True,
+            "runtime_validated": False,
+            "ready": False,
             "source_repository_unchanged": True,
             "requires_approval": True,
-            "changed_paths": changed_paths,
+            "changed_paths": normalized_changed_paths,
             "plan": {
-                "files": changed_paths,
+                "files": normalized_changed_paths,
                 "engine": OPENHANDS_ENGINE,
                 "review_only": True,
                 "target_paths": list(normalized_targets),
