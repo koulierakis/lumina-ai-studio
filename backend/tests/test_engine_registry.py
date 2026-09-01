@@ -27,6 +27,10 @@ def test_registry_always_keeps_native_engine():
     assert options[0].available is True
 
 
+def test_registry_defaults_missing_selection_to_native():
+    assert registry(False).validate_selection(None) == "native"
+
+
 def test_registry_reports_openhands_availability():
     options = registry(True).options()
     assert options[1].name == "openhands"
