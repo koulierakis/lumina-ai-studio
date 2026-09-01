@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Final
 
 from .openhands_engine import OpenHandsEngine
@@ -44,6 +45,6 @@ class CodingEngineRegistry:
             return OPENHANDS_ENGINE
         raise ValueError(f"Unknown coding engine: {name}")
 
-    def execute_openhands(self, *, repository_root: str, instruction: str):
+    def execute_openhands(self, *, repository_root: str | Path, instruction: str):
         self.validate_selection(OPENHANDS_ENGINE)
         return self.openhands.execute(repository_root=repository_root, instruction=instruction)
