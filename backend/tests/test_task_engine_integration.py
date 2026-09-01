@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from code_builder.task_engine_integration import (
+    _approved_openhands_plan,
     _is_openhands_preparation,
     execute_openhands_preparation,
 )
@@ -49,6 +50,29 @@ def test_only_openhands_preparation_is_intercepted():
     assert not _is_openhands_preparation(
         TaskRequest(instruction="fix", metadata={"coding_engine": "openhands"})
     )
+
+
+def test_approved_openhands_plan_is_reused_exactly():
+    approved = {"files": ["demo.txt"], "engine": "openhands", "review_only": True}
+    request = TaskRequest(
+        instruction="fix",
+        metadata={
+            "coding_engine": "openhands",
+            "approved_preparation_plan": approved,
+        },
+    )
+    assert _approved_openhands_plan(request) is approved
+
+
+def test_native_task_never_reuses_openhands_plan_metadata():
+    request = TaskRequest(
+        instruction="fix",
+        metadata={
+            "coding_engine": "native",
+            "approved_preparation_plan": {"files": ["wrong.txt"]},
+        },
+    )
+    assert _approved_openhands_plan(request) is None
 
 
 def test_openhands_preparation_returns_task_execution_result_without_source_changes(tmp_path: Path):
