@@ -7,7 +7,7 @@ Implemented on the completion branch:
 3. OpenHands autonomous work is permitted only inside the disposable copy.
 4. The real repository remains untouched during AI execution.
 5. Before/after file states are compared.
-6. Created, modified, and deleted files return as reviewable diffs; oversized diffs are shortened and excessively large change sets are rejected.
+6. Created, modified, and deleted files return as reviewable diffs plus simple change counts; oversized diffs are shortened and excessively large change sets are rejected.
 7. Temporary work is cleaned up after execution.
 8. OpenHands availability and safe-mode status are reportable without a hard dependency.
 9. Native Code Builder remains the default; OpenHands is experimental and only available when installed.
