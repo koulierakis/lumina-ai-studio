@@ -11,11 +11,16 @@ on:
       - 'backend/code_builder/task_service_engine_hooks.py'
       - 'backend/code_builder/engine_preparation_service.py'
       - 'backend/code_builder/router_engine_bridge.py'
+      - 'backend/code_builder/engine_http_routes.py'
+      - 'backend/code_builder/engine_http_integration.py'
+      - 'backend/code_builder/__init__.py'
       - 'backend/tests/test_openhands_*.py'
       - 'backend/tests/test_task_service_engine_hooks.py'
       - 'backend/tests/test_engine_preparation_service.py'
       - 'backend/tests/test_task_engine_integration.py'
       - 'backend/tests/test_router_engine_bridge.py'
+      - 'backend/tests/test_engine_http_routes.py'
+      - 'backend/tests/test_engine_http_integration.py'
       - 'backend/tests/conftest.py'
       - '.github/workflows/lumina-master-openhands-validation.yml'
   workflow_dispatch:
@@ -57,6 +62,8 @@ jobs:
           python -m py_compile backend/code_builder/task_service_engine_hooks.py
           python -m py_compile backend/code_builder/engine_preparation_service.py
           python -m py_compile backend/code_builder/router_engine_bridge.py
+          python -m py_compile backend/code_builder/engine_http_routes.py
+          python -m py_compile backend/code_builder/engine_http_integration.py
           python -m py_compile backend/code_builder/models.py
           python -m py_compile backend/code_builder/task_service.py
       - name: Run full OpenHands integration tests
@@ -68,3 +75,5 @@ jobs:
           tests/test_engine_preparation_service.py
           tests/test_task_engine_integration.py
           tests/test_router_engine_bridge.py
+          tests/test_engine_http_routes.py
+          tests/test_engine_http_integration.py
