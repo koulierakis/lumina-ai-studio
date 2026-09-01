@@ -18,8 +18,18 @@ class OpenHandsWorkspaceService:
         source=Path(repository_root).expanduser().resolve()
         if not source.is_dir():raise OpenHandsWorkspaceError(f"Repository directory does not exist: {source}")
         return source
-    def _ignore(self,_directory:str,names:list[str])->set[str]:
-        ignored={n for n in names if n in self.ignored_names};ignored.update(n for n in names if any(n.startswith(p)for p in _SECRET_PREFIXES));return ignored
+    def _ignore(self,directory:str,names:list[str])->set[str]:
+        base=Path(directory)
+        ignored={n for n in names if n in self.ignored_names}
+        ignored.update(n for n in names if any(n.startswith(p)for p in _SECRET_PREFIXES))
+        # Never dereference repository symlinks into the disposable workspace.
+        # A link could point outside the repository to credentials or unrelated files.
+        for name in names:
+            try:
+                if (base/name).is_symlink():ignored.add(name)
+            except OSError:
+                ignored.add(name)
+        return ignored
     def prepare(self,repository_root:str|os.PathLike[str])->DisposableOpenHandsWorkspace:
         source=self._resolve_source(repository_root);temp_parent=Path(tempfile.mkdtemp(prefix="lumina-openhands-"));destination=temp_parent/"workspace"
         try:shutil.copytree(source,destination,ignore=self._ignore,symlinks=False)
