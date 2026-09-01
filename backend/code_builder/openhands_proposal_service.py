@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Final
+from typing import Annotated, Final
+
+from pydantic import StringConstraints
 
 from .models import ChangeType, ProposedFileChange, RiskLevel
 from .openhands_change_capture_service import OpenHandsFileChange
@@ -11,6 +13,18 @@ RISKY_PATH_MARKERS: Final[tuple[str, ...]] = (
     ".github/", "backend/server.py", "launcher/", "docker-compose", "package.json",
     "backend/requirements", "pyproject.toml",
 )
+
+# StrictModel intentionally strips surrounding whitespace from normal strings.
+# Source file payloads are different: spaces and final newlines are data and must
+# survive byte-for-byte through preview, approval, backup and apply.
+ExactFileText = Annotated[str, StringConstraints(strip_whitespace=False)]
+
+
+class OpenHandsProposedFileChange(ProposedFileChange):
+    """Native proposal contract with exact source-file payload preservation."""
+
+    old_content: ExactFileText | None = None
+    new_content: ExactFileText | None = None
 
 
 def _sha256(text: str | None) -> str | None:
@@ -44,7 +58,7 @@ class OpenHandsProposalService:
         for change in changes:
             change_type = mapping[change.change_type]
             proposals.append(
-                ProposedFileChange(
+                OpenHandsProposedFileChange(
                     relative_path=change.relative_path,
                     change_type=change_type,
                     old_content=change.before_text,
