@@ -28,8 +28,6 @@ class OpenHandsExecutionService:
         try:
             before=self._files(workspace.workspace_root);run=self.adapter.run(prompt=normalized,workspace_root=workspace.workspace_root,disposable_workspace=True);after=self._files(workspace.workspace_root);changed=sorted(p for p in set(before)|set(after)if before.get(p)!=after.get(p))
             if len(changed)>MAX_CHANGED_FILES:raise RuntimeError(f"OpenHands changed too many files for safe review: {len(changed)}")
-            changes=[]
-            for path in changed:
-                kind="created"if path not in before else"deleted"if path not in after else"modified";changes.append(OpenHandsFileChange(path,kind,self._text_diff(path,before.get(path),after.get(path))))
-            return OpenHandsExecutionResult(run,tuple(changes))
+            changes=tuple(OpenHandsFileChange(path,"created"if path not in before else"deleted"if path not in after else"modified",self._text_diff(path,before.get(path),after.get(path)))for path in changed)
+            return OpenHandsExecutionResult(run,changes)
         finally:workspace.cleanup()
