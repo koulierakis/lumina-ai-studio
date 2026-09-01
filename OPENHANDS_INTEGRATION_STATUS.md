@@ -12,16 +12,17 @@ Implemented on the completion branch:
 8. OpenHands availability and safe-mode status are reportable without a hard dependency.
 9. Native Code Builder remains the default and is explicitly preserved; OpenHands is experimental and migration is parallel.
 10. Approval is mandatory; any future apply path must preserve both backup and rollback capability.
-11. Engine status explicitly reports OpenHands as not runtime-validated and not ready until a real runtime test succeeds.
-12. OpenHands proposals are converted into the same approved patch metadata keys already consumed by the existing TaskService.
-13. A shared `CodeBuilderEnginePreparationService` now selects Native or OpenHands for proposal preparation while leaving approval, backup, apply, build validation, persistence, and rollback under the existing LUMINA task lifecycle.
+11. OpenHands proposals are converted into the same approved patch metadata keys already consumed by the existing TaskService.
+12. A shared `CodeBuilderEnginePreparationService` selects Native or OpenHands for proposal preparation while leaving approval, backup, apply, build validation, persistence, and rollback under the existing LUMINA task lifecycle.
+13. A minimal `router_engine_bridge.py` now contains the exact small hooks needed by `router.py`: read the requested engine from task metadata, route only the preparation stage, and attach approved operations back to the existing execution request.
+14. Native remains the default when no engine is supplied, so existing Code Builder behavior is preserved.
 
 ## Next integration boundary
 
-Wire `CodeBuilderEnginePreparationService` into the router's preparation step and add the engine selection field to the existing Code Builder API/UI. Native must remain the default. OpenHands must remain review-only until runtime validation succeeds.
+Apply these small bridge calls inside `router.py` and expose `coding_engine` through the existing API/UI. Keep OpenHands review-only until runtime validation succeeds.
 
 ## Validation status
 
-Isolated tests exist for the safety boundary, OpenHands proposal conversion, and the shared Native/OpenHands preparation bridge. The GitHub connector cannot execute repository tests. A real OpenHands task also requires OpenHands plus a configured model.
+Isolated tests exist for the safety boundary, OpenHands proposal conversion, shared preparation service, and minimal router bridge. The GitHub connector cannot execute repository tests. A real OpenHands task also requires OpenHands plus a configured model.
 
-Current checkpoint: the engine-selection preparation bridge is implemented in code. It is NOT yet marked READY because automated tests and a real OpenHands runtime task have not yet been executed in the target runtime.
+Current checkpoint: the router integration has been reduced to a small, testable change rather than a rewrite of the existing Code Builder lifecycle. It is NOT yet marked READY because the actual `router.py` wiring and real runtime proof still remain.
