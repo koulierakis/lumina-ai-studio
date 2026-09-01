@@ -1,0 +1,54 @@
+name: Apply Code Builder Engine Selector
+
+on:
+  push:
+    branches:
+      - work/lumina-master-completion
+    paths:
+      - 'ops/add-code-builder-engine-selector.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: work/lumina-master-completion
+          fetch-depth: 0
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply guarded frontend migration
+        run: python ops/add-code-builder-engine-selector.py
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: yarn install --frozen-lockfile --ignore-scripts
+      - name: Run Code Builder frontend tests
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: yarn test --watchAll=false --runInBand src/pages/CodeBuilder.test.js src/pages/CodeBuilder.runtimeStatus.test.js
+      - name: Commit validated selector
+        run: |
+          if git diff --quiet -- frontend/src/pages/CodeBuilder.jsx frontend/src/pages/CodeBuilder.test.js; then
+            echo 'No frontend selector changes required.'
+            exit 0
+          fi
+          git config user.name 'LUMINA Completion Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add frontend/src/pages/CodeBuilder.jsx frontend/src/pages/CodeBuilder.test.js
+          git commit -m 'Add Native and OpenHands selector to Code Builder'
+          git push origin HEAD:work/lumina-master-completion
