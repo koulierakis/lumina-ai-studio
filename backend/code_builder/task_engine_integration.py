@@ -7,7 +7,6 @@ and rollback remain owned by the existing LUMINA Code Builder lifecycle.
 from __future__ import annotations
 
 import time
-from collections.abc import Mapping
 from typing import Any
 
 from .engine_registry import NATIVE_ENGINE, OPENHANDS_ENGINE
@@ -96,7 +95,12 @@ def execute_openhands_preparation(
             status=TaskStatus.ANALYZING,
             stage=TaskStage.ANALYSIS,
             message="OpenHands safe preparation started.",
-            details={"coding_engine": OPENHANDS_ENGINE, "safe_copy": True},
+            details={
+                "coding_engine": OPENHANDS_ENGINE,
+                "safe_copy": True,
+                "target_paths": list(request.target_paths),
+                "excluded_paths": list(request.excluded_paths),
+            },
         )
     )
 
@@ -105,6 +109,10 @@ def execute_openhands_preparation(
         task_id=request.task_id,
         repository_root=task_service.configuration.repository_root,
         instruction=request.instruction,
+        target_paths=request.target_paths,
+        excluded_paths=request.excluded_paths,
+        allow_file_creation=request.allow_file_creation,
+        allow_file_deletion=request.allow_file_deletion,
     )
     token.raise_if_cancelled()
 
@@ -122,6 +130,7 @@ def execute_openhands_preparation(
                 "coding_engine": OPENHANDS_ENGINE,
                 "changed_paths": list(changed_paths),
                 "source_repository_unchanged": True,
+                "scope_enforced": True,
             },
         )
     )
@@ -138,10 +147,11 @@ def execute_openhands_preparation(
             "engine": OPENHANDS_ENGINE,
             "safe_copy": True,
             "source_repository_unchanged": True,
+            "scope_enforced": True,
         },
         plan=prepared.get("plan"),
         patch=prepared.get("patch"),
-        patch_validation={"success": True, "review_only": True},
+        patch_validation={"success": True, "review_only": True, "scope_enforced": True},
         patch_application={"success": True, "dry_run": True, "changed_paths": list(changed_paths)},
         changed_paths=changed_paths,
         events=tuple(events),
@@ -153,6 +163,7 @@ def execute_openhands_preparation(
             "source_repository_unchanged": True,
             "requires_approval": True,
             "runtime_validated_for_task": True,
+            "scope_enforced": True,
         },
     )
     if not return_domain_model:
