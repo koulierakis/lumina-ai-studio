@@ -11,7 +11,7 @@ Implemented on the completion branch:
 7. Temporary work is cleaned up after execution.
 8. OpenHands availability and safe-mode status are reportable without a hard dependency.
 9. Native Code Builder remains the default; OpenHands is experimental and only available when installed.
-10. OpenHands proposals explicitly report `awaiting_approval`, `review_only: true`, `applied: false`, `can_apply: false`, and `source_repository_unchanged: true`.
+10. OpenHands proposals explicitly report `awaiting_approval`, `review_only: true`, `applied: false`, `can_apply: false`, and `source_repository_unchanged: true`, plus a simple user-facing review message.
 
 ## Next integration boundary
 
