@@ -22,6 +22,16 @@ class OpenHandsExecutionResult:
     run: OpenHandsRunResult
     changes: tuple[OpenHandsFileChange, ...]
 
+    def public_summary(self) -> dict[str, object]:
+        return {
+            "successful": self.run.successful,
+            "changed_files": len(self.changes),
+            "changes": [
+                {"path": item.path, "change_type": item.change_type, "diff": item.diff}
+                for item in self.changes
+            ],
+        }
+
 
 class OpenHandsExecutionService:
     """Runs OpenHands on a copy and returns reviewable changes without touching source."""
