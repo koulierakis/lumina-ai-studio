@@ -24,14 +24,7 @@ class OpenHandsEngine:
         self.execution_service = execution_service or OpenHandsExecutionService()
 
     def status(self) -> OpenHandsEngineStatus:
-        return OpenHandsEngineStatus(
-            name=self.name,
-            available=self.execution_service.adapter.is_available(),
-            safe_mode=True,
-        )
+        return OpenHandsEngineStatus(name=self.name, available=self.execution_service.adapter.is_available(), safe_mode=True)
 
     def execute(self, *, repository_root: str | Path, instruction: str) -> OpenHandsExecutionResult:
-        return self.execution_service.execute(
-            repository_root=repository_root,
-            instruction=instruction,
-        )
+        return self.execution_service.execute(repository_root=repository_root, instruction=instruction)
