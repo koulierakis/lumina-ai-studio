@@ -11,7 +11,7 @@ class CodingEngineRegistry:
     def __init__(self,openhands:OpenHandsEngine|None=None)->None:self.openhands=openhands or OpenHandsEngine()
     def options(self)->tuple[CodingEngineOption,...]:
         s=self.openhands.status();return(CodingEngineOption(NATIVE_ENGINE,True,False,True),CodingEngineOption(OPENHANDS_ENGINE,s.available,True,s.safe_mode))
-    def public_status(self)->dict[str,object]:return{"default":NATIVE_ENGINE,"engines":[asdict(o)for o in self.options()],"migration_mode":"parallel","native_preserved":True}
+    def public_status(self)->dict[str,object]:return{"default":NATIVE_ENGINE,"engines":[asdict(o)for o in self.options()],"migration_mode":"parallel","native_preserved":True,"approval_required_for_openhands":True}
     def validate_selection(self,name:str|None)->str:
         n=(name or NATIVE_ENGINE).strip().lower()
         if n==NATIVE_ENGINE:return NATIVE_ENGINE
