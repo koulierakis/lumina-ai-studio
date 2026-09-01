@@ -14,8 +14,22 @@ class FakeTaskService:
 
 
 class FakePreparationService:
-    def prepare(self, *, task_id, repository_root, instruction):
+    def prepare(
+        self,
+        *,
+        task_id,
+        repository_root,
+        instruction,
+        target_paths=(),
+        excluded_paths=(),
+        allow_file_creation=True,
+        allow_file_deletion=False,
+    ):
         assert Path(repository_root).is_dir()
+        assert tuple(target_paths) == ("demo.txt",)
+        assert tuple(excluded_paths) == ("secret.txt",)
+        assert allow_file_creation is True
+        assert allow_file_deletion is False
         return {
             "task_id": task_id,
             "engine": "openhands",
@@ -81,6 +95,10 @@ def test_openhands_preparation_returns_task_execution_result_without_source_chan
     request = TaskRequest(
         task_id="openhands-prep-1",
         instruction="create demo",
+        target_paths=("demo.txt",),
+        excluded_paths=("secret.txt",),
+        allow_file_creation=True,
+        allow_file_deletion=False,
         dry_run=True,
         metadata={"code_builder_preparation": True, "coding_engine": "openhands"},
     )
