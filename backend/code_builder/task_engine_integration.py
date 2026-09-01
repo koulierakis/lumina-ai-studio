@@ -1,12 +1,13 @@
 """Route OpenHands preparation tasks through the existing TaskService boundary.
 
-Only the pre-approval dry-run stage is intercepted. Native execution, approval,
-backup, patch application, build validation, persistence, and rollback remain
-owned by the existing LUMINA Code Builder lifecycle.
+Only proposal preparation and approved-plan restoration are intercepted. Native
+execution, approval, backup, patch application, build validation, persistence,
+and rollback remain owned by the existing LUMINA Code Builder lifecycle.
 """
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from .engine_registry import NATIVE_ENGINE, OPENHANDS_ENGINE
@@ -27,6 +28,7 @@ from .task_service import (
 
 _INSTALLED = False
 _ORIGINAL_EXECUTE = TaskService.execute
+_ORIGINAL_PLANNING_STAGE = TaskService._execute_planning_stage
 
 
 def _requested_engine(request: TaskRequest) -> str:
@@ -36,6 +38,12 @@ def _requested_engine(request: TaskRequest) -> str:
 
 def _is_openhands_preparation(request: TaskRequest) -> bool:
     return bool(request.metadata.get("code_builder_preparation")) and _requested_engine(request) == OPENHANDS_ENGINE
+
+
+def _approved_openhands_plan(request: TaskRequest) -> Any | None:
+    if _requested_engine(request) != OPENHANDS_ENGINE:
+        return None
+    return request.metadata.get("approved_preparation_plan")
 
 
 def _emit(
@@ -153,12 +161,13 @@ def execute_openhands_preparation(
 
 
 def install_task_engine_integration() -> None:
-    """Install one idempotent TaskService.execute wrapper."""
+    """Install idempotent wrappers while leaving Native tasks unchanged."""
     global _INSTALLED
     if _INSTALLED:
         return
 
-    original = TaskService.execute
+    original_execute = TaskService.execute
+    original_planning_stage = TaskService._execute_planning_stage
 
     def execute(
         self: TaskService,
@@ -170,7 +179,7 @@ def install_task_engine_integration() -> None:
     ) -> Any:
         request = _task_request_from_domain_model(task)
         if not _is_openhands_preparation(request):
-            return original(
+            return original_execute(
                 self,
                 request,
                 event_callback=event_callback,
@@ -185,5 +194,24 @@ def install_task_engine_integration() -> None:
             return_domain_model=return_domain_model,
         )
 
+    def planning_stage(self: TaskService, context: Any, recorder: Any) -> None:
+        approved_plan = _approved_openhands_plan(context.request)
+        if approved_plan is None:
+            return original_planning_stage(self, context, recorder)
+
+        # Approval was granted for this exact plan/patch pair. Running another AI
+        # planner here could change scope and make the approved patch inconsistent.
+        self._record_event(
+            context,
+            recorder,
+            stage=TaskStage.PLANNING,
+            status=TaskStatus.PLANNING,
+            level=TaskEventLevel.INFO,
+            message="Approved OpenHands implementation plan loaded.",
+            details={"coding_engine": OPENHANDS_ENGINE, "approved_plan": True},
+        )
+        context.plan = approved_plan
+
     TaskService.execute = execute
+    TaskService._execute_planning_stage = planning_stage
     _INSTALLED = True
