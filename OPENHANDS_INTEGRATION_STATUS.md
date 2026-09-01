@@ -8,21 +8,20 @@ Implemented on the completion branch:
 4. The real repository remains untouched during AI execution.
 5. Before/after file states are compared.
 6. Created, modified, and deleted files return as reviewable diffs plus simple change counts; oversized diffs are shortened and excessively large change sets are rejected.
-7. For safe future approval/apply, OpenHands changes now also retain the minimum data needed to recreate them through the existing LUMINA PatchService: created-file text, original-file hashes, and unified diffs.
-8. A dedicated `openhands_patch_bridge.py` converts approved OpenHands proposals into the existing LUMINA patch-operation format. Binary modifications, failed OpenHands runs, empty proposals, and missing safety hashes are rejected.
-9. Temporary work is cleaned up after execution.
-10. OpenHands availability and safe-mode status are reportable without a hard dependency.
-11. Native Code Builder remains the default and is explicitly preserved; OpenHands is experimental and migration is parallel.
-12. Approval is mandatory; any future apply path must preserve both backup and rollback capability.
-13. Engine status explicitly reports OpenHands as not runtime-validated and not ready.
-14. OpenHands proposals report `awaiting_approval`, `review_only: true`, `applied: false`, `can_apply: false`, `source_repository_unchanged: true`, and `next_action: review_changes`.
+7. Temporary work is cleaned up after execution.
+8. OpenHands availability and safe-mode status are reportable without a hard dependency.
+9. Native Code Builder remains the default and is explicitly preserved; OpenHands is experimental and migration is parallel.
+10. Approval is mandatory; any future apply path must preserve both backup and rollback capability.
+11. Engine status explicitly reports OpenHands as not runtime-validated and not ready until a real runtime test succeeds.
+12. OpenHands proposals are converted into the same approved patch metadata keys already consumed by the existing TaskService.
+13. A shared `CodeBuilderEnginePreparationService` now selects Native or OpenHands for proposal preparation while leaving approval, backup, apply, build validation, persistence, and rollback under the existing LUMINA task lifecycle.
 
 ## Next integration boundary
 
-Connect the OpenHands proposal and patch bridge to the existing Code Builder API/task lifecycle. The preparation result must be stored for review; only after explicit approval should LUMINA feed the converted operations into its existing backup / PatchService / build / rollback path.
+Wire `CodeBuilderEnginePreparationService` into the router's preparation step and add the engine selection field to the existing Code Builder API/UI. Native must remain the default. OpenHands must remain review-only until runtime validation succeeds.
 
 ## Validation status
 
-Isolated tests exist for sandbox isolation, secret exclusion, cleanup, proposal capture, engine selection, safe-mode status, review summaries, approval gates, and OpenHands-to-PatchService conversion. These tests have not been executed by the GitHub connector. A real OpenHands task also requires OpenHands plus a configured model.
+Isolated tests exist for the safety boundary, OpenHands proposal conversion, and the shared Native/OpenHands preparation bridge. The GitHub connector cannot execute repository tests. A real OpenHands task also requires OpenHands plus a configured model.
 
-Current checkpoint: OpenHands can work in isolation, return a reviewable proposal, and that proposal can be converted into the same patch format already used by LUMINA. The integration is still NOT marked READY because the API/task wiring and real runtime proof are still required.
+Current checkpoint: the engine-selection preparation bridge is implemented in code. It is NOT yet marked READY because automated tests and a real OpenHands runtime task have not yet been executed in the target runtime.
