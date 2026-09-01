@@ -2,26 +2,26 @@
 
 Implemented on the completion branch:
 
-1. LUMINA can prepare a disposable copy of the repository.
+1. LUMINA prepares a disposable copy of the repository.
 2. Empty instructions are rejected before copy creation.
-3. Runtime folders and dotenv secret files are excluded from the OpenHands copy.
-4. OpenHands autonomous work is permitted only inside that copy.
+3. Runtime folders and dotenv secret files are excluded.
+4. OpenHands autonomous work is permitted only inside the disposable copy.
 5. The real repository remains untouched during AI execution.
 6. Before/after file states are compared.
-7. Created, modified, and deleted files are returned with reviewable diffs; oversized diffs are safely shortened for display.
+7. Created, modified, and deleted files return as reviewable diffs; oversized diffs are shortened.
 8. Temporary work is cleaned up after execution.
-9. OpenHands availability and safe-mode status can be reported without making it a hard LUMINA dependency.
-10. Native Code Builder remains the safe default.
-11. OpenHands is exposed as an experimental second engine only when available.
-12. A controlled engine entry point returns a review-ready change summary.
-13. Every OpenHands review result is explicitly marked as requiring approval and safe mode; this path does not auto-apply AI edits.
+9. OpenHands availability and safe-mode status are reportable without a hard dependency.
+10. Native Code Builder remains the default.
+11. OpenHands is an experimental second engine only when available.
+12. The controlled engine entry point returns review-ready changes.
+13. OpenHands results require approval and never auto-apply through this path.
 
 ## Next integration boundary
 
-Connect the engine registry to the existing Code Builder API/task lifecycle and UI while preserving approval, backup, persistence, apply, rollback, and all current native behavior.
+Connect this controlled path to the existing Code Builder API/task lifecycle and UI while preserving approval, backup, persistence, apply, rollback, and native behavior.
 
 ## Validation status
 
-Isolated tests have been added for sandbox isolation, secret exclusion, cleanup, engine selection, safe-mode status, review summaries, approval marking, empty tasks, and oversized diffs. They have not been executed by the GitHub connector itself. A real OpenHands runtime test also still requires an environment where OpenHands is installed/configured and a suitable model is available. Do not mark OpenHands READY until both automated tests and a real runtime task pass.
+Isolated tests exist for sandbox isolation, secret exclusion, cleanup, engine selection, safe-mode status, review summaries, approval marking, empty tasks, and oversized diffs. The GitHub connector cannot execute the repository tests, so they remain unverified until run in a runtime environment. A real OpenHands task also requires OpenHands plus a configured model.
 
-Current implementation checkpoint: OpenHands can safely work on a temporary LUMINA copy and return its proposed changes for human review without changing the real repository.
+Current checkpoint: the first safe OpenHands proposal path is implemented in code. It is NOT yet marked READY because runtime proof is still required.
