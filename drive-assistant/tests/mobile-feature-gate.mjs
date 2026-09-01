@@ -11,6 +11,7 @@ const app = read('app-v2.js');
 const completion = read('drive-completion.js');
 const labels = read('map-labels.js');
 const google = read('google-places.js');
+const poiLayer = read('map-poi-layer.js');
 const session = read('session-bootstrap.js');
 const index = read('index.html');
 
@@ -52,6 +53,13 @@ assert.match(google, /textSearch=async\(query,origin=currentPos\(\)\)/);
 assert.match(google, /if\(origin\)request\.locationBias/);
 assert.match(google, /source:'google'/);
 
+// Ambient map POIs must disappear during active navigation and return after it ends.
+assert.match(poiLayer, /navigation-active/);
+assert.match(poiLayer, /map\.removeLayer\(layer\)/);
+assert.match(poiLayer, /layer\.addTo\(map\)/);
+assert.match(poiLayer, /MutationObserver\(syncVisibility\)/);
+assert.match(poiLayer, /LuminaMapPoiLayer/);
+
 // Mobile/PWA shell and navigation UI are required deployment assets.
 assert.match(index, /viewport/i);
 assert.match(index, /manifest\.webmanifest/);
@@ -60,5 +68,5 @@ assert.match(index, /drive-completion\.js/);
 assert.match(completion, /maneuver-card/);
 assert.match(completion, /Free Drive/);
 
-console.log('PASS mobile GPS, Greek voice, maneuver, reroute, persistence, road labels, nationwide Google search');
+console.log('PASS mobile GPS, Greek voice, maneuver, reroute, persistence, road labels, nationwide Google search, navigation POI visibility');
 console.log('REQUIRES REAL DRIVING TEST: GPS accuracy, turn timing, reroute timing, TTS audibility, microphone, background return, local map coverage');
