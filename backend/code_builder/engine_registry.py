@@ -6,13 +6,12 @@ from typing import Final
 from .openhands_engine import OpenHandsEngine
 NATIVE_ENGINE:Final[str]="native";OPENHANDS_ENGINE:Final[str]="openhands"
 @dataclass(frozen=True,slots=True)
-class CodingEngineOption:
-    name:str;available:bool;experimental:bool;safe_mode:bool
+class CodingEngineOption:name:str;available:bool;experimental:bool;safe_mode:bool
 class CodingEngineRegistry:
     def __init__(self,openhands:OpenHandsEngine|None=None)->None:self.openhands=openhands or OpenHandsEngine()
     def options(self)->tuple[CodingEngineOption,...]:
         s=self.openhands.status();return(CodingEngineOption(NATIVE_ENGINE,True,False,True),CodingEngineOption(OPENHANDS_ENGINE,s.available,True,s.safe_mode))
-    def public_status(self)->dict[str,object]:return{"default":NATIVE_ENGINE,"engines":[asdict(o) for o in self.options()]}
+    def public_status(self)->dict[str,object]:return{"default":NATIVE_ENGINE,"engines":[asdict(o)for o in self.options()]}
     def validate_selection(self,name:str|None)->str:
         n=(name or NATIVE_ENGINE).strip().lower()
         if n==NATIVE_ENGINE:return NATIVE_ENGINE
@@ -21,8 +20,7 @@ class CodingEngineRegistry:
             return OPENHANDS_ENGINE
         raise ValueError(f"Unknown coding engine: {name}")
     def execute(self,*,engine:str|None,repository_root:str|Path,instruction:str):
-        selected=self.validate_selection(engine)
-        if selected==OPENHANDS_ENGINE:return self.openhands.execute(repository_root=repository_root,instruction=instruction)
+        if self.validate_selection(engine)==OPENHANDS_ENGINE:return self.openhands.execute(repository_root=repository_root,instruction=instruction)
         raise RuntimeError("Native execution remains owned by the existing Code Builder task service.")
     def execute_for_review(self,*,engine:str|None,repository_root:str|Path,instruction:str)->dict[str,object]:
-        result=self.execute(engine=engine,repository_root=repository_root,instruction=instruction);payload=result.public_summary();payload.update({"engine":OPENHANDS_ENGINE,"requires_approval":True,"safe_mode":True,"applied":False});return payload
+        result=self.execute(engine=engine,repository_root=repository_root,instruction=instruction);payload=result.public_summary();payload.update({"engine":OPENHANDS_ENGINE,"requires_approval":True,"safe_mode":True,"applied":False,"status":"awaiting_approval"});return payload
