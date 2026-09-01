@@ -4,7 +4,7 @@ import os,shutil,tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
-_DEFAULT_IGNORES:Final[frozenset[str]]=frozenset({".git",".lumina-runtime",".pytest_cache","__pycache__","node_modules","dist","build",".env",".env.local",".env.production","venv",".venv","coverage",".coverage"})
+_DEFAULT_IGNORES:Final[frozenset[str]]=frozenset({".git",".lumina-runtime",".pytest_cache","__pycache__","node_modules","dist","build",".env",".env.local",".env.production","venv",".venv","coverage",".coverage","logs"})
 _SECRET_PREFIXES:Final[tuple[str,...]]=(".env.",)
 class OpenHandsWorkspaceError(RuntimeError):pass
 @dataclass(frozen=True,slots=True)
