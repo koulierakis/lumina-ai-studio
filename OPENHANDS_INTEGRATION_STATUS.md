@@ -10,7 +10,7 @@ Implemented on the completion branch:
 6. Before/after file states are compared.
 7. Created, modified, and deleted files are returned with reviewable diffs; oversized diffs are safely shortened for display.
 8. Temporary work is cleaned up after execution.
-9. OpenHands availability can be checked without making it a hard LUMINA dependency.
+9. OpenHands availability and safe-mode status can be reported without making it a hard LUMINA dependency.
 10. Native Code Builder remains the safe default.
 11. OpenHands is exposed as an experimental second engine only when available.
 12. A controlled engine entry point returns a review-ready change summary.
@@ -22,4 +22,4 @@ Connect the engine registry to the existing Code Builder API/task lifecycle and 
 
 ## Validation status
 
-Isolated tests have been added for sandbox isolation, secret exclusion, cleanup, engine selection, review summaries, approval marking, empty tasks, and oversized diffs. They have not been executed by the GitHub connector itself. A real OpenHands runtime test also still requires an environment where OpenHands is installed/configured and a suitable model is available. Do not mark OpenHands READY until both automated tests and a real runtime task pass.
+Isolated tests have been added for sandbox isolation, secret exclusion, cleanup, engine selection, status, review summaries, approval marking, empty tasks, and oversized diffs. They have not been executed by the GitHub connector itself. A real OpenHands runtime test also still requires an environment where OpenHands is installed/configured and a suitable model is available. Do not mark OpenHands READY until both automated tests and a real runtime task pass.
