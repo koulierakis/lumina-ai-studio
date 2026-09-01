@@ -1,0 +1,42 @@
+"""Coding-engine selection without removing the existing native Code Builder."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Final
+
+from .openhands_engine import OpenHandsEngine
+
+NATIVE_ENGINE: Final[str] = "native"
+OPENHANDS_ENGINE: Final[str] = "openhands"
+
+
+@dataclass(frozen=True, slots=True)
+class CodingEngineOption:
+    name: str
+    available: bool
+    experimental: bool
+
+
+class CodingEngineRegistry:
+    """Advertises native and optional OpenHands engines for a gradual migration."""
+
+    def __init__(self, openhands: OpenHandsEngine | None = None) -> None:
+        self.openhands = openhands or OpenHandsEngine()
+
+    def options(self) -> tuple[CodingEngineOption, ...]:
+        openhands_status = self.openhands.status()
+        return (
+            CodingEngineOption(NATIVE_ENGINE, True, False),
+            CodingEngineOption(OPENHANDS_ENGINE, openhands_status.available, True),
+        )
+
+    def validate_selection(self, name: str) -> str:
+        normalized = name.strip().lower()
+        if normalized == NATIVE_ENGINE:
+            return NATIVE_ENGINE
+        if normalized == OPENHANDS_ENGINE:
+            if not self.openhands.status().available:
+                raise RuntimeError("OpenHands engine is not available on this machine.")
+            return OPENHANDS_ENGINE
+        raise ValueError(f"Unknown coding engine: {name}")
