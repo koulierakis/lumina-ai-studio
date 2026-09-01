@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+# One-time guarded migration: the workflow compiles and tests the model before commit.
 PATH = Path("backend/code_builder/models.py")
 
 
