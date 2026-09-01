@@ -14,6 +14,9 @@ class OpenHandsEngineStatus:
     available: bool
     safe_mode: bool = True
 
+    def public_status(self) -> dict[str, object]:
+        return {"name": self.name, "available": self.available, "safe_mode": self.safe_mode}
+
 
 class OpenHandsEngine:
     """Small boundary used by Code Builder without replacing its safety lifecycle."""
