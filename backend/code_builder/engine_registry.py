@@ -4,10 +4,10 @@ from dataclasses import asdict,dataclass
 from pathlib import Path
 from typing import Final
 from .openhands_engine import OpenHandsEngine
-NATIVE_ENGINE:Final[str]="native"; OPENHANDS_ENGINE:Final[str]="openhands"
+NATIVE_ENGINE:Final[str]="native";OPENHANDS_ENGINE:Final[str]="openhands"
 @dataclass(frozen=True,slots=True)
 class CodingEngineOption:
-    name:str; available:bool; experimental:bool; safe_mode:bool
+    name:str;available:bool;experimental:bool;safe_mode:bool
 class CodingEngineRegistry:
     def __init__(self,openhands:OpenHandsEngine|None=None)->None:self.openhands=openhands or OpenHandsEngine()
     def options(self)->tuple[CodingEngineOption,...]:
@@ -25,4 +25,4 @@ class CodingEngineRegistry:
         if selected==OPENHANDS_ENGINE:return self.openhands.execute(repository_root=repository_root,instruction=instruction)
         raise RuntimeError("Native execution remains owned by the existing Code Builder task service.")
     def execute_for_review(self,*,engine:str|None,repository_root:str|Path,instruction:str)->dict[str,object]:
-        result=self.execute(engine=engine,repository_root=repository_root,instruction=instruction);payload=result.public_summary();payload.update({"engine":OPENHANDS_ENGINE,"requires_approval":True,"safe_mode":True});return payload
+        result=self.execute(engine=engine,repository_root=repository_root,instruction=instruction);payload=result.public_summary();payload.update({"engine":OPENHANDS_ENGINE,"requires_approval":True,"safe_mode":True,"applied":False});return payload
