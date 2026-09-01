@@ -51,22 +51,13 @@ class OpenHandsExecutionService:
         workspace = self.workspace_service.prepare(repository_root)
         try:
             before = self._files(workspace.workspace_root)
-            run = self.adapter.run(
-                prompt=instruction,
-                workspace_root=workspace.workspace_root,
-                disposable_workspace=True,
-            )
+            run = self.adapter.run(prompt=instruction, workspace_root=workspace.workspace_root, disposable_workspace=True)
             after = self._files(workspace.workspace_root)
             changes: list[OpenHandsFileChange] = []
             for path in sorted(set(before) | set(after)):
                 if before.get(path) == after.get(path):
                     continue
-                if path not in before:
-                    kind = "created"
-                elif path not in after:
-                    kind = "deleted"
-                else:
-                    kind = "modified"
+                kind = "created" if path not in before else "deleted" if path not in after else "modified"
                 changes.append(OpenHandsFileChange(path, kind, self._text_diff(path, before.get(path), after.get(path))))
             return OpenHandsExecutionResult(run=run, changes=tuple(changes))
         finally:
