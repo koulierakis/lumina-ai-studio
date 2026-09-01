@@ -2,19 +2,16 @@
 
 Implemented on the completion branch:
 
-1. LUMINA prepares a disposable copy of the repository.
+1. LUMINA prepares a lean disposable copy of the repository, excluding runtime/build/coverage/virtual-environment folders and dotenv secrets.
 2. Empty instructions are rejected before copy creation.
-3. Runtime folders, local virtual environments, and dotenv secret files are excluded.
-4. OpenHands autonomous work is permitted only inside the disposable copy.
-5. The real repository remains untouched during AI execution.
-6. Before/after file states are compared.
-7. Created, modified, and deleted files return as reviewable diffs; oversized diffs are shortened and excessively large change sets are rejected.
-8. Temporary work is cleaned up after execution.
-9. OpenHands availability and safe-mode status are reportable without a hard dependency.
-10. Native Code Builder remains the default.
-11. OpenHands is an experimental second engine only when available.
-12. The controlled engine entry point returns review-ready changes.
-13. OpenHands proposals explicitly report `awaiting_approval`, `applied: false`, `can_apply: false`, and `source_repository_unchanged: true`.
+3. OpenHands autonomous work is permitted only inside the disposable copy.
+4. The real repository remains untouched during AI execution.
+5. Before/after file states are compared.
+6. Created, modified, and deleted files return as reviewable diffs; oversized diffs are shortened and excessively large change sets are rejected.
+7. Temporary work is cleaned up after execution.
+8. OpenHands availability and safe-mode status are reportable without a hard dependency.
+9. Native Code Builder remains the default; OpenHands is experimental and only available when installed.
+10. OpenHands proposals explicitly report `awaiting_approval`, `applied: false`, `can_apply: false`, and `source_repository_unchanged: true`.
 
 ## Next integration boundary
 
