@@ -15,7 +15,7 @@ jobs:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt
       - name: Run Code Builder prompt-to-verified-change acceptance gate
-        run: python -m pytest backend/tests/test_code_builder_ai_patch_generation.py backend/tests/test_code_builder_prompt_e2e.py backend/tests/test_code_builder_execution_pipeline.py backend/tests/test_code_builder_kilo_adapter.py -q
+        run: python -m pytest backend/tests/test_code_builder_ai_patch_generation.py backend/tests/test_code_builder_prompt_e2e.py backend/tests/test_code_builder_execution_pipeline.py backend/tests/test_code_builder_kilo_adapter.py backend/tests/test_openhands_adapter.py backend/tests/test_openhands_engine.py backend/tests/test_openhands_patch_bridge.py backend/tests/test_openhands_preparation_service.py backend/tests/test_engine_preparation_service.py backend/tests/test_task_engine_integration.py -q
   document-cv-e2e:
     runs-on: ubuntu-latest
     steps:
