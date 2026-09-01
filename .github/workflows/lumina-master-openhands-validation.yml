@@ -1,0 +1,43 @@
+name: LUMINA Master OpenHands Validation
+
+on:
+  push:
+    branches:
+      - work/lumina-master-completion
+    paths:
+      - 'backend/code_builder/openhands_*.py'
+      - 'backend/tests/test_openhands_*.py'
+      - '.github/workflows/lumina-master-openhands-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  openhands-safety:
+    name: OpenHands sandbox safety and orchestration
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Compile OpenHands integration
+        run: |
+          python -m py_compile backend/code_builder/openhands_adapter.py
+          python -m py_compile backend/code_builder/openhands_workspace_service.py
+          python -m py_compile backend/code_builder/openhands_change_capture_service.py
+          python -m py_compile backend/code_builder/openhands_engine_service.py
+      - name: Run focused OpenHands tests
+        working-directory: backend
+        run: >-
+          python -m pytest -q
+          tests/test_openhands_adapter.py
+          tests/test_openhands_workspace_service.py
+          tests/test_openhands_change_capture_service.py
+          tests/test_openhands_engine_service.py
