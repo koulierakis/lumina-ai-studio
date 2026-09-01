@@ -32,14 +32,10 @@ class CodingEngineRegistry:
         )
 
     def public_status(self) -> dict[str, object]:
-        options = self.options()
-        return {
-            "default": NATIVE_ENGINE,
-            "engines": [asdict(option) for option in options],
-        }
+        return {"default": NATIVE_ENGINE, "engines": [asdict(option) for option in self.options()]}
 
-    def validate_selection(self, name: str) -> str:
-        normalized = name.strip().lower()
+    def validate_selection(self, name: str | None) -> str:
+        normalized = (name or NATIVE_ENGINE).strip().lower()
         if normalized == NATIVE_ENGINE:
             return NATIVE_ENGINE
         if normalized == OPENHANDS_ENGINE:
