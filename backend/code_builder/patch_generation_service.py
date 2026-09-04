@@ -60,7 +60,32 @@ _OPERATION_ALIASES: Final[dict[str, str]] = {
     "new": "create",
     "new_file": "create",
     "create_file": "create",
+    "overwrite": "replace_file",
+    "overwrite_file": "replace_file",
+    "replace": "replace_file",
+    "update_file": "replace_file",
+    "modify_file": "replace_file",
+    "edit_file": "replace_file",
 }
+_WRITE_STYLE_ALIASES: Final[frozenset[str]] = frozenset(
+    {"write", "write_file", "save", "save_file", "set_file"}
+)
+
+
+def _canonicalize_operation(raw_operation: Any, *, path_exists: bool) -> str:
+    """Map common small-model operation variants without widening file scope.
+
+    The returned operation is still subjected to the approved-path allowlist and
+    all deterministic existence/content/hash checks. Write-style aliases are
+    resolved from repository state: creating a missing approved file or replacing
+    an existing approved file.
+    """
+
+    operation = str(raw_operation or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    operation = _OPERATION_ALIASES.get(operation, operation)
+    if operation in _WRITE_STYLE_ALIASES:
+        return "replace_file" if path_exists else "create"
+    return operation
 
 
 class AIPatchGenerationError(RuntimeError):
@@ -409,22 +434,34 @@ def _to_patch_request(
     for raw in raw_operations:
         if not isinstance(raw, Mapping):
             raise AIPatchGenerationError("AI returned a malformed patch operation.")
-        operation = str(raw.get("operation") or "").strip()
-        operation = _OPERATION_ALIASES.get(operation, operation)
+        raw_operation = raw.get("operation")
         raw_path = raw.get("path")
         path = _coerce_repository_relative_path(raw_path, root)
         if path is None and isinstance(raw_path, str) and raw_path.startswith("/"):
             approved_root_relative = _normalize_relative_path(raw_path.lstrip("/"))
             if approved_root_relative in allowed_paths:
                 path = approved_root_relative
-        if operation not in ALLOWED_OPERATIONS or path is None:
-            raise AIPatchGenerationError("AI returned an unsupported patch operation or path.")
+        if path is None:
+            raise AIPatchGenerationError(
+                f"AI returned an unsupported or unsafe patch path {raw_path!r} "
+                f"for operation {raw_operation!r}."
+            )
+        absolute_path = _safe_repository_path(root, path)
+        operation = _canonicalize_operation(
+            raw_operation,
+            path_exists=absolute_path.exists(),
+        )
+        if operation not in ALLOWED_OPERATIONS:
+            raise AIPatchGenerationError(
+                f"AI returned unsupported patch operation {raw_operation!r} "
+                f"for approved path {path!r}. Allowed operations are: "
+                + ", ".join(sorted(ALLOWED_OPERATIONS))
+            )
         if path not in allowed_paths:
             raise AIPatchGenerationError(
                 f"AI attempted to change a file outside the approved plan: {path}"
             )
 
-        absolute_path = _safe_repository_path(root, path)
         if operation == "create":
             if not allow_file_creation:
                 raise AIPatchGenerationError("This task does not allow creating files.")
