@@ -179,6 +179,45 @@ def _collect_plan_paths(plan: Any) -> tuple[str, ...]:
     return tuple(collected)
 
 
+def _collect_required_plan_paths(plan: Any) -> tuple[str, ...]:
+    dumped = _dump(plan)
+    if not isinstance(dumped, Mapping):
+        return ()
+    raw_changes = dumped.get("changes")
+    if not isinstance(raw_changes, Sequence) or isinstance(raw_changes, (str, bytes, bytearray)):
+        raw_changes = dumped.get("files")
+    if not isinstance(raw_changes, Sequence) or isinstance(raw_changes, (str, bytes, bytearray)):
+        return ()
+    result: list[str] = []
+    for change in raw_changes:
+        if not isinstance(change, Mapping):
+            continue
+        operation = str(change.get("change_type") or change.get("operation") or "").strip().lower()
+        operation = {"modify": "update", "edit": "update", "change": "update"}.get(operation, operation)
+        if operation not in {"create", "update"}:
+            continue
+        raw_path = change.get("relative_path") or change.get("path")
+        normalized = _normalize_relative_path(raw_path)
+        if normalized and normalized not in result:
+            result.append(normalized)
+    return tuple(result)
+
+
+def _ensure_required_plan_coverage(
+    patch: PatchRequestPayload,
+    required_paths: Sequence[str],
+) -> None:
+    if not required_paths:
+        return
+    operation_paths = {operation.path for operation in patch.operations}
+    missing = [path for path in required_paths if path not in operation_paths]
+    if missing:
+        raise AIPatchGenerationError(
+            "AI patch is incomplete; required planned files are missing: "
+            + ", ".join(missing)
+        )
+
+
 def _task_paths(task: Any) -> tuple[str, ...]:
     values = getattr(task, "target_paths", ()) or ()
     result: list[str] = []
@@ -513,6 +552,7 @@ def generate_patch(
         )
 
     allowed_paths = frozenset(approved_paths)
+    required_paths = _collect_required_plan_paths(plan)
     file_context, hashes = _build_file_context(root, approved_paths)
     creation_allowed = bool(
         allow_file_creation
@@ -526,11 +566,13 @@ def generate_patch(
         "You are proposing changes, not writing files.\n"
         "Use ONLY these operations: create, replace_file, replace_text, unified_diff.\n"
         "Change ONLY files in APPROVED PATHS. Never invent another path.\n"
+        "You MUST include at least one patch operation for EVERY REQUIRED PATH.\n"
         "Prefer replace_text for small precise edits and replace_file only when necessary.\n"
         "For replace_text, copy search_text EXACTLY from CURRENT FILE CONTENT.\n"
         "Do not use markdown fences. Do not include commentary outside JSON.\n\n"
         f"USER INSTRUCTION:\n{instruction}\n\n"
         f"APPROVED PATHS:\n" + "\n".join(f"- {path}" for path in approved_paths) + "\n\n"
+        f"REQUIRED PATHS (all must be covered):\n" + ("\n".join(f"- {path}" for path in required_paths) or "- none") + "\n\n"
         f"APPROVED PLAN:\n{json.dumps(_dump(plan), ensure_ascii=False, default=str)[:60_000]}\n\n"
         f"REPOSITORY ANALYSIS SUMMARY:\n{json.dumps(_dump(analysis), ensure_ascii=False, default=str)[:30_000]}\n\n"
         f"CURRENT FILE CONTENT:\n{file_context}\n"
@@ -554,6 +596,7 @@ def generate_patch(
             hashes=hashes,
             allow_file_creation=creation_allowed,
         )
+        _ensure_required_plan_coverage(patch, required_paths)
         validation = self.apply_patch(patch, dry_run=True)
         if validation.successful:
             return patch
@@ -585,6 +628,7 @@ def generate_patch(
         hashes=hashes,
         allow_file_creation=creation_allowed,
     )
+    _ensure_required_plan_coverage(patch, required_paths)
     validation = self.apply_patch(patch, dry_run=True)
     if not validation.successful:
         raise AIPatchGenerationError(

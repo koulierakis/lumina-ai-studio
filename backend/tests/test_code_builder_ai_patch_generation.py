@@ -391,6 +391,40 @@ def test_malformed_first_patch_consumes_the_single_repair_attempt(tmp_path, monk
     assert "unsupported patch operation" in prompts[1]
 
 
+def test_incomplete_multifile_patch_is_repaired_with_missing_path_feedback(tmp_path, monkeypatch):
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    first.write_text("ONE = False\n", encoding="utf-8")
+    second.write_text("TWO = False\n", encoding="utf-8")
+    plan = ChangePlan(
+        task_id=uuid4(),
+        title="Enable both flags",
+        summary="Update two simple files.",
+        changes=[
+            ProposedFileChange(relative_path="first.py", change_type=ChangeType.MODIFY, old_content="ONE = False\n", new_content="ONE = True\n", summary="Enable first flag.", reason="Requested."),
+            ProposedFileChange(relative_path="second.py", change_type=ChangeType.MODIFY, old_content="TWO = False\n", new_content="TWO = True\n", summary="Enable second flag.", reason="Requested."),
+        ],
+    )
+    responses = [
+        {"operations": [{"operation": "replace_text", "path": "first.py", "search_text": "ONE = False", "replacement_text": "ONE = True"}]},
+        {"operations": [
+            {"operation": "replace_text", "path": "first.py", "search_text": "ONE = False", "replacement_text": "ONE = True"},
+            {"operation": "replace_text", "path": "second.py", "search_text": "TWO = False", "replacement_text": "TWO = True"},
+        ]},
+    ]
+    prompts = []
+    def fake_request(prompt, **_kwargs):
+        prompts.append(prompt)
+        return responses.pop(0)
+    monkeypatch.setattr(patch_generation, "_request_structured_patch", fake_request)
+    service = _PatchServiceStub(tmp_path)
+    patch = patch_generation.generate_patch(service, task=_Task("Enable both flags"), analysis=None, plan=plan, ollama_service=SimpleNamespace(model="test-coder"), repository_root=tmp_path)
+    assert {op.path for op in patch.operations} == {"first.py", "second.py"}
+    assert len(prompts) == 2
+    assert "required planned files are missing: second.py" in prompts[1]
+    assert "REQUIRED PATHS" in prompts[0]
+
+
 def test_repeatedly_malformed_patch_fails_after_one_repair(tmp_path, monkeypatch):
     service = _PatchServiceStub(tmp_path)
     responses = [
