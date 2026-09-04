@@ -533,3 +533,59 @@ def test_coerced_absolute_path_still_requires_approved_plan(tmp_path: Path) -> N
         )
 
 
+
+
+def test_write_file_alias_creates_missing_approved_file(tmp_path: Path) -> None:
+    request = _to_patch_request(
+        {
+            "operations": [
+                {
+                    "operation": "write_file",
+                    "path": "hello_lumina.py",
+                    "content": "def greet(name):\n    return f\"Hello, {name}!\"\n",
+                }
+            ]
+        },
+        allowed_paths=frozenset({"hello_lumina.py"}),
+        root=tmp_path,
+        hashes={},
+        allow_file_creation=True,
+    )
+    assert request.operations[0].operation == "create"
+    assert request.operations[0].path == "hello_lumina.py"
+
+
+def test_write_file_alias_replaces_existing_approved_file(tmp_path: Path) -> None:
+    target = tmp_path / "existing.py"
+    target.write_text("OLD = True\n", encoding="utf-8")
+    request = _to_patch_request(
+        {
+            "operations": [
+                {
+                    "operation": "WRITE-FILE",
+                    "path": "existing.py",
+                    "content": "OLD = False\n",
+                }
+            ]
+        },
+        allowed_paths=frozenset({"existing.py"}),
+        root=tmp_path,
+        hashes={},
+        allow_file_creation=True,
+    )
+    assert request.operations[0].operation == "replace_file"
+    assert request.operations[0].expected_sha256 is not None
+
+
+def test_unsupported_operation_error_reports_operation_and_approved_path(tmp_path: Path) -> None:
+    with pytest.raises(AIPatchGenerationError) as exc_info:
+        _to_patch_request(
+            {"operations": [{"operation": "invent_magic", "path": "safe.py", "content": "x = 1\n"}]},
+            allowed_paths=frozenset({"safe.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=True,
+        )
+    message = str(exc_info.value)
+    assert "invent_magic" in message
+    assert "safe.py" in message
