@@ -4,6 +4,7 @@ import json
 import os
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -29,14 +30,26 @@ ADVISOR_ROLES = {
 }
 
 ROLE_KEYWORDS = {
-    "cfo": ("cash", "revenue", "profit", "cost", "budget", "tax", "finance", "financial", "bank", "liquidity", "margin", "€", "$"),
-    "cmo": ("marketing", "brand", "campaign", "sales funnel", "social", "advertising", "positioning", "customer acquisition"),
-    "strategy": ("strategy", "competitor", "market entry", "expansion", "business model", "partnership", "deal"),
-    "investment": ("invest", "investment", "portfolio", "return", "roi", "valuation", "asset", "property", "stock"),
-    "operations": ("operations", "workflow", "process", "team", "staff", "supplier", "logistics", "execution"),
-    "risk": ("risk", "compliance", "kyc", "aml", "legal", "regulation", "audit", "exposure"),
-    "mentor": ("mentor", "personal", "decision", "stress", "habit", "motivation", "career", "life"),
+    "cfo": ("cash", "revenue", "profit", "cost", "budget", "tax", "finance", "financial", "bank", "liquidity", "margin", "€", "$",
+            "ταμει", "εσοδ", "κέρδ", "κερδ", "κόστος", "κοστος", "προϋπολογ", "φορο", "οικονομ", "τραπεζ", "ρευστό", "ρευστο"),
+    "cmo": ("marketing", "brand", "campaign", "sales funnel", "social", "advertising", "positioning", "customer acquisition",
+            "μάρκετινγκ", "μαρκετινγκ", "διαφήμ", "διαφημ", "πωλήσ", "πωλησ", "πελάτ", "πελατ", "προώθη", "προωθη"),
+    "strategy": ("strategy", "competitor", "market entry", "expansion", "business model", "partnership", "deal",
+                 "στρατηγ", "ανταγωνισ", "επέκτα", "επεκτα", "συνεργασ", "αγορά", "αγορα", "συμφων"),
+    "investment": ("invest", "investment", "portfolio", "return", "roi", "valuation", "asset", "property", "stock",
+                   "επένδ", "επενδ", "απόδο", "αποδο", "αποτίμ", "αποτιμ", "ακίνητ", "ακινητ", "μετοχ"),
+    "operations": ("operations", "workflow", "process", "team", "staff", "supplier", "logistics", "execution",
+                   "λειτουργ", "διαδικασ", "ομάδ", "ομαδ", "προσωπ", "προμηθευ", "logistic", "εκτέλε", "εκτελε"),
+    "risk": ("risk", "compliance", "kyc", "aml", "legal", "regulation", "audit", "exposure",
+             "ρίσκ", "ρισκ", "κίνδυν", "κινδυν", "συμμόρφ", "συμμορφ", "νομικ", "κανονισ", "έλεγχ", "ελεγχ"),
+    "mentor": ("mentor", "personal", "decision", "stress", "habit", "motivation", "career", "life",
+               "μέντορ", "μεντορ", "προσωπ", "απόφασ", "αποφασ", "άγχ", "αγχ", "κίνητρ", "κινητρ", "καριέρ", "καριερ", "ζωή", "ζωη"),
 }
+
+
+MAX_CONTEXT_DOCUMENTS = 3
+MAX_CONTEXT_CHARS_PER_DOCUMENT = 20_000
+MAX_CONTEXT_TOTAL_CHARS = 45_000
 
 
 class AdvisorRequest(BaseModel):
@@ -162,8 +175,16 @@ class ExecutiveAdvisorService:
         return list(self._owner(owner).get("memories", []))
 
     def remember(self, owner: str, text: str, category: str = "general") -> dict[str, Any]:
-        memory = {"id": uuid4().hex, "text": text.strip(), "category": category.strip() or "general", "created_at": time.time()}
+        normalized_text = text.strip()
+        normalized_category = category.strip() or "general"
         memories = self._owner(owner).setdefault("memories", [])
+        for existing in reversed(memories):
+            if (
+                str(existing.get("text") or "").strip().casefold() == normalized_text.casefold()
+                and str(existing.get("category") or "general").strip().casefold() == normalized_category.casefold()
+            ):
+                return existing
+        memory = {"id": uuid4().hex, "text": normalized_text, "category": normalized_category, "created_at": time.time()}
         memories.append(memory)
         del memories[:-100]
         self._save()
@@ -186,6 +207,35 @@ class ExecutiveAdvisorService:
         self._save()
         return safe_profile
 
+    @staticmethod
+    def _bounded_context(context: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(context, dict):
+            return {}
+        safe: dict[str, Any] = {}
+        documents = context.get("documents")
+        if isinstance(documents, list):
+            bounded_documents = []
+            remaining = MAX_CONTEXT_TOTAL_CHARS
+            for item in documents[:MAX_CONTEXT_DOCUMENTS]:
+                if not isinstance(item, dict) or remaining <= 0:
+                    continue
+                text = str(item.get("text") or "")[: min(MAX_CONTEXT_CHARS_PER_DOCUMENT, remaining)]
+                remaining -= len(text)
+                bounded_documents.append({
+                    "id": str(item.get("id") or "")[:200],
+                    "title": str(item.get("title") or "Attached document")[:500],
+                    "category": str(item.get("category") or "")[:200],
+                    "text": text,
+                })
+            if bounded_documents:
+                safe["documents"] = bounded_documents
+        for key, value in context.items():
+            if key == "documents":
+                continue
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                safe[str(key)[:100]] = str(value)[:2000] if isinstance(value, str) else value
+        return safe
+
     def _system_prompt(self, owner: str, role: str, deep_reasoning: bool) -> str:
         owner_state = self._owner(owner)
         profile = owner_state.get("profile", {})
@@ -199,7 +249,9 @@ class ExecutiveAdvisorService:
                 "Return one unified recommendation; surface material disagreements and trade-offs without simulating a theatrical conversation."
             )
         depth = "Use deliberate multi-step analysis before answering." if deep_reasoning else "Prefer a concise operational answer."
+        current_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
         return f"""You are LUMINA Executive Intelligence, acting as {role_name}.
+Current UTC date/time: {current_utc}. Treat current or fast-changing facts as unverified unless supported by supplied context or live research.
 You are an exacting advisor, not a passive assistant. Challenge weak assumptions, distinguish evidence from inference, and state material risks.
 Never invent facts, financial figures, legal status, source documents, or completed actions. Ask for missing facts only when they are essential; otherwise make bounded assumptions and label them.
 For financial, legal, medical, tax, compliance, or investment matters, explicitly flag uncertainty and the need for professional verification when material.
@@ -298,16 +350,15 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             if item_role in {"user", "assistant"}:
                 messages.append({"role": item_role, "content": str(item.get("content") or "")})
         context_text = ""
-        if request.context:
-            context_text = "\n\nAdditional structured context:\n" + json.dumps(request.context, ensure_ascii=False, indent=2)
+        bounded_context = self._bounded_context(request.context)
+        if bounded_context:
+            context_text = "\n\nAdditional structured context:\n" + json.dumps(bounded_context, ensure_ascii=False, indent=2)
         messages.append({"role": "user", "content": request.message + context_text})
 
         requested_provider = request.provider.strip().casefold()
         if requested_provider not in {"auto", "local", "openai"}:
             requested_provider = "auto"
         use_openai = requested_provider == "openai" or request.web_research
-        if requested_provider == "auto" and not request.web_research:
-            use_openai = False
 
         started = time.monotonic()
         sources: list[dict[str, str]] = []
@@ -341,9 +392,24 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
                 answer = result.content.strip()
                 provider_status = "ok"
             except OllamaServiceError as exc:
-                answer = "The local advisor model is currently unavailable. Check Ollama and the configured advisor model, then retry."
-                provider_status = "unavailable"
-                error = str(exc)
+                if requested_provider == "auto" and self.openai_configured():
+                    try:
+                        answer, sources, model = await self._ask_openai(
+                            messages=messages,
+                            deep_reasoning=request.deep_reasoning,
+                            web_research=False,
+                        )
+                        provider = "openai"
+                        provider_status = "fallback"
+                        error = f"Local provider unavailable; automatic cloud fallback used: {exc}"
+                    except Exception as cloud_exc:
+                        answer = "Both the local advisor and automatic cloud fallback are currently unavailable. Check Ollama and the OpenAI configuration, then retry."
+                        provider_status = "unavailable"
+                        error = f"Local: {exc}; Cloud fallback: {cloud_exc}"
+                else:
+                    answer = "The local advisor model is currently unavailable. Check Ollama and the configured advisor model, then retry."
+                    provider_status = "unavailable"
+                    error = str(exc)
 
         now = time.time()
         session["messages"].append({"id": uuid4().hex, "role": "user", "content": request.message, "created_at": now, "role_mode": role})
@@ -382,7 +448,7 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             "model_installed": any(name.casefold() == model.casefold() or name.casefold().startswith(model.casefold() + ":") for name in installed),
             "ollama": health.to_dict(),
             "roles": ADVISOR_ROLES,
-            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first", "optional_openai", "optional_web_research"],
+            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "greek_role_routing", "board_mode", "deep_reasoning", "local_first", "automatic_cloud_fallback", "optional_openai", "optional_web_research", "bounded_document_grounding"],
         }
 
 

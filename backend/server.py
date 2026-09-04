@@ -895,6 +895,9 @@ async def _run_generation(job_id: str, owner: str, spec: GenerationRequest) -> N
                 ref_bytes.append(read_bytes(mdoc["filename"], kind="reference" if mdoc.get("kind") == "reference" else "generated"))
                 ref_mimes.append(mdoc.get("mime_type", "image/png"))
 
+        if spec.identity_pack_id and not ref_bytes:
+            raise RuntimeError("Identity Pack has no readable reference images")
+
         gen_in = GenerationInput(
             prompt=f"{_image_studio_prompt_context(spec.identity_lock, {**(spec.metadata or {}), 'style_reference_id': spec.style_reference_id, 'composition_reference_id': spec.composition_reference_id})}\n\nUser prompt: {spec.prompt}",
             negative_prompt=spec.negative_prompt or "",
@@ -1000,6 +1003,14 @@ async def generate(
         raise HTTPException(400, "Unsupported quality preset")
     if body.identity_lock not in IMAGE_STUDIO_IDENTITY_LOCKS:
         raise HTTPException(400, "Unsupported Identity Lock level")
+    if body.identity_pack_id:
+        pack_doc = await packs_coll.find_one(
+            {"id": body.identity_pack_id, "owner_email": owner}, {"_id": 0}
+        )
+        if not pack_doc:
+            raise HTTPException(404, "Identity Pack not found")
+        if not pack_doc.get("photo_ids"):
+            raise HTTPException(400, "Identity Pack has no reference photos")
     if body.project_id:
         await _attach_to_project(owner, body.project_id, activity="Image generation queued")
     provider_name = (body.provider or os.environ.get("IMAGE_PROVIDER") or "gemini").lower()
@@ -1315,6 +1326,24 @@ async def _run_ai_edit(job_id: str, owner: str) -> None:
 
         route, runtime_job = await _runtime_execute(owner, "photo", "image_editing", job.provider, {"tool": job.tool, "source_media_id": job.source_media_id}, image_edit_executor)
         result = route.images[0]
+
+        # Claim the short persistence phase atomically. If cancellation won the
+        # race while the provider was running, do not write any output media.
+        finalize = await ai_edit_jobs_coll.update_one(
+            {"id": job_id, "owner_email": owner, "status": "processing"},
+            {"$set": {"status": "finalizing", "updated_at": now_iso()}},
+        )
+        if not finalize.modified_count:
+            current = await ai_edit_jobs_coll.find_one(
+                {"id": job_id, "owner_email": owner}, {"_id": 0}
+            )
+            if not current or current.get("status") == "canceled":
+                await jobs_coll.update_one(
+                    {"id": job_id, "owner_email": owner},
+                    {"$set": {"status": "cancelled", "updated_at": now_iso()}},
+                )
+                return
+            raise RuntimeError("AI edit could not enter final persistence phase")
 
         filename, _abs, size = save_bytes(result.data, result.mime_type, kind="generated")
         out_media = MediaAsset(

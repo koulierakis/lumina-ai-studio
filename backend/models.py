@@ -233,7 +233,7 @@ class AiEditJob(BaseModel):
 
     id: str = Field(default_factory=new_id)
     owner_email: str
-    status: str = "queued"  # queued | processing | completed | failed | canceled
+    status: str = "queued"  # queued | processing | finalizing | completed | failed | canceled
     provider: str = "gemini"
     tool: str = "retouch"  # one of the AI tool keys (retouch, enhance, upscale, ...)
     source_media_id: str

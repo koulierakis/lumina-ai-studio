@@ -16,10 +16,14 @@ def test_mock_voice_provider_creates_valid_wav_with_metadata():
     assert metadata["style"] == "documentary"
 
 
-def test_voice_provider_catalog_keeps_future_adapters_unavailable():
+def test_voice_provider_catalog_distinguishes_implemented_from_configured(monkeypatch):
+    monkeypatch.delenv("ELEVENLABS_API_KEY", raising=False)
     catalog = {item["name"]: item for item in voice_provider_catalog()}
     assert catalog["mock"]["available"] is True
-    assert catalog["elevenlabs"]["available"] is False
+    assert catalog["elevenlabs"]["available"] is True
+    assert catalog["elevenlabs"]["configured"] is False
+    assert catalog["elevenlabs"]["capabilities"]["credential_ready"] is False
+    assert catalog["openai"]["available"] is False
     assert "text-to-speech" in catalog["mock"]["capabilities"]["modes"]
     assert "singing-conversion" in catalog["mock"]["capabilities"]["modes"]
     assert {"wav", "mp3", "flac", "aac"}.issubset(set(catalog["mock"]["capabilities"]["formats"]))

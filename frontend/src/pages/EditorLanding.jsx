@@ -7,13 +7,30 @@ import { Wand2 } from 'lucide-react';
 export default function EditorLanding() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const nav = useNavigate();
 
   useEffect(() => {
-    apiGet('/gallery').then((data) => {
-      setItems(data);
-      setLoading(false);
-    });
+    let cancelled = false;
+
+    async function loadGallery() {
+      setLoading(true);
+      setLoadError('');
+      try {
+        const data = await apiGet('/gallery');
+        if (!cancelled) setItems(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (!cancelled) {
+          setItems([]);
+          setLoadError(err?.message || 'Gallery is temporarily unavailable.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    loadGallery();
+    return () => { cancelled = true; };
   }, []);
 
   return (
@@ -24,7 +41,19 @@ export default function EditorLanding() {
       </div>
 
       {loading && <p className="text-white/40 text-sm">Loading…</p>}
-      {!loading && items.length === 0 && (
+      {!loading && loadError && (
+        <div className="lumina-glass rounded-lg p-6 mb-6 border border-amber-400/20">
+          <p className="text-amber-200 text-sm">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-3 text-xs px-3 py-1.5 rounded bg-white/5 text-white/70 hover:bg-white/10 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!loading && !loadError && items.length === 0 && (
         <div className="lumina-glass rounded-lg p-10 text-center">
           <Wand2 strokeWidth={1} className="w-8 h-8 mx-auto text-gold/70 mb-3" />
           <h3 className="font-display text-2xl text-white mb-2">Nothing to edit yet</h3>

@@ -32,3 +32,14 @@ def test_photo_models_preserve_metadata_tags_collections_and_references():
 
 def test_photo_tag_cleanup_is_search_safe():
     assert _clean_tags([' Portrait ', '', 'CLIENT', 'portrait']) == ['portrait', 'client']
+
+
+def test_ai_edit_has_atomic_cancel_before_persistence_guard():
+    from pathlib import Path
+    import server
+
+    source = Path(server.__file__).read_text(encoding="utf-8")
+    assert '"status": "finalizing"' in source
+    assert 'if not finalize.modified_count:' in source
+    assert 'current.get("status") == "canceled"' in source
+    assert source.index('if not finalize.modified_count:') < source.index('save_bytes(result.data, result.mime_type, kind="generated")')
