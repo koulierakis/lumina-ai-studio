@@ -822,8 +822,66 @@ def _extract_backup_id(source: Any) -> str | None:
     return str(value)
 
 
+def _normalize_relative_repository_path(
+    repository_root: Path,
+    path_text: str,
+) -> str:
+    resolved = _normalize_repository_path(
+        repository_root,
+        path_text,
+        must_exist=False,
+    )
+    return resolved.relative_to(repository_root).as_posix()
+
+
 def _extract_plan_operation_paths(plan: Any) -> frozenset[str]:
     return frozenset(_extract_paths(plan))
+
+
+def _extract_required_plan_paths(
+    plan: Any,
+    *,
+    repository_root: Path,
+) -> frozenset[str]:
+    changes = _extract_value(plan, ("changes", "files"), default=())
+    if not isinstance(changes, Sequence) or isinstance(changes, (str, bytes)):
+        return frozenset()
+
+    aliases = {
+        "add": "create", "new": "create", "create_file": "create",
+        "modify": "update", "edit": "update", "change": "update",
+        "replace": "update", "patch": "update", "refactor": "update",
+        "remove": "delete", "delete_file": "delete",
+        "move": "rename", "rename_file": "rename",
+    }
+    required: set[str] = set()
+    for change in changes:
+        operation = str(_extract_value(change, ("operation", "action", "type"), default="")).strip().lower().replace("-", "_")
+        operation = aliases.get(operation, operation)
+        if operation not in {"create", "update", "delete", "rename"}:
+            continue
+        path_value = _extract_value(change, ("path", "file_path", "relative_path", "target_path"))
+        if path_value:
+            required.add(_normalize_relative_repository_path(repository_root, str(path_value)))
+        if operation == "rename":
+            destination = _extract_value(change, ("destination_path", "new_path", "destination"))
+            if destination:
+                required.add(_normalize_relative_repository_path(repository_root, str(destination)))
+    return frozenset(required)
+
+
+def _extract_patch_operation_paths(
+    payload: PatchRequestPayload,
+    *,
+    repository_root: Path,
+) -> frozenset[str]:
+    paths: set[str] = set()
+    for operation in payload.operations:
+        for field in ("path", "destination_path"):
+            value = getattr(operation, field, None)
+            if value:
+                paths.add(_normalize_relative_repository_path(repository_root, str(value)))
+    return frozenset(paths)
 
 
 def _build_patch_request_from_metadata(
@@ -861,17 +919,35 @@ def _build_patch_request_from_metadata(
         }
     )
 
-    planned_paths = _extract_plan_operation_paths(context.plan)
+    repository_root = context.configuration.repository_root
+    planned_paths = frozenset(
+        _normalize_relative_repository_path(repository_root, path)
+        for path in _extract_plan_operation_paths(context.plan)
+    )
+    required_paths = _extract_required_plan_paths(
+        context.plan,
+        repository_root=repository_root,
+    )
 
-    if planned_paths:
-        operation_paths = frozenset(_extract_paths(payload))
-        unexpected_paths = sorted(operation_paths - planned_paths)
+    if planned_paths or required_paths:
+        operation_paths = _extract_patch_operation_paths(
+            payload,
+            repository_root=repository_root,
+        )
+        allowed_paths = planned_paths | required_paths
+        unexpected_paths = sorted(operation_paths - allowed_paths)
+        missing_required_paths = sorted(required_paths - operation_paths)
 
         if unexpected_paths:
             raise TaskPatchError(
                 "Patch operations include paths not present in the "
                 "approved GeneratedChangePlan: "
                 + ", ".join(unexpected_paths)
+            )
+        if missing_required_paths:
+            raise TaskPatchError(
+                "Generated patch is incomplete; required planned files are missing: "
+                + ", ".join(missing_required_paths)
             )
 
     return payload

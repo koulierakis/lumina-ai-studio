@@ -289,6 +289,43 @@ def test_execution_rejects_unapproved_plan_path(
     assert not (tmp_path / unexpected_path).exists()
 
 
+def test_execution_rejects_patch_missing_required_planned_file(tmp_path: Path) -> None:
+    first = "tests/test_first.py"
+    second = "tests/test_second.py"
+    (tmp_path / "tests").mkdir()
+    plan = GeneratedChangePlan(
+        title="Create two required tests",
+        summary="Both files are required by the approved plan.",
+        objective="Verify incomplete generated patches cannot execute.",
+        risk_level="low",
+        files=[
+            GeneratedFileChange(path=first, operation="create", summary="Create first test.", rationale="Required by task."),
+            GeneratedFileChange(path=second, operation="create", summary="Create second test.", rationale="Required by task."),
+        ],
+        steps=[GeneratedPlanStep(order=1, title="Create both tests", description="Create both planned files.", file_paths=[first, second], validation=["Both files must exist."])],
+        acceptance_criteria=["Both planned files are present."],
+        test_plan=["python -m compileall tests"],
+        rollback_plan=["Restore the automatic backup."],
+    )
+    request = TaskRequest(
+        instruction="Create both planned test files.",
+        target_paths=(first, second),
+        metadata={"patch_operations": [{"operation": "create", "path": first, "content": "FIRST = True\n"}]},
+        build_commands=(BuildCommandSpec(command_id="compile", kind=BuildCommandKind.PYTHON_COMPILE, arguments=(".",), timeout_seconds=60),),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.ROLLED_BACK
+    assert result.rollback_attempted is True
+    assert "required planned files are missing" in (result.error_message or "")
+    assert second in (result.error_message or "")
+    assert not (tmp_path / first).exists()
+    assert not (tmp_path / second).exists()
+
+
 def test_approval_marks_awaiting_task_as_approved() -> None:
     api_request = TaskCreateRequest(
         instruction="Add a backend health-check unit test without changing public APIs.",
