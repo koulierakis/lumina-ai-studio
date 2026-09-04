@@ -1,0 +1,10 @@
+{
+  "name": "LUMINA Mobile Acceptance",
+  "hostRequirements": { "cpus": 4, "memory": "16gb", "storage": "32gb" },
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": { "label": "LUMINA AI Studio", "onAutoForward": "notify" }
+  },
+  "postCreateCommand": "bash .devcontainer/codespace-setup.sh",
+  "postStartCommand": "bash .devcontainer/codespace-start.sh"
+}
