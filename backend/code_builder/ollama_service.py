@@ -1,4 +1,4 @@
-﻿"""Local Ollama API integration for the LUMINA Code Builder.
+"""Local Ollama API integration for the LUMINA Code Builder.
 
 This module provides a production-oriented asynchronous client for a local
 Ollama installation.

@@ -1,4 +1,4 @@
-﻿ M .gitignore
+ M .gitignore
  M backend/auth.py
  M backend/document_studio/models.py
  M backend/document_studio/router.py

@@ -1,4 +1,4 @@
-﻿import { ElementNode } from 'lexical';
+import { ElementNode } from 'lexical';
 
 const SAFE_IMAGE_SRC_PATTERN = /^(https?:\/\/|data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,|blob:)/i;
 
