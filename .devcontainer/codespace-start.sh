@@ -25,6 +25,15 @@ cd "$ROOT/frontend"
 nohup npm start >"$STATE/logs/frontend.log" 2>&1 &
 (
   for _ in $(seq 1 90); do
+    curl -fsS http://127.0.0.1:3000 >/dev/null 2>&1 && break
+    sleep 1
+  done
+  if command -v gh >/dev/null 2>&1 && [ -n "${CODESPACE_NAME:-}" ]; then
+    gh codespace ports visibility 3000:public -c "$CODESPACE_NAME" >>"$STATE/logs/ports.log" 2>&1 || true
+  fi
+) >/dev/null 2>&1 &
+(
+  for _ in $(seq 1 90); do
     curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break
     sleep 1
   done
