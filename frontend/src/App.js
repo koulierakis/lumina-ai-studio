@@ -21,6 +21,7 @@ import CodeCreator from './pages/CodeCreator';
 import CodeBuilder from './pages/CodeBuilder';
 import DocumentStudio from './pages/DocumentStudio';
 import ExecutiveAdvisor from './pages/ExecutiveAdvisor';
+import Mentor from './pages/Mentor';
 
 export default function App() {
   return (
@@ -52,6 +53,7 @@ export default function App() {
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
               <Route path="advisor" element={<ExecutiveAdvisor />} />
+              <Route path="mentor" element={<Mentor />} />
               <Route path="developer" element={<DeveloperCenter />} />
               <Route path="code-creator" element={<CodeCreator />} />
               <Route path="code-builder" element={<CodeBuilder />} />

@@ -148,6 +148,7 @@ from code_builder.router import (  # noqa: E402
     router as code_builder_router,
 )
 from document_studio.router import configure_document_studio_router, router as document_studio_router  # noqa: E402
+from mentor import configure_mentor, router as mentor_router  # noqa: E402
 from ai_runtime.router import router as runtime_router  # noqa: E402
 from ai_runtime.manager import runtime_manager  # noqa: E402
 from ai_runtime.schemas import RuntimeJob, RuntimeJobStatus  # noqa: E402
@@ -193,6 +194,7 @@ talking_portrait_installs_coll = TalkingPortraitCollection(persistence_provider,
 projects_coll = LocalPersistenceCollection(persistence_provider, "projects")
 preferences_coll = LocalPersistenceCollection(persistence_provider, "preferences")
 notifications_coll = LocalPersistenceCollection(persistence_provider, "notifications")
+mentor_sessions_coll = LocalPersistenceCollection(persistence_provider, "mentor_sessions")
 
 
 def _configure_local_first_collections() -> None:
@@ -368,6 +370,7 @@ configure_code_builder_router(
     backup_service=code_builder_backup_service,
 )
 configure_document_studio_router(persistence_provider, media_coll, notifications_coll)
+configure_mentor(sessions_collection=mentor_sessions_coll)
 
 
 async def _runtime_execute(owner: str, studio: str, task_type: str, provider: str | None, payload: dict, executor):
@@ -2725,7 +2728,7 @@ async def workspace_search(q: str = "", owner: str = Depends(require_owner)) -> 
     projects = [doc async for doc in projects_coll.find({"owner_email": owner, "$or": [{"name": pattern}, {"description": pattern}, {"notes": pattern}]}, {"_id": 0}).limit(20)]
     packs = [doc async for doc in packs_coll.find({"owner_email": owner, "$or": [{"name": pattern}, {"description": pattern}]}, {"_id": 0}).limit(20)]
     jobs = [job for job in await _central_jobs(owner) if term.lower() in str(job.get("title") or job.get("prompt") or job.get("text") or "").lower()][:20]
-    modules = [{"id": item, "name": name, "route": route} for item, name, route in [("image", "Image Studio", "/studio/generate"), ("video", "Video Studio", "/studio/video-studio"), ("voice", "Voice Studio", "/studio/voice-studio"), ("talking-portrait", "Talking Portrait", "/studio/talking-portrait"), ("projects", "Projects", "/studio/projects") ] if term.lower() in name.lower()]
+    modules = [{"id": item, "name": name, "route": route} for item, name, route in [("image", "Image Studio", "/studio/generate"), ("video", "Video Studio", "/studio/video-studio"), ("voice", "Voice Studio", "/studio/voice-studio"), ("mentor", "Mentor", "/studio/mentor"), ("talking-portrait", "Talking Portrait", "/studio/talking-portrait"), ("projects", "Projects", "/studio/projects") ] if term.lower() in name.lower()]
     return {"media": media, "projects": projects, "jobs": jobs, "identity_packs": packs, "modules": modules}
 
 
@@ -3396,6 +3399,7 @@ async def code_creator_check(project_id: str, _: str = Depends(require_owner)) -
 app.include_router(api)
 app.include_router(code_builder_router)
 app.include_router(document_studio_router)
+app.include_router(mentor_router)
 app.include_router(runtime_router)
 
 
