@@ -1,11 +1,10 @@
 import axios from 'axios';
 
 const CONFIGURED_BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || '').replace(/\/+$/, '');
-const DEV_BACKEND_URL =
-  typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:8000`
-    : 'http://127.0.0.1:8000';
-const BACKEND_URL = process.env.NODE_ENV === 'development' ? DEV_BACKEND_URL : CONFIGURED_BACKEND_URL;
+// Default to same-origin API requests. In development, CRA/CRACO proxies /api to
+// the local backend. This also makes GitHub Codespaces and other forwarded web
+// origins work correctly without exposing or hardcoding backend port 8000.
+const BACKEND_URL = CONFIGURED_BACKEND_URL;
 export const API_BASE = `${BACKEND_URL}/api`;
 const DEFAULT_TIMEOUT = 25000;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
