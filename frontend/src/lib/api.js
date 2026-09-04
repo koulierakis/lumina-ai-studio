@@ -9,8 +9,6 @@ export const API_BASE = `${BACKEND_URL}/api`;
 const DEFAULT_TIMEOUT = 25000;
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const SAFE_METHODS = new Set(['get', 'head', 'options']);
-const CODE_BUILDER_MODEL_STATUS_PATH = '/code-builder/model-status';
-const OLLAMA_STATUS_PATH = '/code-creator/status';
 
 export const api = axios.create({
   baseURL: API_BASE,
@@ -144,18 +142,6 @@ export async function apiRequest(method, url, options = {}) {
 }
 
 export async function apiGet(url, options = {}) {
-  if (url === CODE_BUILDER_MODEL_STATUS_PATH) {
-    const ollamaStatus = await request('get', OLLAMA_STATUS_PATH, options);
-    return {
-      status: !ollamaStatus?.online
-        ? 'offline'
-        : ollamaStatus?.installed
-          ? 'ready'
-          : 'not_configured',
-      model: ollamaStatus?.model || null,
-      installed_models: Array.isArray(ollamaStatus?.models) ? ollamaStatus.models : [],
-    };
-  }
   return request('get', url, options);
 }
 
