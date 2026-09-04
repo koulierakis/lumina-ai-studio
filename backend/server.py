@@ -2905,6 +2905,79 @@ async def upload_voice_sample(pack_id: str, file: UploadFile = File(...), owner:
     await media_coll.insert_one(media.model_dump()); pack["sample_media_ids"].append(media.id); pack["sample_count"] = len(pack["sample_media_ids"]); pack["total_sample_duration_seconds"] = round(float(pack.get("total_sample_duration_seconds", 0)) + metadata["duration_seconds"], 3); pack["updated_at"] = now_iso(); await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)
     return {"media_id": media.id, "mime_type": mime, "size_bytes": size, "metadata": metadata}
 
+@api.post("/voice/packs/{pack_id}/clone", response_model=VoicePack)
+async def clone_voice_pack(pack_id: str, owner: str = Depends(require_owner)) -> VoicePack:
+    pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
+    if not pack:
+        raise HTTPException(404, "Voice Pack not found")
+    if pack.get("provider") != "elevenlabs":
+        raise HTTPException(400, "Personal voice cloning requires an ElevenLabs Voice Pack.")
+    if not pack.get("consent_confirmed") or not str(pack.get("ownership_declaration") or "").strip():
+        raise HTTPException(400, "Voice ownership and consent are required before cloning.")
+    sample_ids = list(pack.get("sample_media_ids") or [])
+    if not sample_ids:
+        raise HTTPException(400, "Add at least one voice recording before cloning.")
+    provider = get_voice_provider("elevenlabs")
+    if not provider.is_configured():
+        raise HTTPException(503, "ElevenLabs is not configured. Add ELEVENLABS_API_KEY on this LUMINA installation.")
+    audio_files = []
+    for media_id in sample_ids:
+        media = await media_coll.find_one({"id": media_id, "owner_email": owner}, {"_id": 0})
+        if not media or media.get("kind") != "reference":
+            continue
+        try:
+            data = read_bytes(media["filename"], kind="reference")
+        except (FileNotFoundError, OSError):
+            continue
+        audio_files.append((media.get("filename") or f"sample-{media_id}", media.get("mime_type") or "application/octet-stream", data))
+    if not audio_files:
+        raise HTTPException(409, "No readable voice recordings remain in this Voice Pack.")
+    try:
+        result = await provider.clone_voice(pack["name"], audio_files, pack.get("description") or "LUMINA personal voice")
+    except (RuntimeError, ValueError) as exc:
+        logger.warning("Personal voice cloning failed for pack %s: %s", pack_id, exc)
+        pack.update({"readiness_status": "failed", "updated_at": now_iso()})
+        await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)
+        raise HTTPException(502, "ElevenLabs could not create the personal voice model.") from exc
+    pack.update({
+        "provider_voice_id": result["voice_id"],
+        "readiness_status": "provider-pending" if result.get("requires_verification") else "ready",
+        "updated_at": now_iso(),
+    })
+    await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)
+    return VoicePack(**pack)
+
+@api.post("/voice/generate-personal", response_model=VoiceJob)
+async def generate_personal_voice(
+    background: BackgroundTasks,
+    pack_id: str = Form(...),
+    text: str = Form(...),
+    style_prompt: str = Form("calm"),
+    owner: str = Depends(require_owner),
+) -> VoiceJob:
+    clean_text = text.strip()
+    if not clean_text:
+        raise HTTPException(400, "Enter text to generate with My Voice.")
+    pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
+    if not pack:
+        raise HTTPException(404, "Voice Pack not found")
+    if pack.get("provider") != "elevenlabs" or not pack.get("provider_voice_id") or pack.get("readiness_status") != "ready":
+        raise HTTPException(409, "This Voice Pack is not ready for personal voice generation.")
+    provider = get_voice_provider("elevenlabs")
+    if not provider.is_configured():
+        raise HTTPException(503, "ElevenLabs is not configured. Add ELEVENLABS_API_KEY on this LUMINA installation.")
+    personal_model = await _get_or_create_personal_voice_model(owner)
+    job = VoiceJob(
+        owner_email=owner, provider="elevenlabs", mode="text-to-speech", text=clean_text,
+        voice=pack["provider_voice_id"], style=(style_prompt.strip() or "calm"),
+        personal_model_id=personal_model.id, output_format="mp3",
+        title=clean_text[:80], tags=["personal-voice"],
+        metadata={"identity_preservation": True, "voice_pack_id": pack_id, "personal_model_version": personal_model.version},
+    )
+    await voice_jobs_coll.insert_one(job.model_dump())
+    background.add_task(_run_voice_job, job.id, owner)
+    return job
+
 def _inspect_voice_sample(data: bytes, mime: str) -> dict:
     """Reject empty/disguised content; extract reliable WAV details locally."""
     if mime in {"audio/wav", "audio/x-wav"}:
