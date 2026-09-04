@@ -6,5 +6,5 @@
     "3000": { "label": "LUMINA AI Studio", "onAutoForward": "notify" }
   },
   "postCreateCommand": "bash .devcontainer/codespace-setup.sh",
-  "postStartCommand": "bash .devcontainer/codespace-start.sh"
+  "postStartCommand": "bash .devcontainer/codespace-start.sh && bash .devcontainer/codespace-health.sh"
 }
