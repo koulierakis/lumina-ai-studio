@@ -147,6 +147,16 @@ from code_builder.router import (  # noqa: E402
     configure_code_builder_router,
     router as code_builder_router,
 )
+from code_builder_v2.applier import AtomicChangeApplier  # noqa: E402
+from code_builder_v2.backup import BackupService as BackupServiceV2  # noqa: E402
+from code_builder_v2.executor import CommandExecutor as CommandExecutorV2  # noqa: E402
+from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner  # noqa: E402
+from code_builder_v2.pipeline import ExecutionPipeline  # noqa: E402
+from code_builder_v2.repository import Repository as RepositoryV2  # noqa: E402
+from code_builder_v2.router import configure as configure_code_builder_v2_router, router as code_builder_v2_router  # noqa: E402
+from code_builder_v2.service import CodeBuilderService  # noqa: E402
+from code_builder_v2.store import JsonTaskStore  # noqa: E402
+from code_builder_v2.validation import ValidationRunner as ValidationRunnerV2  # noqa: E402
 from document_studio.router import configure_document_studio_router, router as document_studio_router  # noqa: E402
 from ai_runtime.router import router as runtime_router  # noqa: E402
 from ai_runtime.manager import runtime_manager  # noqa: E402
@@ -367,6 +377,34 @@ configure_code_builder_router(
     repository_service=code_builder_repository_service,
     backup_service=code_builder_backup_service,
 )
+
+# ---------- Code Builder V2 bootstrap ----------
+CODE_BUILDER_V2_RUNTIME_ROOT = ROOT_DIR.parent / ".lumina-runtime" / "code-builder-v2"
+CODE_BUILDER_V2_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+code_builder_v2_repository = RepositoryV2(CODE_BUILDER_REPOSITORY_ROOT)
+code_builder_v2_backup = BackupServiceV2(
+    CODE_BUILDER_REPOSITORY_ROOT,
+    CODE_BUILDER_V2_RUNTIME_ROOT / "backups",
+)
+code_builder_v2_client = OllamaClient(
+    default_model=str(runtime_config["preferred_ollama_model"]),
+)
+code_builder_v2_applier = AtomicChangeApplier(
+    code_builder_v2_repository,
+    code_builder_v2_backup,
+)
+code_builder_v2_pipeline = ExecutionPipeline(
+    code_builder_v2_repository,
+    OllamaChangeGenerator(code_builder_v2_client),
+    code_builder_v2_applier,
+    ValidationRunnerV2(CommandExecutorV2(CODE_BUILDER_REPOSITORY_ROOT)),
+)
+code_builder_v2_service = CodeBuilderService(
+    OllamaPlanner(code_builder_v2_client),
+    store=JsonTaskStore(CODE_BUILDER_V2_RUNTIME_ROOT / "tasks.json"),
+    pipeline=code_builder_v2_pipeline,
+)
+configure_code_builder_v2_router(code_builder_v2_service)
 configure_document_studio_router(persistence_provider, media_coll, notifications_coll)
 
 
@@ -3366,6 +3404,7 @@ async def code_creator_check(project_id: str, _: str = Depends(require_owner)) -
 # ---------- Boot ----------
 app.include_router(api)
 app.include_router(code_builder_router)
+app.include_router(code_builder_v2_router)
 app.include_router(document_studio_router)
 app.include_router(runtime_router)
 
