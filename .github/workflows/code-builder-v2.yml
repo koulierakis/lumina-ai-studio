@@ -28,10 +28,10 @@ jobs:
         run: python -m pip install --upgrade pip pytest pytest-xdist 'pydantic>=2,<3' fastapi
       - name: Compile V2 modules and server
         run: python -m py_compile server.py code_builder_v2/*.py
-      - name: Run V2 tests
+      - name: Run isolated V2 tests
         env:
           PYTHONPATH: .
-        run: pytest -q tests/test_code_builder_v2_*.py
+        run: pytest -q --noconftest tests/test_code_builder_v2_*.py
 
   frontend-v2:
     runs-on: ubuntu-latest
