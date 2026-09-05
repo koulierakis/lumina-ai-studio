@@ -1,0 +1,51 @@
+name: Code Builder V2 Verification
+
+on:
+  push:
+    branches:
+      - work/code-builder-v2-from-scratch
+    paths:
+      - 'backend/code_builder_v2/**'
+      - 'backend/tests/test_code_builder_v2_*.py'
+      - 'backend/server.py'
+      - 'frontend/src/pages/CodeBuilderV2.jsx'
+      - 'frontend/src/App.js'
+      - '.github/workflows/code-builder-v2.yml'
+  workflow_dispatch:
+
+jobs:
+  backend-v2:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install focused test dependencies
+        run: python -m pip install --upgrade pip pytest 'pydantic>=2,<3' fastapi
+      - name: Compile V2 modules and server
+        run: python -m py_compile server.py code_builder_v2/*.py
+      - name: Run V2 tests
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/test_code_builder_v2_*.py
+
+  frontend-v2:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Build frontend
+        run: npm run build
