@@ -39,6 +39,12 @@ class ChangePlan(BaseModel):
     validation_commands: list[str] = Field(default_factory=list)
 
 
+class ExecutionReport(BaseModel):
+    backup_id: str
+    changed_paths: list[str] = Field(default_factory=list)
+    validation_commands: list[str] = Field(default_factory=list)
+
+
 class TaskEvent(BaseModel):
     at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     phase: TaskStatus
@@ -50,6 +56,7 @@ class BuildTask(BaseModel):
     request: TaskRequest
     status: TaskStatus = TaskStatus.queued
     plan: ChangePlan | None = None
+    execution: ExecutionReport | None = None
     error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
