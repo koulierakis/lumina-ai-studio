@@ -5,6 +5,7 @@ from threading import RLock
 
 from .models import BuildTask, TaskRequest, TaskStatus
 from .planner import Planner
+from .store import JsonTaskStore
 
 
 class TaskNotFound(KeyError):
@@ -14,14 +15,24 @@ class TaskNotFound(KeyError):
 @dataclass
 class CodeBuilderService:
     planner: Planner
+    store: JsonTaskStore | None = None
     _tasks: dict[str, BuildTask] = field(default_factory=dict)
     _lock: RLock = field(default_factory=RLock)
+
+    def __post_init__(self) -> None:
+        if self.store is not None:
+            self._tasks = self.store.load_all()
+
+    def _persist(self) -> None:
+        if self.store is not None:
+            self.store.save_all(self._tasks)
 
     def create_task(self, request: TaskRequest) -> BuildTask:
         task = BuildTask(request=request)
         task.transition(TaskStatus.queued, "Task created")
         with self._lock:
             self._tasks[task.id] = task
+            self._persist()
         return task
 
     def get_task(self, task_id: str) -> BuildTask:
@@ -40,6 +51,8 @@ class CodeBuilderService:
         except Exception as exc:
             task.error = str(exc)
             task.transition(TaskStatus.failed, "Planning failed")
+        with self._lock:
+            self._persist()
         return task
 
     def cancel_task(self, task_id: str) -> BuildTask:
@@ -47,4 +60,6 @@ class CodeBuilderService:
         if task.status in {TaskStatus.completed, TaskStatus.failed, TaskStatus.rolled_back}:
             return task
         task.transition(TaskStatus.cancelled, "Task cancelled")
+        with self._lock:
+            self._persist()
         return task
