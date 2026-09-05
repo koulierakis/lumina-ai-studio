@@ -46,7 +46,7 @@ export default function CodeBuilderV2() {
   const elapsed = useMemo(() => {
     if (!task?.created_at) return null;
     return Math.max(0, Math.floor((Date.now() - new Date(task.created_at).getTime()) / 1000));
-  }, [task?.created_at, task?.updated_at]);
+  }, [task?.created_at]);
 
   async function createTask(event) {
     event.preventDefault();
