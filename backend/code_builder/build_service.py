@@ -1895,6 +1895,18 @@ def resolve_command(
 
     custom_policy = configuration.custom_command_policy
     explicitly_allowed_paths = custom_policy.executable_paths
+    if command.kind in {
+        BuildCommandKind.PYTHON_COMPILE,
+        BuildCommandKind.PYTEST,
+        BuildCommandKind.UNITTEST,
+    }:
+        # These built-in command kinds deliberately use the interpreter that is
+        # already running LUMINA. On Windows ``sys.executable`` is absolute, so
+        # include that trusted interpreter without weakening the allowlist for
+        # user-supplied custom commands or other absolute executables.
+        explicitly_allowed_paths = frozenset(
+            {*explicitly_allowed_paths, sys.executable}
+        )
 
     executable = resolve_executable(
         executable_text,

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+from uuid import uuid4
 
+from code_builder.models import (
+    ChangePlan,
+    ChangeType,
+    ProposedFileChange,
+)
 from code_builder.backup_service import BackupService
 from code_builder.build_service import (
     BuildCommandKind,
@@ -89,6 +95,39 @@ def _plan_for(path: str) -> GeneratedChangePlan:
     )
 
 
+def _plan_for_changes(
+    changes: list[tuple[str, str]],
+) -> GeneratedChangePlan:
+    paths = [path for path, _ in changes]
+    return GeneratedChangePlan(
+        title="Apply controlled multi-file changes",
+        summary="Apply every explicit file change in the approved plan.",
+        objective="Keep generated patch coverage aligned with approval.",
+        risk_level="low",
+        files=[
+            GeneratedFileChange(
+                path=path,
+                operation=operation,
+                summary=f"{operation} {path}",
+                rationale="Explicitly required by the task.",
+            )
+            for path, operation in changes
+        ],
+        steps=[
+            GeneratedPlanStep(
+                order=1,
+                title="Apply approved files",
+                description="Apply every explicit file operation.",
+                file_paths=paths,
+                validation=["Verify all planned files are covered."],
+            )
+        ],
+        acceptance_criteria=["Every planned file is represented in the patch."],
+        test_plan=["Compile the resulting Python files."],
+        rollback_plan=["Restore the automatic backup."],
+    )
+
+
 def _service(repository_root: Path, plan: GeneratedChangePlan) -> TaskService:
     return TaskService(
         repository_service=StaticRepositoryService(repository_root),
@@ -145,6 +184,53 @@ def test_nested_pytest_build_preserves_repository_and_backup(tmp_path: Path) -> 
         f"cwd={command.working_directory!r}; args={command.arguments!r}"
     )
     assert manifest.exists(), f"nested pytest removed backup manifest: {manifest}"
+
+
+def test_builtin_python_compile_uses_running_interpreter_without_custom_allowlist(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "probe.py"
+    source.write_text("FLAG = True\n", encoding="utf-8")
+
+    build = BuildService(
+        BuildServiceConfiguration(repository_root=tmp_path)
+    ).execute_sequence(
+        (
+            BuildCommandSpec(
+                command_id="probe-compile",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=(source.name,),
+                timeout_seconds=60,
+            ),
+        )
+    )
+
+    command = build.commands[0]
+    assert command.status is BuildStatus.SUCCEEDED, (
+        f"stdout={command.stdout!r}; stderr={command.stderr!r}; "
+        f"executable={command.executable!r}"
+    )
+
+
+def test_custom_absolute_executable_still_requires_explicit_allowlist(
+    tmp_path: Path,
+) -> None:
+    build = BuildService(
+        BuildServiceConfiguration(repository_root=tmp_path)
+    ).execute_sequence(
+        (
+            BuildCommandSpec(
+                command_id="custom-python",
+                kind=BuildCommandKind.CUSTOM,
+                executable=sys.executable,
+                arguments=("--version",),
+            ),
+        )
+    )
+
+    command = build.commands[0]
+    assert command.status is BuildStatus.ERROR
+    assert "allowlist" in (command.error_message or "").lower()
 
 
 def test_approved_generated_change_plan_executes_with_backup_and_diff(
@@ -324,6 +410,352 @@ def test_execution_rejects_patch_missing_required_planned_file(tmp_path: Path) -
     assert second in (result.error_message or "")
     assert not (tmp_path / first).exists()
     assert not (tmp_path / second).exists()
+
+
+def test_complete_create_modify_delete_plan_coverage_is_accepted(
+    tmp_path: Path,
+) -> None:
+    created = "created.py"
+    modified = "modified.py"
+    deleted = "deleted.py"
+    (tmp_path / modified).write_text("VALUE = 1\n", encoding="utf-8")
+    (tmp_path / deleted).write_text("REMOVE = True\n", encoding="utf-8")
+    plan = _plan_for_changes(
+        [(created, "create"), (modified, "modify"), (deleted, "delete")]
+    )
+    request = TaskRequest(
+        instruction="Create, modify, and delete the three approved files.",
+        target_paths=(created, modified, deleted),
+        metadata={
+            "patch_operations": [
+                {"operation": "create", "path": created, "content": "CREATED = True\n"},
+                {
+                    "operation": "replace_text",
+                    "path": modified,
+                    "search_text": "VALUE = 1",
+                    "replacement_text": "VALUE = 2",
+                },
+                {"operation": "delete", "path": deleted},
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="compile-covered-files",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=(created, modified),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.SUCCEEDED, result.error_message
+    assert (tmp_path / created).read_text(encoding="utf-8") == "CREATED = True\n"
+    assert (tmp_path / modified).read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert not (tmp_path / deleted).exists()
+
+
+def test_incomplete_approved_plan_patch_is_rejected_before_apply(
+    tmp_path: Path,
+) -> None:
+    greeting = "greeting.py"
+    settings = "settings.json"
+    test_file = "test_greeting.py"
+    original_greeting = "def message() -> str:\n    return 'pending'\n"
+    original_settings = '{\n  "mode": "pending"\n}\n'
+    (tmp_path / greeting).write_text(original_greeting, encoding="utf-8")
+    (tmp_path / settings).write_text(original_settings, encoding="utf-8")
+    plan = {
+        "changes": [
+            {"relative_path": greeting, "change_type": "modify"},
+            {"relative_path": settings, "change_type": "modify"},
+            {"relative_path": test_file, "change_type": "create"},
+        ]
+    }
+    request = TaskRequest(
+        instruction="Apply the approved three-file greeting change.",
+        target_paths=(greeting, settings, test_file),
+        metadata={
+            "patch_operations": [
+                {
+                    "operation": "replace_text",
+                    "path": settings,
+                    "search_text": '"pending"',
+                    "replacement_text": '"verified"',
+                }
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="must-not-run",
+                kind=BuildCommandKind.PYTEST,
+                arguments=(test_file,),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.ROLLED_BACK
+    assert result.rollback_attempted is True
+    assert result.patch_application is None
+    assert result.build_result is None
+    assert result.error_message is not None
+    assert "Generated patch does not cover approved plan." in result.error_message
+    assert "- greeting.py" in result.error_message
+    assert "- test_greeting.py" in result.error_message
+    assert (tmp_path / greeting).read_text(encoding="utf-8") == original_greeting
+    assert (tmp_path / settings).read_text(encoding="utf-8") == original_settings
+    assert not (tmp_path / test_file).exists()
+
+
+def test_patch_path_traversal_alias_cannot_satisfy_plan_coverage(
+    tmp_path: Path,
+) -> None:
+    path = "safe.py"
+    original = "SAFE = True\n"
+    (tmp_path / path).write_text(original, encoding="utf-8")
+    request = TaskRequest(
+        instruction="Modify the approved safe file.",
+        target_paths=(path,),
+        metadata={
+            "patch_operations": [
+                {
+                    "operation": "replace_text",
+                    "path": "nested/../safe.py",
+                    "search_text": "True",
+                    "replacement_text": "False",
+                }
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="must-not-run",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=(path,),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(
+        tmp_path,
+        {
+            "changes": [
+                {"relative_path": path, "change_type": "modify"},
+            ]
+        },
+    ).execute_internal(request)
+
+    assert result.status is TaskStatus.ROLLED_BACK
+    assert result.patch_application is None
+    assert result.build_result is None
+    assert result.error_message is not None
+    assert "unsafe repository-relative path" in result.error_message
+    assert (tmp_path / path).read_text(encoding="utf-8") == original
+
+
+def test_informational_plan_entry_does_not_require_patch_coverage(
+    tmp_path: Path,
+) -> None:
+    path = "covered.py"
+    plan = {
+        "changes": [
+            {"relative_path": path, "change_type": "create"},
+            {"relative_path": "notes-only.txt", "change_type": "informational"},
+        ]
+    }
+    request = TaskRequest(
+        instruction="Create the required file and retain informational guidance.",
+        target_paths=(path,),
+        metadata={
+            "patch_operations": [
+                {"operation": "create", "path": path, "content": "OK = True\n"}
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="compile",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=(path,),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.SUCCEEDED, result.error_message
+    assert (tmp_path / path).read_text(encoding="utf-8") == "OK = True\n"
+
+
+def test_plan_delete_but_patch_replaces_is_rejected(
+    tmp_path: Path,
+) -> None:
+    """A patch cannot silently downgrade a planned delete to an edit."""
+
+    deleted = "deleted.py"
+    (tmp_path / deleted).write_text("REMOVE = True\n", encoding="utf-8")
+    plan = {
+        "changes": [
+            {"relative_path": deleted, "change_type": "delete"},
+        ]
+    }
+    request = TaskRequest(
+        instruction="Delete the approved file.",
+        target_paths=(deleted,),
+        metadata={
+            "patch_operations": [
+                {
+                    "operation": "replace_text",
+                    "path": deleted,
+                    "search_text": "REMOVE = True",
+                    "replacement_text": "REMOVE = False",
+                }
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="must-not-run",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=(deleted,),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.ROLLED_BACK
+    assert result.patch_application is None
+    assert result.error_message is not None
+    assert "does not delete it" in result.error_message
+    assert (tmp_path / deleted).read_text(encoding="utf-8") == "REMOVE = True\n"
+
+
+def test_plan_rename_but_patch_renames_to_other_destination_is_rejected(
+    tmp_path: Path,
+) -> None:
+    source = "old_name.py"
+    (tmp_path / source).write_text("VALUE = 1\n", encoding="utf-8")
+    plan = {
+        "changes": [
+            {
+                "relative_path": "new_name.py",
+                "change_type": "rename",
+                "previous_path": source,
+            },
+        ]
+    }
+    request = TaskRequest(
+        instruction="Rename the approved file.",
+        target_paths=(source,),
+        metadata={
+            "patch_operations": [
+                {
+                    "operation": "rename",
+                    "path": source,
+                    "destination_path": "other_name.py",
+                }
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="must-not-run",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=(source,),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.ROLLED_BACK
+    assert result.patch_application is None
+    assert result.error_message is not None
+    # Path coverage rejects the unplanned destination before application.
+    assert "new_name.py" in result.error_message
+    assert (tmp_path / source).exists()
+    assert not (tmp_path / "other_name.py").exists()
+
+
+def test_domain_change_plan_delete_and_rename_execute_faithfully(
+    tmp_path: Path,
+) -> None:
+    """Domain ChangePlan (change_type) coverage works at the task level."""
+
+    stale = "stale.py"
+    (tmp_path / stale).write_text("OLD = True\n", encoding="utf-8")
+    old_name = "old_name.py"
+    (tmp_path / old_name).write_text("VALUE = 1\n", encoding="utf-8")
+    plan = ChangePlan(
+        task_id=uuid4(),
+        title="Delete stale file and rename module",
+        summary="Controlled destructive operations.",
+        changes=[
+            ProposedFileChange(
+                relative_path=stale,
+                change_type=ChangeType.DELETE,
+                old_content="OLD = True\n",
+                summary="Remove stale file.",
+                reason="Requested.",
+            ),
+            ProposedFileChange(
+                relative_path="new_name.py",
+                change_type=ChangeType.RENAME,
+                previous_path=old_name,
+                new_content="VALUE = 1\n",
+                summary="Rename module.",
+                reason="Requested.",
+            ),
+        ],
+    )
+    request = TaskRequest(
+        instruction="Delete stale.py and rename old_name.py to new_name.py.",
+        target_paths=(stale, old_name),
+        metadata={
+            "patch_operations": [
+                {"operation": "delete", "path": stale},
+                {
+                    "operation": "rename",
+                    "path": old_name,
+                    "destination_path": "new_name.py",
+                },
+            ]
+        },
+        build_commands=(
+            BuildCommandSpec(
+                command_id="compile-remaining",
+                kind=BuildCommandKind.PYTHON_COMPILE,
+                arguments=("new_name.py",),
+                timeout_seconds=60,
+            ),
+        ),
+        backup_policy=BackupPolicy.REQUIRED,
+        rollback_policy=RollbackPolicy.ON_ANY_FAILURE,
+    )
+
+    result = _service(tmp_path, plan).execute_internal(request)
+
+    assert result.status is TaskStatus.SUCCEEDED, result.error_message
+    assert not (tmp_path / stale).exists()
+    assert not (tmp_path / old_name).exists()
+    assert (tmp_path / "new_name.py").read_text(encoding="utf-8") == "VALUE = 1\n"
 
 
 def test_approval_marks_awaiting_task_as_approved() -> None:

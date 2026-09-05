@@ -39,7 +39,7 @@ from .security import (
 
 DEFAULT_TASK_TIMEOUT_SECONDS: Final[float] = 3600.0
 DEFAULT_ANALYSIS_TIMEOUT_SECONDS: Final[float] = 300.0
-DEFAULT_PLANNING_TIMEOUT_SECONDS: Final[float] = 600.0
+DEFAULT_PLANNING_TIMEOUT_SECONDS: Final[float] = 900.0
 DEFAULT_PATCH_TIMEOUT_SECONDS: Final[float] = 900.0
 DEFAULT_BUILD_TIMEOUT_SECONDS: Final[float] = 1800.0
 DEFAULT_ROLLBACK_TIMEOUT_SECONDS: Final[float] = 300.0
@@ -838,6 +838,337 @@ def _extract_plan_operation_paths(plan: Any) -> frozenset[str]:
     return frozenset(_extract_paths(plan))
 
 
+_PLAN_OPERATION_ALIASES: Final[dict[str, str]] = {
+    "add": "create",
+    "new": "create",
+    "create_file": "create",
+    "create-directory": "create",
+    "create_directory": "create",
+    "modify": "update",
+    "edit": "update",
+    "change": "update",
+    "replace": "update",
+    "patch": "update",
+    "refactor": "update",
+    "remove": "delete",
+    "delete_file": "delete",
+    "move": "rename",
+    "rename_file": "rename",
+}
+
+_FILE_CHANGING_PLAN_OPERATIONS: Final[frozenset[str]] = frozenset(
+    {"create", "update", "delete", "rename"}
+)
+
+
+def _normalize_plan_operation_value(raw_operation: Any) -> str:
+    """Return the canonical create/update/delete/rename operation or ""."""
+
+    if isinstance(raw_operation, enum.Enum):
+        raw_operation = raw_operation.value
+    operation = str(raw_operation or "").strip().casefold()
+    operation = operation.replace("-", "_").replace(" ", "_")
+    return _PLAN_OPERATION_ALIASES.get(operation, operation)
+
+
+def _normalize_patch_coverage_path(
+    path_value: Any,
+    *,
+    repository_root: Path,
+    source: str,
+) -> tuple[str, str]:
+    """Normalize a repository-relative path to (casefolded, display) form."""
+
+    if not isinstance(path_value, str):
+        raise TaskPatchError(
+            f"{source} contains a non-string repository path."
+        )
+
+    display_path = path_value.strip().replace("\\", "/")
+    segments = display_path.split("/")
+    candidate = Path(display_path)
+
+    if (
+        not display_path
+        or "\x00" in display_path
+        or candidate.is_absolute()
+        or any(segment in {"", ".", ".."} for segment in segments)
+    ):
+        raise TaskPatchError(
+            f"{source} contains an unsafe repository-relative path: "
+            f"{path_value!r}."
+        )
+
+    try:
+        resolved = (repository_root / Path(*segments)).resolve(strict=False)
+        relative = resolved.relative_to(repository_root.resolve(strict=False))
+    except (OSError, ValueError) as exc:
+        raise TaskPatchError(
+            f"{source} path escapes the repository: {path_value!r}."
+        ) from exc
+
+    normalized = relative.as_posix()
+    return normalized.casefold(), normalized
+
+
+def _normalized_plan_changes(
+    plan: Any,
+    *,
+    repository_root: Path,
+) -> list[tuple[str, str, str | None]]:
+    """Normalize plan changes to (operation, path, rename_destination) tuples.
+
+    Handles both the domain ChangePlan shape (``changes[].change_type`` +
+    ``relative_path``/``previous_path``) and the GeneratedChangePlan shape
+    (``files[].operation`` + ``path``/``destination_path``).
+    """
+
+    changes = _extract_value(plan, ("changes", "files"), default=())
+    if not isinstance(changes, Sequence) or isinstance(
+        changes,
+        (str, bytes, bytearray),
+    ):
+        return []
+
+    normalized: list[tuple[str, str, str | None]] = []
+    for change in changes:
+        if change is None or isinstance(change, (str, bytes, bytearray)):
+            continue
+        operation = _normalize_plan_operation_value(
+            _extract_value(
+                change,
+                ("change_type", "operation", "type", "action"),
+            )
+        )
+        if operation not in _FILE_CHANGING_PLAN_OPERATIONS:
+            continue
+        raw_path = _extract_value(
+            change,
+            ("relative_path", "path", "file_path", "target_path"),
+        )
+        if not raw_path:
+            continue
+        _, path = _normalize_patch_coverage_path(
+            raw_path,
+            repository_root=repository_root,
+            source="Approved plan",
+        )
+        if operation == "rename":
+            raw_destination = _extract_value(
+                change,
+                ("destination_path", "new_path", "destination"),
+            )
+            if raw_destination:
+                _, destination = _normalize_patch_coverage_path(
+                    raw_destination,
+                    repository_root=repository_root,
+                    source="Approved plan",
+                )
+                normalized.append((operation, path, destination))
+                continue
+            raw_previous = _extract_value(
+                change,
+                ("previous_path", "source_path"),
+            )
+            if raw_previous:
+                # Domain ChangePlan renames: previous_path is the source and
+                # relative_path is the destination.
+                _, source = _normalize_patch_coverage_path(
+                    raw_previous,
+                    repository_root=repository_root,
+                    source="Approved plan",
+                )
+                normalized.append((operation, source, path))
+                continue
+        normalized.append((operation, path, None))
+
+    return normalized
+
+
+def _required_approved_plan_paths(
+    plan: Any,
+    *,
+    repository_root: Path,
+) -> dict[str, str]:
+    """All repository paths the approved plan requires the patch to touch."""
+
+    required: dict[str, str] = {}
+    for operation, path, destination in _normalized_plan_changes(
+        plan,
+        repository_root=repository_root,
+    ):
+        required.setdefault(path.casefold(), path)
+        if operation == "rename" and destination is not None:
+            required.setdefault(destination.casefold(), destination)
+    return required
+
+
+def _generated_patch_paths(
+    patch: Any,
+    *,
+    repository_root: Path,
+) -> frozenset[str]:
+    if isinstance(patch, PatchRequestPayload):
+        paths: set[str] = set()
+        for operation in patch.operations:
+            for raw_path in (
+                operation.path,
+                operation.destination_path,
+            ):
+                if not raw_path:
+                    continue
+                canonical, _ = _normalize_patch_coverage_path(
+                    raw_path,
+                    repository_root=repository_root,
+                    source="Generated patch",
+                )
+                paths.add(canonical)
+        return frozenset(paths)
+
+    operations = _extract_value(patch, ("operations",), default=())
+    if not isinstance(operations, Sequence) or isinstance(
+        operations,
+        (str, bytes, bytearray),
+    ):
+        raise TaskPatchError(
+            "Generated patch operations must be a sequence."
+        )
+
+    paths = set()
+    for operation in operations:
+        raw_path = _extract_value(
+            operation,
+            ("path", "file_path", "relative_path", "target_path"),
+        )
+        canonical, _ = _normalize_patch_coverage_path(
+            raw_path,
+            repository_root=repository_root,
+            source="Generated patch",
+        )
+        paths.add(canonical)
+        raw_destination = _extract_value(
+            operation,
+            ("destination_path", "new_path", "destination"),
+        )
+        if raw_destination:
+            destination_canonical, _ = _normalize_patch_coverage_path(
+                raw_destination,
+                repository_root=repository_root,
+                source="Generated patch",
+            )
+            paths.add(destination_canonical)
+    return frozenset(paths)
+
+
+def _validate_approved_plan_patch_coverage(
+    context: TaskExecutionContext,
+) -> None:
+    """Require the generated patch to cover every file the plan changes."""
+
+    required = _required_approved_plan_paths(
+        context.plan,
+        repository_root=context.configuration.repository_root,
+    )
+    if not required:
+        return
+
+    generated = _generated_patch_paths(
+        context.patch,
+        repository_root=context.configuration.repository_root,
+    )
+    missing = sorted(
+        (required[path] for path in required.keys() - generated),
+        key=str.casefold,
+    )
+    if missing:
+        formatted = "\n".join(f"- {path}" for path in missing)
+        raise TaskPatchError(
+            "Generated patch does not cover approved plan.\n"
+            "Missing planned files:\n"
+            f"{formatted}"
+        )
+
+
+def _validate_approved_plan_patch_operations(
+    context: TaskExecutionContext,
+) -> None:
+    """Require destructive plan operations to be executed faithfully.
+
+    A patch may list a path that is planned for deletion or rename while
+    silently replacing its contents instead. Path coverage alone cannot detect
+    that semantic mismatch, so plan operations with destructive intent are
+    matched against the generated patch operations.
+    """
+
+    if not isinstance(context.patch, PatchRequestPayload):
+        return
+
+    repository_root = context.configuration.repository_root
+    planned = _normalized_plan_changes(
+        context.plan,
+        repository_root=repository_root,
+    )
+    if not planned:
+        return
+
+    generated: list[tuple[str, str, str | None]] = []
+    for operation in context.patch.operations:
+        _, operation_path = _normalize_patch_coverage_path(
+            operation.path,
+            repository_root=repository_root,
+            source="Generated patch",
+        )
+        destination = None
+        if operation.destination_path:
+            _, destination = _normalize_patch_coverage_path(
+                operation.destination_path,
+                repository_root=repository_root,
+                source="Generated patch",
+            )
+        generated.append(
+            (str(operation.operation).strip().casefold(), operation_path, destination)
+        )
+
+    for planned_operation, path, destination in planned:
+        if planned_operation == "delete":
+            if not any(
+                generated_operation == "delete"
+                and generated_path.casefold() == path.casefold()
+                for generated_operation, generated_path, _ in generated
+            ):
+                raise TaskPatchError(
+                    f"Approved plan marks {path} for deletion but the "
+                    "generated patch does not delete it."
+                )
+        elif planned_operation == "rename":
+            if destination is None or not any(
+                generated_operation == "rename"
+                and generated_path.casefold() == path.casefold()
+                and generated_destination is not None
+                and generated_destination.casefold() == destination.casefold()
+                for generated_operation, generated_path, generated_destination in generated
+            ):
+                expected = (
+                    f" from {path} to {destination}"
+                    if destination is not None
+                    else f" for {path}"
+                )
+                raise TaskPatchError(
+                    f"Approved plan requires a rename{expected} but the "
+                    "generated patch does not rename it exactly."
+                )
+        elif planned_operation == "create":
+            if not any(
+                generated_operation == "create"
+                and generated_path.casefold() == path.casefold()
+                for generated_operation, generated_path, _ in generated
+            ):
+                raise TaskPatchError(
+                    f"Approved plan creates {path} but the generated patch "
+                    "does not create it."
+                )
+
+
 def _extract_required_plan_paths(
     plan: Any,
     *,
@@ -877,8 +1208,8 @@ def _extract_patch_operation_paths(
 ) -> frozenset[str]:
     paths: set[str] = set()
     for operation in payload.operations:
-        for field in ("path", "destination_path"):
-            value = getattr(operation, field, None)
+        for field_name in ("path", "destination_path"):
+            value = getattr(operation, field_name, None)
             if value:
                 paths.add(_normalize_relative_repository_path(repository_root, str(value)))
     return frozenset(paths)
@@ -1459,12 +1790,26 @@ def _create_backup(
         context.configuration.rollback_timeout_seconds,
     )
 
-    planned_paths = _extract_paths(context.plan)
+    # The domain ChangePlan model carries its file locations under
+    # ``changes[].relative_path`` which the generic path extractor cannot
+    # see. Deriving backup paths from the plan's file changes (including
+    # rename destinations) keeps the backup aligned with what the patch may
+    # touch even when the frontend did not send explicit target paths.
+    planned_paths = tuple(
+        _required_approved_plan_paths(
+            context.plan,
+            repository_root=context.configuration.repository_root,
+        ).values()
+    ) or tuple(_extract_paths(context.plan))
     paths_to_backup = (
         planned_paths
-        or context.request.target_paths
-        or (".",)
+        or tuple(context.request.target_paths)
     )
+    if not paths_to_backup:
+        raise TaskBackupError(
+            "The approved plan contains no repository file paths to "
+            "back up before patch application."
+        )
 
     try:
         backup = _call_compatible_method(
@@ -3331,6 +3676,8 @@ class TaskService:
         )
 
         try:
+            _validate_approved_plan_patch_coverage(context)
+            _validate_approved_plan_patch_operations(context)
             context.patch_validation = _validate_patch(
                 context,
                 patch_service=self._patch_service,

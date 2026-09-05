@@ -1863,6 +1863,18 @@ def _manual_rollback_sync(
             "backup reference."
         )
 
+    backup_id: str | None = None
+    if isinstance(backup_reference, str):
+        backup_id = backup_reference
+    elif isinstance(backup_reference, Mapping):
+        raw_backup_id = backup_reference.get("backup_id")
+        if raw_backup_id is not None:
+            backup_id = str(raw_backup_id)
+    else:
+        raw_backup_id = getattr(backup_reference, "backup_id", None)
+        if raw_backup_id is not None:
+            backup_id = str(raw_backup_id)
+
     try:
         rollback_result = _call_service_method(
             backup_service,
@@ -1874,6 +1886,10 @@ def _manual_rollback_sync(
                 "recover",
             ),
             keyword_variants=(
+                {
+                    "backup_id": backup_id,
+                    "create_safety_backup": True,
+                },
                 {
                     "backup": backup_reference,
                     "backup_reference": (
@@ -1903,7 +1919,7 @@ def _manual_rollback_sync(
                 },
             ),
             positional_variants=(
-                (backup_reference,),
+                (backup_id or backup_reference,),
                 (
                     stored_task.request.task_id,
                     backup_reference,

@@ -121,10 +121,19 @@ def test_real_router_full_loop_reconnect_cancel_and_rollback(tmp_path: Path) -> 
         assert completed["phase"] == "completed"
         assert (tmp_path / path).read_text(encoding="utf-8") == "RUNTIME_OK = True\n"
 
+        rollback = client.post(
+            f"/api/code-builder/tasks/{task_id}/rollback",
+            json={"reason": "runtime manual rollback verification"},
+        )
+        assert rollback.status_code == 200
+        rolled_back = client.get(f"/api/code-builder/tasks/{task_id}").json()
+        assert rolled_back["phase"] == "rolled_back"
+        assert not (tmp_path / path).exists()
+
         reconnect_store = PersistentTaskStore(path=tmp_path / "runtime.db")
         restored = reconnect_store.get(task_id)
         assert restored.request.task_id == task_id
-        assert restored.phase is CodeBuilderTaskPhase.COMPLETED
+        assert restored.phase is CodeBuilderTaskPhase.ROLLED_BACK
 
         cancel_path = "cancelled.py"
         cancel_store = PersistentTaskStore(path=tmp_path / "cancel.db")

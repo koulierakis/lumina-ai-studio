@@ -11,9 +11,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Final
 from urllib.parse import urlparse
@@ -21,9 +23,9 @@ from urllib.parse import urlparse
 from .patch_service import (
     PatchRequestPayload,
     PatchService,
+    PatchServiceError,
     ProposedPatchOperation,
 )
-
 
 DEFAULT_MODEL: Final[str] = "qwen2.5-coder:7b"
 DEFAULT_OLLAMA_URL: Final[str] = "http://127.0.0.1:11434"
@@ -33,7 +35,14 @@ MAX_TOTAL_CONTEXT_CHARACTERS: Final[int] = 180_000
 MAX_OPERATIONS: Final[int] = 50
 MAX_RESPONSE_CHARACTERS: Final[int] = 1_000_000
 ALLOWED_OPERATIONS: Final[frozenset[str]] = frozenset(
-    {"create", "replace_file", "replace_text", "unified_diff"}
+    {
+        "create",
+        "replace_file",
+        "replace_text",
+        "unified_diff",
+        "delete",
+        "rename",
+    }
 )
 _PATH_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -66,10 +75,27 @@ _OPERATION_ALIASES: Final[dict[str, str]] = {
     "update_file": "replace_file",
     "modify_file": "replace_file",
     "edit_file": "replace_file",
+    "delete_file": "delete",
+    "remove": "delete",
+    "remove_file": "delete",
+    "erase": "delete",
+    "rename_file": "rename",
+    "move": "rename",
+    "move_file": "rename",
 }
 _WRITE_STYLE_ALIASES: Final[frozenset[str]] = frozenset(
     {"write", "write_file", "save", "save_file", "set_file"}
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _PlanOperations:
+    """Operations explicitly authorized by the approved plan."""
+
+    create_paths: frozenset[str] = frozenset()
+    update_paths: frozenset[str] = frozenset()
+    delete_paths: frozenset[str] = frozenset()
+    rename_destinations: dict[str, str] = field(default_factory=dict)
 
 
 def _canonicalize_operation(raw_operation: Any, *, path_exists: bool) -> str:
@@ -107,6 +133,28 @@ def _dump(value: Any) -> Any:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_dump(item) for item in value]
     return value
+
+
+def _lf_normalized(text: str) -> str:
+    """Normalize any line-ending style to LF for deterministic matching."""
+
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _file_style_text(text: str, *, crlf_file: bool) -> str:
+    """Map LF-normalized text back to the file's actual line endings.
+
+    PatchService counts search occurrences against the raw file bytes. On
+    Windows fixture and repository files commonly use CRLF, while small local
+    models emit LF text. Converting the proposed search/replacement text to
+    the file's own newline style keeps the deterministic engine consistent
+    with what the model actually meant.
+    """
+
+    normalized = _lf_normalized(text)
+    if crlf_file and "\n" in normalized:
+        return normalized.replace("\n", "\r\n")
+    return normalized
 
 
 def _normalize_relative_path(value: Any) -> str | None:
@@ -204,27 +252,131 @@ def _collect_plan_paths(plan: Any) -> tuple[str, ...]:
     return tuple(collected)
 
 
-def _collect_required_plan_paths(plan: Any) -> tuple[str, ...]:
+_PLAN_OPERATION_ALIASES: Final[dict[str, str]] = {
+    "add": "create",
+    "new": "create",
+    "create_file": "create",
+    "create_directory": "create",
+    "create-directory": "create",
+    "modify": "update",
+    "edit": "update",
+    "change": "update",
+    "replace": "update",
+    "patch": "update",
+    "refactor": "update",
+    "remove": "delete",
+    "delete_file": "delete",
+    "move": "rename",
+    "rename_file": "rename",
+}
+
+
+def _normalize_plan_operation(raw_operation: Any) -> str:
+    operation = str(raw_operation or "").strip().casefold()
+    operation = operation.replace("-", "_").replace(" ", "_")
+    return _PLAN_OPERATION_ALIASES.get(operation, operation)
+
+
+def _collect_plan_operations(plan: Any) -> _PlanOperations:
+    """Extract the exact operations the approved plan authorizes.
+
+    Handles both the domain ChangePlan shape (``changes[].change_type`` +
+    ``relative_path``/``previous_path``) and the GeneratedChangePlan shape
+    (``files[].operation`` + ``path``/``destination_path``). Deletes and
+    renames are authorized only when the plan names them explicitly.
+    """
+
     dumped = _dump(plan)
     if not isinstance(dumped, Mapping):
-        return ()
+        return _PlanOperations()
     raw_changes = dumped.get("changes")
-    if not isinstance(raw_changes, Sequence) or isinstance(raw_changes, (str, bytes, bytearray)):
+    if not isinstance(raw_changes, Sequence) or isinstance(
+        raw_changes,
+        (str, bytes, bytearray),
+    ):
         raw_changes = dumped.get("files")
-    if not isinstance(raw_changes, Sequence) or isinstance(raw_changes, (str, bytes, bytearray)):
-        return ()
-    result: list[str] = []
+    if not isinstance(raw_changes, Sequence) or isinstance(
+        raw_changes,
+        (str, bytes, bytearray),
+    ):
+        return _PlanOperations()
+
+    creates: set[str] = set()
+    updates: set[str] = set()
+    deletes: set[str] = set()
+    renames: dict[str, str] = {}
+
     for change in raw_changes:
         if not isinstance(change, Mapping):
             continue
-        operation = str(change.get("change_type") or change.get("operation") or "").strip().lower()
-        operation = {"modify": "update", "edit": "update", "change": "update"}.get(operation, operation)
-        if operation not in {"create", "update"}:
+        operation = _normalize_plan_operation(
+            change.get("change_type")
+            or change.get("operation")
+            or change.get("type")
+            or change.get("action")
+        )
+        raw_path = change.get("relative_path") or change.get("path") or change.get("file_path") or change.get("target_path")
+        normalized_path = _normalize_relative_path(raw_path)
+        if normalized_path is None:
             continue
-        raw_path = change.get("relative_path") or change.get("path")
-        normalized = _normalize_relative_path(raw_path)
-        if normalized and normalized not in result:
-            result.append(normalized)
+        if operation == "create":
+            creates.add(normalized_path)
+        elif operation == "update":
+            updates.add(normalized_path)
+        elif operation == "delete":
+            deletes.add(normalized_path)
+        elif operation == "rename":
+            raw_destination = change.get("destination_path") or change.get("new_path")
+            if raw_destination is not None:
+                normalized_destination = _normalize_relative_path(raw_destination)
+                if normalized_destination is not None and normalized_destination != normalized_path:
+                    renames[normalized_path] = normalized_destination
+                    continue
+            raw_previous = change.get("previous_path") or change.get("source_path")
+            if raw_previous is not None:
+                # Domain ChangePlan renames: previous_path is the source and
+                # relative_path is the destination.
+                normalized_previous = _normalize_relative_path(raw_previous)
+                if normalized_previous is not None and normalized_previous != normalized_path:
+                    renames[normalized_previous] = normalized_path
+                    continue
+            updates.add(normalized_path)
+
+    return _PlanOperations(
+        create_paths=frozenset(creates),
+        update_paths=frozenset(updates),
+        delete_paths=frozenset(deletes),
+        rename_destinations=renames,
+    )
+
+
+def _collect_required_plan_paths(plan: Any) -> tuple[str, ...]:
+    """Every file the approved plan requires the patch to cover.
+
+    Deletes and renames are required coverage as well: a plan that marks a
+    file for deletion must not silently become an edit of that file, and a
+    rename must cover both the source and its approved destination.
+    """
+
+    operations = _collect_plan_operations(plan)
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def add(path: str) -> None:
+        if path and path not in seen:
+            seen.add(path)
+            result.append(path)
+
+    for path in operations.create_paths:
+        add(path)
+    for path in operations.update_paths:
+        add(path)
+    for path in operations.delete_paths:
+        add(path)
+    for source, destination in operations.rename_destinations.items():
+        add(source)
+        add(destination)
+
     return tuple(result)
 
 
@@ -234,7 +386,13 @@ def _ensure_required_plan_coverage(
 ) -> None:
     if not required_paths:
         return
-    operation_paths = {operation.path for operation in patch.operations}
+    operation_paths = {
+        operation.path for operation in patch.operations
+    } | {
+        operation.destination_path
+        for operation in patch.operations
+        if operation.destination_path
+    }
     missing = [path for path in required_paths if path not in operation_paths]
     if missing:
         raise AIPatchGenerationError(
@@ -303,6 +461,7 @@ def _schema() -> dict[str, Any]:
     operation_properties: dict[str, Any] = {
         "operation": {"type": "string", "enum": sorted(ALLOWED_OPERATIONS)},
         "path": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "destination_path": {"type": ["string", "null"]},
         "content": {"type": ["string", "null"]},
         "search_text": {"type": ["string", "null"]},
         "replacement_text": {"type": ["string", "null"]},
@@ -336,6 +495,85 @@ def _schema() -> dict[str, Any]:
             "description": {"type": ["string", "null"]},
         },
     }
+
+
+def _error_chain_detail(error: BaseException) -> str:
+    """Join an exception with its causes into one diagnostic string.
+
+    PatchService raises a shallow ``PatchTransactionError`` whose underlying
+    validation failure is chained as the cause. Preserving the chain gives
+    the model (and the task error) the precise deterministic rejection
+    reason instead of a generic wrapper message.
+    """
+
+    parts: list[str] = []
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        message = str(current).strip()
+        detail = (
+            f"{type(current).__name__}: {message}"
+            if message
+            else type(current).__name__
+        )
+        if detail not in parts:
+            parts.append(detail)
+        current = current.__cause__
+    return " -> ".join(parts)
+
+
+def _extract_json_object(text: str) -> Any:
+    """Deterministically extract one JSON object from a model response.
+
+    Small local models occasionally wrap structured output in markdown fences
+    or append short commentary even with ``format`` enabled. The extraction is
+    strictly syntactic: the parsed object must still pass the schema-constrained
+    patch validation and every allowlist afterwards.
+    """
+
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```[A-Za-z0-9_+-]*\s*", "", stripped)
+        stripped = re.sub(r"\s*```\s*$", "", stripped)
+        try:
+            return json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    start = stripped.find("{")
+    if start >= 0:
+        depth = 0
+        in_string = False
+        escape = False
+        for index in range(start, len(stripped)):
+            character = stripped[index]
+            if in_string:
+                if escape:
+                    escape = False
+                elif character == "\\":
+                    escape = True
+                elif character == '"':
+                    in_string = False
+                continue
+            if character == '"':
+                in_string = True
+            elif character == "{":
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(stripped[start : index + 1])
+                    except (json.JSONDecodeError, TypeError):
+                        break
+
+    raise ValueError("no JSON object found")
 
 
 def _resolve_base_url(ollama_service: Any) -> str:
@@ -408,12 +646,51 @@ def _request_structured_patch(
     try:
         envelope = json.loads(body.decode("utf-8"))
         generated = envelope["response"]
-        result = json.loads(generated)
-    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        result = _extract_json_object(generated)
+    except (UnicodeDecodeError, KeyError, TypeError) as exc:
+        raise AIPatchGenerationError("Ollama returned an invalid structured patch response.") from exc
+    except ValueError as exc:
         raise AIPatchGenerationError("Ollama returned an invalid structured patch response.") from exc
     if not isinstance(result, dict):
         raise AIPatchGenerationError("Ollama patch response must be a JSON object.")
     return result
+
+
+def _check_patch_operation_conflicts(
+    operation: str,
+    path: str,
+    *,
+    destination: str | None,
+    seen_paths: dict[str, str],
+    seen_destinations: set[str],
+) -> None:
+    """Reject duplicate or contradictory operations on the same path.
+
+    Mirrors PatchService.normalize_operations: every path may be claimed at
+    most once, rename destinations may not collide with another patch target,
+    and two renames cannot share a destination. Catching this at generation
+    time yields precise repair feedback instead of a generic dry-run failure.
+    """
+
+    if path in seen_paths:
+        raise AIPatchGenerationError(
+            f"AI patch contains conflicting operations for path {path!r}: "
+            f"{seen_paths[path]} and {operation}."
+        )
+    seen_paths[path] = operation
+
+    if operation == "rename" and destination is not None:
+        if destination in seen_paths:
+            raise AIPatchGenerationError(
+                f"AI patch rename destination {destination!r} is also a "
+                "patch target; refusing ambiguous rename."
+            )
+        if destination in seen_destinations:
+            raise AIPatchGenerationError(
+                f"AI patch contains two renames to the same destination "
+                f"{destination!r}."
+            )
+        seen_destinations.add(destination)
 
 
 def _to_patch_request(
@@ -423,7 +700,10 @@ def _to_patch_request(
     root: Path,
     hashes: Mapping[str, str],
     allow_file_creation: bool,
+    allow_file_deletion: bool = False,
+    plan_operations: _PlanOperations | None = None,
 ) -> PatchRequestPayload:
+    plan_operations = plan_operations or _PlanOperations()
     raw_operations = data.get("operations")
     if not isinstance(raw_operations, list) or not raw_operations:
         raise AIPatchGenerationError("AI returned no patch operations.")
@@ -431,6 +711,8 @@ def _to_patch_request(
         raise AIPatchGenerationError("AI returned too many patch operations.")
 
     operations: list[ProposedPatchOperation] = []
+    seen_paths: dict[str, str] = {}
+    seen_destinations: set[str] = set()
     for raw in raw_operations:
         if not isinstance(raw, Mapping):
             raise AIPatchGenerationError("AI returned a malformed patch operation.")
@@ -461,6 +743,94 @@ def _to_patch_request(
             raise AIPatchGenerationError(
                 f"AI attempted to change a file outside the approved plan: {path}"
             )
+
+        destination: str | None = None
+        if operation == "rename":
+            raw_destination = raw.get("destination_path") or raw.get("new_path")
+            destination = _coerce_repository_relative_path(
+                raw_destination,
+                root,
+            )
+            if destination is None:
+                raise AIPatchGenerationError(
+                    f"AI returned an unsupported or unsafe rename destination "
+                    f"{raw_destination!r} for operation {raw_operation!r}."
+                )
+            planned_destination = plan_operations.rename_destinations.get(path)
+            if planned_destination is None:
+                raise AIPatchGenerationError(
+                    f"AI attempted to rename a file not marked for rename in "
+                    f"the approved plan: {path}"
+                )
+            if destination != planned_destination:
+                raise AIPatchGenerationError(
+                    f"AI rename destination {destination!r} does not match "
+                    f"the approved plan destination {planned_destination!r} "
+                    f"for {path}."
+                )
+            if not absolute_path.is_file():
+                raise AIPatchGenerationError(
+                    f"AI tried to rename a missing file: {path}"
+                )
+            destination_path = _safe_repository_path(root, destination)
+            if destination_path.exists():
+                raise AIPatchGenerationError(
+                    f"AI rename destination already exists: {destination}"
+                )
+            _check_patch_operation_conflicts(
+                operation,
+                path,
+                destination=destination,
+                seen_paths=seen_paths,
+                seen_destinations=seen_destinations,
+            )
+            operations.append(
+                ProposedPatchOperation(
+                    operation="rename",
+                    path=path,
+                    destination_path=destination,
+                    description=raw.get("description"),
+                )
+            )
+            continue
+
+        if operation == "delete":
+            if path not in plan_operations.delete_paths:
+                raise AIPatchGenerationError(
+                    f"AI attempted to delete a file not marked for deletion in "
+                    f"the approved plan: {path}"
+                )
+            if not allow_file_deletion:
+                raise AIPatchGenerationError(
+                    "This task does not allow deleting files."
+                )
+            if not absolute_path.is_file():
+                raise AIPatchGenerationError(
+                    f"AI tried to delete a missing file: {path}"
+                )
+            _check_patch_operation_conflicts(
+                operation,
+                path,
+                destination=None,
+                seen_paths=seen_paths,
+                seen_destinations=seen_destinations,
+            )
+            operations.append(
+                ProposedPatchOperation(
+                    operation="delete",
+                    path=path,
+                    description=raw.get("description"),
+                )
+            )
+            continue
+
+        _check_patch_operation_conflicts(
+            operation,
+            path,
+            destination=None,
+            seen_paths=seen_paths,
+            seen_destinations=seen_destinations,
+        )
 
         if operation == "create":
             if not allow_file_creation:
@@ -501,16 +871,39 @@ def _to_patch_request(
                 raise AIPatchGenerationError(f"replace_text is missing search_text: {path}")
             if not isinstance(replacement_text, str):
                 raise AIPatchGenerationError(f"replace_text is missing replacement_text: {path}")
-            source_text = absolute_path.read_text(encoding="utf-8-sig")
-            occurrences = source_text.count(search_text)
+            # PatchService counts search occurrences against the raw file
+            # bytes (no universal-newline translation). Models emit LF text
+            # even when the file uses CRLF, so normalize both sides to LF
+            # for matching and then map the proposed text back to the file's
+            # own line endings before the deterministic engine validates it.
+            raw_source_bytes = absolute_path.read_bytes()
+            try:
+                raw_source_text = raw_source_bytes.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                raise AIPatchGenerationError(
+                    f"AI search target is not valid UTF-8 text: {path}"
+                )
+            crlf_file = "\r\n" in raw_source_text
+            source_text = _lf_normalized(raw_source_text)
+            occurrences = source_text.count(
+                _lf_normalized(search_text)
+            )
             if occurrences < 1:
-                raise AIPatchGenerationError(f"AI search text was not found in {path}")
+                raise AIPatchGenerationError(
+                    f"AI search text was not found in {path}"
+                )
             operations.append(
                 ProposedPatchOperation(
                     operation="replace_text",
                     path=path,
-                    search_text=search_text,
-                    replacement_text=replacement_text,
+                    search_text=_file_style_text(
+                        search_text,
+                        crlf_file=crlf_file,
+                    ),
+                    replacement_text=_file_style_text(
+                        replacement_text,
+                        crlf_file=crlf_file,
+                    ),
                     expected_occurrences=occurrences,
                     expected_sha256=expected_hash,
                     description=raw.get("description"),
@@ -549,6 +942,7 @@ def generate_patch(
     instruction: str | None = None,
     target_paths: Sequence[str] | None = None,
     allow_file_creation: bool | None = None,
+    allow_file_deletion: bool | None = None,
     model_service: Any = None,
     request: Any = None,
     implementation_plan: Any = None,
@@ -589,6 +983,7 @@ def generate_patch(
         )
 
     allowed_paths = frozenset(approved_paths)
+    plan_operations = _collect_plan_operations(plan)
     required_paths = _collect_required_plan_paths(plan)
     file_context, hashes = _build_file_context(root, approved_paths)
     creation_allowed = bool(
@@ -596,20 +991,35 @@ def generate_patch(
         if allow_file_creation is not None
         else getattr(task, "allow_file_creation", True)
     )
+    deletion_allowed = bool(
+        allow_file_deletion
+        if allow_file_deletion is not None
+        else getattr(task, "allow_file_deletion", False)
+    )
+
+    operation_guidance = (
+        "Use ONLY these operations: create, replace_file, replace_text, "
+        "unified_diff, delete, rename.\n"
+        "Use delete ONLY for a file the approved plan marks for deletion.\n"
+        "Use rename ONLY for a file the approved plan marks for rename, and "
+        "set destination_path to the approved destination exactly.\n"
+    )
+    if not deletion_allowed:
+        operation_guidance += "This task does not allow deleting files; never emit delete.\n"
 
     prompt = (
         "You are the code-change generator for LUMINA Code Builder.\n"
         "Return ONLY the JSON object required by the supplied JSON Schema.\n"
         "You are proposing changes, not writing files.\n"
-        "Use ONLY these operations: create, replace_file, replace_text, unified_diff.\n"
-        "Change ONLY files in APPROVED PATHS. Never invent another path.\n"
+        + operation_guidance
+        + "Change ONLY files in APPROVED PATHS. Never invent another path.\n"
         "You MUST include at least one patch operation for EVERY REQUIRED PATH.\n"
         "Prefer replace_text for small precise edits and replace_file only when necessary.\n"
         "For replace_text, copy search_text EXACTLY from CURRENT FILE CONTENT.\n"
         "Do not use markdown fences. Do not include commentary outside JSON.\n\n"
         f"USER INSTRUCTION:\n{instruction}\n\n"
         f"APPROVED PATHS:\n" + "\n".join(f"- {path}" for path in approved_paths) + "\n\n"
-        f"REQUIRED PATHS (all must be covered):\n" + ("\n".join(f"- {path}" for path in required_paths) or "- none") + "\n\n"
+        "REQUIRED PATHS (all must be covered):\n" + ("\n".join(f"- {path}" for path in required_paths) or "- none") + "\n\n"
         f"APPROVED PLAN:\n{json.dumps(_dump(plan), ensure_ascii=False, default=str)[:60_000]}\n\n"
         f"REPOSITORY ANALYSIS SUMMARY:\n{json.dumps(_dump(analysis), ensure_ascii=False, default=str)[:30_000]}\n\n"
         f"CURRENT FILE CONTENT:\n{file_context}\n"
@@ -632,6 +1042,8 @@ def generate_patch(
             root=root,
             hashes=hashes,
             allow_file_creation=creation_allowed,
+            allow_file_deletion=deletion_allowed,
+            plan_operations=plan_operations,
         )
         _ensure_required_plan_coverage(patch, required_paths)
         validation = self.apply_patch(patch, dry_run=True)
@@ -642,6 +1054,12 @@ def generate_patch(
         # A structurally invalid first response consumes the same single
         # bounded repair attempt as a dry-run validation failure.
         validation_error = str(exc)
+    except PatchServiceError as exc:
+        # PatchService dry-runs by raising on invalid operations instead of
+        # returning a failed result. Route those deterministic rejections
+        # into the same single bounded repair attempt so real-model output
+        # is repaired instead of escaping the loop.
+        validation_error = _error_chain_detail(exc)
 
     # One bounded repair attempt. The model receives the deterministic
     # rejection reason but still cannot write or expand its approved path
@@ -664,12 +1082,25 @@ def generate_patch(
         root=root,
         hashes=hashes,
         allow_file_creation=creation_allowed,
+        allow_file_deletion=deletion_allowed,
+        plan_operations=plan_operations,
     )
     _ensure_required_plan_coverage(patch, required_paths)
-    validation = self.apply_patch(patch, dry_run=True)
-    if not validation.successful:
+    try:
+        validation = self.apply_patch(patch, dry_run=True)
+        repair_failed = not validation.successful
+        repair_error = (
+            validation.error
+            if not validation.successful
+            else None
+        )
+    except PatchServiceError as exc:
+        repair_failed = True
+        repair_error = _error_chain_detail(exc)
+    if repair_failed:
         raise AIPatchGenerationError(
-            f"AI patch failed safety validation after one repair attempt: {validation.error}"
+            "AI patch failed deterministic dry-run validation after one "
+            f"repair attempt: {repair_error}"
         )
     return patch
 

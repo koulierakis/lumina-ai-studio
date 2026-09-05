@@ -474,7 +474,7 @@ def test_absolute_path_inside_repository_is_coerced_and_allowed(tmp_path: Path) 
 def test_absolute_path_outside_repository_is_still_refused(tmp_path: Path) -> None:
     outside = tmp_path.parent / ("outside-" + uuid4().hex + ".md")
 
-    with pytest.raises(AIPatchGenerationError, match="unsupported patch operation or path"):
+    with pytest.raises(AIPatchGenerationError, match="unsupported or unsafe patch path"):
         _to_patch_request(
             {
                 "operations": [
@@ -575,6 +575,487 @@ def test_write_file_alias_replaces_existing_approved_file(tmp_path: Path) -> Non
     )
     assert request.operations[0].operation == "replace_file"
     assert request.operations[0].expected_sha256 is not None
+
+
+def test_markdown_fenced_json_response_is_parsed(tmp_path, monkeypatch):
+    service = _PatchServiceStub(tmp_path)
+    generated_patch = {
+        "operations": [
+            {
+                "operation": "create",
+                "path": "hello_lumina.py",
+                "content": "def greet(name):\n    return f\"Hello, {name}!\"\n\nif __name__ == \"__main__\":\n    print(greet(\"Lumina\"))\n",
+            }
+        ],
+        "description": "Create greeting module",
+    }
+    fenced = "```json\n" + json.dumps(generated_patch) + "\n```"
+    envelope = json.dumps({"response": fenced}, ensure_ascii=False).encode("utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, _limit: int = -1) -> bytes:
+            return envelope
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout: FakeResponse(),
+    )
+
+    patch = patch_generation.generate_patch(
+        service,
+        task=_Task(instruction="create a greeting module"),
+        analysis=None,
+        plan=_Plan("hello_lumina.py"),
+        ollama_service=SimpleNamespace(model="test-coder"),
+        repository_root=tmp_path,
+    )
+    assert patch.operations[0].operation == "create"
+    assert patch.operations[0].path == "hello_lumina.py"
+
+
+def test_explanatory_text_around_json_is_tolerated(tmp_path, monkeypatch):
+    service = _PatchServiceStub(tmp_path)
+    generated_patch = {
+        "operations": [
+            {
+                "operation": "create",
+                "path": "hello_lumina.py",
+                "content": "VALUE = 1\n",
+            }
+        ]
+    }
+    noisy = (
+        "Here is the patch I propose:\n"
+        + json.dumps(generated_patch)
+        + "\nThis completes the requested change."
+    )
+    envelope = json.dumps({"response": noisy}, ensure_ascii=False).encode("utf-8")
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self, _limit: int = -1) -> bytes:
+            return envelope
+
+    monkeypatch.setattr(
+        "urllib.request.urlopen",
+        lambda request, timeout: FakeResponse(),
+    )
+
+    patch = patch_generation.generate_patch(
+        service,
+        task=_Task(instruction="create a file"),
+        analysis=None,
+        plan=_Plan("hello_lumina.py"),
+        ollama_service=SimpleNamespace(model="test-coder"),
+        repository_root=tmp_path,
+    )
+    assert patch.operations[0].path == "hello_lumina.py"
+
+
+def test_delete_operation_is_accepted_only_when_plan_authorizes_it(tmp_path: Path) -> None:
+    target = tmp_path / "stale.py"
+    target.write_text("REMOVE = True\n", encoding="utf-8")
+    plan = {
+        "changes": [
+            {"path": "stale.py", "action": "delete"},
+        ]
+    }
+    plan_operations = patch_generation._collect_plan_operations(plan)
+
+    request = _to_patch_request(
+        {
+            "operations": [{"operation": "delete", "path": "stale.py"}],
+            "description": "remove stale file",
+        },
+        allowed_paths=frozenset({"stale.py"}),
+        root=tmp_path,
+        hashes={},
+        allow_file_creation=False,
+        allow_file_deletion=True,
+        plan_operations=plan_operations,
+    )
+
+    assert request.operations[0].operation == "delete"
+    service = _PatchServiceStub(tmp_path)
+    assert service.apply_patch(request).successful
+    assert not target.exists()
+
+
+def test_delete_requires_explicit_plan_authorization(tmp_path: Path) -> None:
+    target = tmp_path / "stale.py"
+    target.write_text("REMOVE = True\n", encoding="utf-8")
+    plan = {
+        "changes": [
+            {"path": "stale.py", "action": "modify"},
+        ]
+    }
+    plan_operations = patch_generation._collect_plan_operations(plan)
+
+    with pytest.raises(
+        AIPatchGenerationError,
+        match="not marked for deletion",
+    ):
+        _to_patch_request(
+            {
+                "operations": [{"operation": "delete", "path": "stale.py"}],
+            },
+            allowed_paths=frozenset({"stale.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=False,
+            allow_file_deletion=True,
+            plan_operations=plan_operations,
+        )
+    assert target.exists()
+
+
+def test_delete_is_blocked_without_task_deletion_permission(tmp_path: Path) -> None:
+    target = tmp_path / "stale.py"
+    target.write_text("REMOVE = True\n", encoding="utf-8")
+    plan_operations = patch_generation._collect_plan_operations(
+        {
+            "changes": [
+                {"path": "stale.py", "action": "delete"},
+            ]
+        }
+    )
+
+    with pytest.raises(AIPatchGenerationError, match="does not allow deleting files"):
+        _to_patch_request(
+            {
+                "operations": [{"operation": "delete", "path": "stale.py"}],
+            },
+            allowed_paths=frozenset({"stale.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=False,
+            allow_file_deletion=False,
+            plan_operations=plan_operations,
+        )
+    assert target.exists()
+
+
+def test_rename_operation_is_accepted_only_when_plan_authorizes_it(tmp_path: Path) -> None:
+    target = tmp_path / "old_name.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    plan = {
+        "changes": [
+            {"path": "old_name.py", "action": "rename", "destination_path": "new_name.py"},
+        ]
+    }
+    plan_operations = patch_generation._collect_plan_operations(plan)
+
+    request = _to_patch_request(
+        {
+            "operations": [
+                {
+                    "operation": "rename",
+                    "path": "old_name.py",
+                    "destination_path": "new_name.py",
+                }
+            ],
+            "description": "rename module",
+        },
+        allowed_paths=frozenset({"old_name.py", "new_name.py"}),
+        root=tmp_path,
+        hashes={},
+        allow_file_creation=False,
+        allow_file_deletion=False,
+        plan_operations=plan_operations,
+    )
+
+    assert request.operations[0].operation == "rename"
+    assert request.operations[0].destination_path == "new_name.py"
+    service = _PatchServiceStub(tmp_path)
+    assert service.apply_patch(request).successful
+    assert not target.exists()
+    assert (tmp_path / "new_name.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
+def test_rename_destination_must_match_approved_plan(tmp_path: Path) -> None:
+    target = tmp_path / "old_name.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    plan_operations = patch_generation._collect_plan_operations(
+        {
+            "changes": [
+                {"path": "old_name.py", "action": "rename", "destination_path": "approved.py"},
+            ]
+        }
+    )
+
+    with pytest.raises(AIPatchGenerationError, match="does not match the approved plan destination"):
+        _to_patch_request(
+            {
+                "operations": [
+                    {
+                        "operation": "rename",
+                        "path": "old_name.py",
+                        "destination_path": "other.py",
+                    }
+                ],
+            },
+            allowed_paths=frozenset({"old_name.py", "approved.py", "other.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=False,
+            allow_file_deletion=False,
+            plan_operations=plan_operations,
+        )
+    assert target.exists()
+
+
+def test_domain_change_plan_delete_and_rename_are_authorized(tmp_path: Path) -> None:
+    """The domain ChangePlan model drives plan authorization too."""
+
+    stale = tmp_path / "stale.py"
+    stale.write_text("OLD = True\n", encoding="utf-8")
+    old_name = tmp_path / "old_name.py"
+    old_name.write_text("VALUE = 1\n", encoding="utf-8")
+    plan = ChangePlan(
+        task_id=uuid4(),
+        title="Delete stale file and rename module",
+        summary="Controlled destructive operations.",
+        changes=[
+            ProposedFileChange(
+                relative_path="stale.py",
+                change_type=ChangeType.DELETE,
+                old_content="OLD = True\n",
+                summary="Remove stale file.",
+                reason="Requested.",
+            ),
+            ProposedFileChange(
+                relative_path="new_name.py",
+                change_type=ChangeType.RENAME,
+                previous_path="old_name.py",
+                new_content="VALUE = 1\n",
+                summary="Rename module.",
+                reason="Requested.",
+            ),
+        ],
+    )
+    operations = patch_generation._collect_plan_operations(plan)
+    assert operations.delete_paths == frozenset({"stale.py"})
+    assert operations.rename_destinations == {"old_name.py": "new_name.py"}
+    assert set(patch_generation._collect_required_plan_paths(plan)) == {
+        "stale.py",
+        "old_name.py",
+        "new_name.py",
+    }
+
+
+def test_conflicting_operations_on_same_path_are_rejected(tmp_path: Path) -> None:
+    with pytest.raises(AIPatchGenerationError, match="conflicting operations"):
+        _to_patch_request(
+            {
+                "operations": [
+                    {"operation": "create", "path": "dupe.py", "content": "A = 1\n"},
+                    {"operation": "create", "path": "dupe.py", "content": "B = 1\n"},
+                ],
+            },
+            allowed_paths=frozenset({"dupe.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=True,
+            allow_file_deletion=False,
+        )
+
+    target = tmp_path / "dupe.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    with pytest.raises(AIPatchGenerationError, match="conflicting operations"):
+        _to_patch_request(
+            {
+                "operations": [
+                    {"operation": "replace_text", "path": "dupe.py", "search_text": "1", "replacement_text": "2"},
+                    {"operation": "delete", "path": "dupe.py"},
+                ],
+            },
+            allowed_paths=frozenset({"dupe.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=False,
+            allow_file_deletion=True,
+            plan_operations=patch_generation._collect_plan_operations(
+                {"changes": [{"path": "dupe.py", "action": "delete"}]}
+            ),
+        )
+    assert target.read_text(encoding="utf-8") == "VALUE = 1\n"
+
+
+def test_duplicate_create_operations_are_rejected_before_patch_service(tmp_path: Path) -> None:
+    """Generation-level conflict detection gives precise repair feedback."""
+
+    with pytest.raises(AIPatchGenerationError, match="conflicting operations"):
+        _to_patch_request(
+            {
+                "operations": [
+                    {"operation": "create", "path": "a.py", "content": "A = 1\n"},
+                    {"operation": "create", "path": "a.py", "content": "A = 2\n"},
+                ],
+            },
+            allowed_paths=frozenset({"a.py"}),
+            root=tmp_path,
+            hashes={},
+            allow_file_creation=True,
+            allow_file_deletion=False,
+        )
+
+
+def test_incomplete_delete_patch_is_repaired_with_missing_path_feedback(tmp_path, monkeypatch):
+    stale = tmp_path / "stale.py"
+    stale.write_text("REMOVE = True\n", encoding="utf-8")
+    keep = tmp_path / "keep.py"
+    keep.write_text("KEEP = True\n", encoding="utf-8")
+    plan = {
+        "changes": [
+            {"path": "stale.py", "action": "delete"},
+            {"path": "keep.py", "action": "modify"},
+        ]
+    }
+    responses = [
+        {"operations": [{"operation": "replace_text", "path": "keep.py", "search_text": "KEEP = True", "replacement_text": "KEEP = False"}]},
+        {
+            "operations": [
+                {"operation": "delete", "path": "stale.py"},
+                {"operation": "replace_text", "path": "keep.py", "search_text": "KEEP = True", "replacement_text": "KEEP = False"},
+            ]
+        },
+    ]
+    prompts: list[str] = []
+
+    def fake_request(prompt, **_kwargs):
+        prompts.append(prompt)
+        return responses.pop(0)
+
+    monkeypatch.setattr(patch_generation, "_request_structured_patch", fake_request)
+    service = _PatchServiceStub(tmp_path)
+
+    class DeletingTask(_Task):
+        def __init__(self) -> None:
+            super().__init__(instruction="remove stale file and keep the flag")
+            self.allow_file_deletion = True
+
+    patch = patch_generation.generate_patch(
+        service,
+        task=DeletingTask(),
+        analysis=None,
+        plan=plan,
+        ollama_service=SimpleNamespace(model="test-coder"),
+        repository_root=tmp_path,
+    )
+
+    assert {operation.path for operation in patch.operations} == {"stale.py", "keep.py"}
+    assert len(prompts) == 2
+    assert "required planned files are missing: stale.py" in prompts[1]
+
+
+def test_multiline_replace_text_on_crlf_file_matches_raw_bytes(tmp_path: Path) -> None:
+    """Regression: Windows files use CRLF; models emit LF search text.
+
+    PatchService counts search occurrences against raw file bytes, so an
+    LF search against a CRLF file previously counted zero and the whole
+    real-model MODIFY path failed on Windows.
+    """
+
+    target = tmp_path / "probe_module.py"
+    content = (
+        '"""Probe module."""\n'
+        "FLAG = False\n"
+        "\n"
+        "\n"
+        "def get_flag() -> bool:\n"
+        "    return FLAG\n"
+    )
+    # Path.write_text opens in text mode and translates LF to CRLF on
+    # Windows, mirroring how fixture/repository files arrive on disk.
+    target.write_text(content, encoding="utf-8")
+
+    search_text = (
+        "FLAG = False\n"
+        "\n"
+        "\n"
+        "def get_flag() -> bool:\n"
+        "    return FLAG\n"
+    )
+    replacement_text = (
+        "FLAG = True\n"
+        "\n"
+        "\n"
+        "def get_flag() -> bool:\n"
+        "    return FLAG\n"
+    )
+
+    request = _to_patch_request(
+        {
+            "operations": [
+                {
+                    "operation": "replace_text",
+                    "path": "probe_module.py",
+                    "search_text": search_text,
+                    "replacement_text": replacement_text,
+                    "description": "Enable the probe flag",
+                }
+            ],
+            "description": "probe",
+        },
+        allowed_paths=frozenset({"probe_module.py"}),
+        root=tmp_path,
+        hashes={},
+        allow_file_creation=False,
+        allow_file_deletion=False,
+    )
+
+    if b"\r\n" in target.read_bytes():
+        assert "\r\n" in request.operations[0].search_text
+    assert request.operations[0].expected_occurrences == 1
+
+    service = _PatchServiceStub(tmp_path)
+    dry_run = service.apply_patch(request, dry_run=True)
+    assert dry_run.successful
+    applied = service.apply_patch(request)
+    assert applied.successful
+    assert "FLAG = True" in target.read_text(encoding="utf-8")
+
+
+def test_multiline_replace_text_on_lf_file_stays_lf(tmp_path: Path) -> None:
+    target = tmp_path / "lf_module.py"
+    target.write_bytes(
+        b"FLAG = False\n\n\ndef get_flag() -> bool:\n    return FLAG\n"
+    )
+
+    request = _to_patch_request(
+        {
+            "operations": [
+                {
+                    "operation": "replace_text",
+                    "path": "lf_module.py",
+                    "search_text": "FLAG = False\n\n\ndef get_flag() -> bool:\n    return FLAG\n",
+                    "replacement_text": "FLAG = True\n\n\ndef get_flag() -> bool:\n    return FLAG\n",
+                    "description": "Enable flag",
+                }
+            ]
+        },
+        allowed_paths=frozenset({"lf_module.py"}),
+        root=tmp_path,
+        hashes={},
+        allow_file_creation=False,
+        allow_file_deletion=False,
+    )
+
+    assert "\r\n" not in request.operations[0].search_text
+    service = _PatchServiceStub(tmp_path)
+    assert service.apply_patch(request).successful
+    assert b"FLAG = True" in target.read_bytes()
 
 
 def test_unsupported_operation_error_reports_operation_and_approved_path(tmp_path: Path) -> None:

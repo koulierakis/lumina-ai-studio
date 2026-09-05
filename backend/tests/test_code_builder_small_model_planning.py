@@ -1,4 +1,4 @@
-from backend.code_builder.planning_service import (
+from code_builder.planning_service import (
     CompactGeneratedChangePlan,
     _expand_compact_generated_plan,
 )
