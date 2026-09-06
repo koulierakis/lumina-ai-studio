@@ -16,6 +16,9 @@ ACTIVE_JOB_STATUSES = {"queued", "preparing", "processing", "rendering", "instal
 
 
 def runtime_database_path() -> Path:
+    configured = os.environ.get("LUMINA_SQLITE_PATH") or os.environ.get("LUMINA_DATABASE_PATH")
+    if configured:
+        return Path(configured).expanduser()
     return Path(__file__).resolve().parents[1] / ".lumina-runtime" / "database" / "lumina.db"
 
 
@@ -146,6 +149,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         "document_clauses", "talking_portrait_jobs",
         "talking_portrait_install_jobs", "talking_portrait_logs", "talking_portrait_outputs",
         "provider_status",
+        "driver_preferences", "driver_places", "driver_trips",
     }
 
     def __init__(self, path: Path | None = None, *, fallback_active: bool = False, mongo_configured: bool = False, mongo_available: bool = False):
@@ -163,13 +167,16 @@ class SQLitePersistenceProvider(PersistenceProvider):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(str(self.path), timeout=2.0, check_same_thread=False)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA busy_timeout=2000")
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
     def _initialize_sync(self) -> None:
         with self._lock, self._connect() as conn:
+            # Journal mode is a database-level setting. Changing it on every
+            # request connection can block on Windows while another request
+            # still owns a read/write handle. Configure it once at startup.
+            conn.execute("PRAGMA journal_mode=WAL")
             schema = """
             id TEXT PRIMARY KEY,
             owner_email TEXT,
@@ -379,6 +386,140 @@ class SQLitePersistenceProvider(PersistenceProvider):
         return {"provider": self.name, "ready": self.ready, "path": str(self.path), "fallback_active": self.fallback_active, "mongo_configured": self.mongo_configured, "mongo_available": self.mongo_available}
 
 
+def export_sqlite_records_for_postgres(provider: SQLitePersistenceProvider, tables: set[str] | None = None) -> list[dict[str, Any]]:
+    """Return a lossless, PostgreSQL-compatible export without writing data.
+
+    The PostgreSQL adapter stores the original JSON document in ``data_json``
+    under a namespace and stable id. This helper is deliberately read-only so
+    migration can be reviewed or dry-run validated before any cloud write.
+    """
+    selected = tables or set(provider.TABLES)
+    unknown = selected - provider.TABLES
+    if unknown:
+        raise ValueError(f"Unsupported SQLite tables: {sorted(unknown)}")
+    exported: list[dict[str, Any]] = []
+    for table in sorted(selected):
+        for document in provider._find_sync(table, {}):
+            document_id = str(document.get("id") or "")
+            if not document_id:
+                raise ValueError(f"SQLite record in {table} has no id")
+            exported.append({
+                "namespace": table,
+                "id": document_id,
+                "owner_email": document.get("owner_email"),
+                "data_json": json.dumps(document, default=_json_default, sort_keys=True),
+                "created_at": document.get("created_at"),
+            })
+    return exported
+
+
+class PostgresPersistenceProvider(PersistenceProvider):
+    """Small generic PostgreSQL adapter for the existing collection contract.
+
+    Records stay JSON-shaped so SQLite and PostgreSQL can share all domain
+    services during migration. It intentionally uses one namespaced table,
+    allowing a Supabase/PostgreSQL deployment without destructive migration.
+    """
+    name = "postgres"
+
+    def __init__(self, dsn: str):
+        if not dsn:
+            raise ValueError("PostgreSQL persistence requires DATABASE_URL or POSTGRES_DSN")
+        self.dsn = dsn
+        self.ready = False
+
+    def _connect(self):
+        try:
+            import psycopg
+        except ImportError as exc:  # pragma: no cover - exercised only when selected
+            raise RuntimeError("PostgreSQL mode requires the optional psycopg[binary] dependency") from exc
+        return psycopg.connect(self.dsn)
+
+    def _rows(self, table: str, query: dict[str, Any]) -> list[dict[str, Any]]:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT data_json FROM lumina_records WHERE namespace = %s", (table,))
+            rows = [json.loads(row[0]) for row in cur.fetchall()]
+        return [row for row in rows if SQLitePersistenceProvider._matches(self, row, query)]
+
+    def _write(self, table: str, document: dict[str, Any]) -> None:
+        payload = dict(document)
+        payload["id"] = str(payload.get("id") or _now_iso())
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                """INSERT INTO lumina_records(namespace, id, owner_email, data_json)
+                   VALUES (%s, %s, %s, %s)
+                   ON CONFLICT(namespace, id) DO UPDATE SET
+                   owner_email = EXCLUDED.owner_email, data_json = EXCLUDED.data_json""",
+                (table, payload["id"], payload.get("owner_email"), json.dumps(payload, default=_json_default)),
+            )
+
+    async def initialize(self) -> None:
+        await asyncio.to_thread(self._initialize_sync)
+
+    def _initialize_sync(self) -> None:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS lumina_records (
+                namespace TEXT NOT NULL,
+                id TEXT NOT NULL,
+                owner_email TEXT,
+                data_json TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY(namespace, id)
+            )""")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_lumina_records_owner ON lumina_records(owner_email)")
+        self.ready = True
+
+    async def verify(self) -> None:
+        probe = {"id": "__persistence_probe__", "status": "ok", "created_at": _now_iso()}
+        await self.insert_one("provider_status", probe)
+        if not await self.find_one("provider_status", {"id": probe["id"]}):
+            raise RuntimeError("PostgreSQL persistence read/write verification failed")
+
+    async def recover_active_jobs(self) -> None:
+        for table in ("talking_portrait_jobs", "talking_portrait_install_jobs"):
+            for row in await asyncio.to_thread(self._rows, table, {}):
+                if row.get("status") in ACTIVE_JOB_STATUSES:
+                    row.update({"status": "failed", "stage": "interrupted", "safe_error_message": "The backend restarted before this job finished.", "updated_at": _now_iso(), "completed_at": _now_iso()})
+                    await self.insert_one(table, row)
+
+    async def insert_one(self, table: str, document: dict[str, Any]) -> None:
+        await asyncio.to_thread(self._write, table, document)
+
+    async def find_one(self, table: str, query: dict[str, Any]) -> Optional[dict[str, Any]]:
+        rows = await asyncio.to_thread(self._rows, table, query)
+        return rows[0] if rows else None
+
+    def find(self, table: str, query: dict[str, Any]) -> PersistenceCursor:
+        return PersistenceCursor(self._rows(table, query))
+
+    async def update_one(self, table: str, query: dict[str, Any], update: dict[str, Any]) -> None:
+        row = await self.find_one(table, query)
+        if row:
+            await self.insert_one(table, SQLitePersistenceProvider._apply_update(self, row, update))
+
+    async def replace_one(self, table: str, query: dict[str, Any], document: dict[str, Any]) -> None:
+        row = await self.find_one(table, query)
+        if row:
+            replacement = dict(document)
+            replacement.setdefault("id", row.get("id"))
+            await self.insert_one(table, replacement)
+
+    async def delete_one(self, table: str, query: dict[str, Any]) -> int:
+        rows = await asyncio.to_thread(self._rows, table, query)
+        if not rows:
+            return 0
+        with self._connect() as conn, conn.cursor() as cur:
+            for row in rows:
+                cur.execute("DELETE FROM lumina_records WHERE namespace = %s AND id = %s", (table, row["id"]))
+        return len(rows)
+
+    async def count_documents(self, table: str, query: dict[str, Any]) -> int:
+        return len(await asyncio.to_thread(self._rows, table, query))
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {"provider": self.name, "ready": self.ready, "dsn_configured": bool(self.dsn), "fallback_active": False}
+
+
 class TalkingPortraitCollection:
     def __init__(self, provider: PersistenceProvider, table: str):
         self.provider = provider
@@ -483,7 +624,7 @@ def _project_document(document: Optional[dict[str, Any]], projection: dict[str, 
 
 def _database_mode() -> str:
     mode = os.environ.get("LUMINA_DATABASE_PROVIDER", "sqlite").strip().lower()
-    if mode not in {"sqlite", "mongo", "auto"}:
+    if mode not in {"sqlite", "mongo", "postgres", "auto"}:
         logger.warning("Unknown LUMINA_DATABASE_PROVIDER=%s; using sqlite", mode)
         return "sqlite"
     return mode
@@ -491,6 +632,8 @@ def _database_mode() -> str:
 
 def create_persistence_provider(db: Any = None, client: Any = None) -> PersistenceProvider:
     mode = _database_mode()
+    if mode == "postgres":
+        return PostgresPersistenceProvider(os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_DSN") or "")
     if mode == "mongo" and db is not None and client is not None:
         return MongoPersistenceProvider(db, client)
     return SQLitePersistenceProvider(
@@ -501,6 +644,12 @@ def create_persistence_provider(db: Any = None, client: Any = None) -> Persisten
 
 async def initialize_persistence_provider(db: Any = None, client: Any = None) -> PersistenceProvider:
     mode = _database_mode()
+    if mode == "postgres":
+        provider = PostgresPersistenceProvider(os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_DSN") or "")
+        await provider.initialize()
+        await provider.verify()
+        await provider.recover_active_jobs()
+        return provider
     mongo_configured = bool(os.environ.get("MONGO_URL"))
 
     if mode in {"mongo", "auto"} and db is not None and client is not None and mongo_configured:

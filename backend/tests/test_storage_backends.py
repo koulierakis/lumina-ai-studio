@@ -1,0 +1,77 @@
+import io
+import os
+
+import pytest
+
+
+def test_local_storage_backend_round_trip(tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    from storage import delete_file, read_bytes, save_bytes
+
+    monkeypatch.setenv("STORAGE_DIR", str(tmp_path))
+    filename, location, size = save_bytes(b"hello", "text/plain", kind="reference")
+    assert size == 5
+    assert filename in location
+    assert read_bytes(filename, "reference") == b"hello"
+    delete_file(filename, "reference")
+    with pytest.raises(FileNotFoundError):
+        read_bytes(filename, "reference")
+
+
+def test_s3_mode_requires_bucket_without_initializing_client(monkeypatch):
+    monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    monkeypatch.delenv("S3_BUCKET", raising=False)
+    from storage_backends import create_storage_backend
+
+    with pytest.raises(RuntimeError, match="S3_BUCKET"):
+        create_storage_backend(__import__("pathlib").Path("."))
+
+
+def test_local_storage_contract_metadata_listing_and_safe_keys(tmp_path):
+    from storage_backends import LocalStorageBackend
+
+    backend = LocalStorageBackend(tmp_path)
+    backend.save("references/a.txt", b"one")
+    backend.save("references/a-duplicate.txt", b"two")
+    assert backend.read("references/a.txt") == b"one"
+    assert backend.metadata("references/a.txt")["size"] == 3
+    assert backend.list("references") == ["references/a-duplicate.txt", "references/a.txt"]
+    backend.delete("references/a.txt")
+    with pytest.raises(FileNotFoundError):
+        backend.read("references/a.txt")
+    with pytest.raises(ValueError):
+        backend.read("../outside")
+
+
+def test_s3_storage_contract_with_fake_compatible_client():
+    from storage_backends import S3StorageBackend
+
+    class Body:
+        def __init__(self, value): self.value = value
+        def read(self): return self.value
+
+    class FakeClient:
+        def __init__(self): self.objects = {}
+        def put_object(self, Bucket, Key, Body): self.objects[(Bucket, Key)] = bytes(Body)
+        def get_object(self, Bucket, Key):
+            if (Bucket, Key) not in self.objects: raise FileNotFoundError(Key)
+            return {"Body": Body(self.objects[(Bucket, Key)])}
+        def delete_object(self, Bucket, Key): self.objects.pop((Bucket, Key), None)
+        def list_objects_v2(self, Bucket, Prefix):
+            return {"Contents": [{"Key": key} for bucket, key in self.objects if bucket == Bucket and key.startswith(Prefix)]}
+        def head_object(self, Bucket, Key):
+            if (Bucket, Key) not in self.objects: raise FileNotFoundError(Key)
+            return {"ContentLength": len(self.objects[(Bucket, Key)]), "ContentType": "text/plain"}
+
+    backend = object.__new__(S3StorageBackend)
+    backend.bucket = "test-bucket"
+    backend.client = FakeClient()
+    backend.save("generated/result.txt", b"hello")
+    assert backend.read("generated/result.txt") == b"hello"
+    assert backend.metadata("generated/result.txt")["size"] == 5
+    assert backend.list("generated") == ["generated/result.txt"]
+    backend.delete("generated/result.txt")
+    with pytest.raises(FileNotFoundError):
+        backend.read("generated/result.txt")
+    with pytest.raises(ValueError):
+        backend.save("../escape", b"x")
