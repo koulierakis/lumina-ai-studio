@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageSequence, UnidentifiedImageError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -57,11 +57,13 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.staticfiles import StaticFiles
 from persistence import LocalPersistenceCollection, SQLitePersistenceProvider, TalkingPortraitCollection, initialize_persistence_provider, create_persistence_provider  # noqa: E402
 
 ROOT_DIR = Path(__file__).parent
@@ -81,6 +83,9 @@ from models import (  # noqa: E402
     Project,
     ProjectCreate,
     WorkspaceNotification,
+    DriverPreferences,
+    DriverSavedPlace,
+    DriverTrip,
     LoginRequest,
     MediaAsset,
     PhotoBatchJob,
@@ -112,11 +117,13 @@ from providers import (  # noqa: E402
     ErrorKind,
     GenerationInput,
     ProviderError,
+    ProviderInvalidResponseError,
     ProviderTimeoutError,
     available_providers,
     manager as provider_manager,
 )
 from storage import delete_file, read_bytes, save_bytes  # noqa: E402
+from local_tools import resolve_executable  # noqa: E402
 from video_providers import VideoGenerationInput, VideoProviderError, available_video_providers, get_video_provider, video_provider_catalog  # noqa: E402
 from platform_services import emit_notification  # noqa: E402
 from voice_providers import get_voice_provider, voice_provider_catalog  # noqa: E402
@@ -172,6 +179,12 @@ from runtime_info import (  # noqa: E402
     save_runtime_settings,
     validate_runtime_settings,
 )
+from driver_assistance_services import (  # noqa: E402
+    fetch_route_weather,
+    fetch_traffic_route,
+    sample_route_points,
+    traffic_provider_status,
+)
 
 logger = logging.getLogger("lumina")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -203,6 +216,9 @@ talking_portrait_installs_coll = TalkingPortraitCollection(persistence_provider,
 projects_coll = LocalPersistenceCollection(persistence_provider, "projects")
 preferences_coll = LocalPersistenceCollection(persistence_provider, "preferences")
 notifications_coll = LocalPersistenceCollection(persistence_provider, "notifications")
+driver_preferences_coll = LocalPersistenceCollection(persistence_provider, "driver_preferences")
+driver_places_coll = LocalPersistenceCollection(persistence_provider, "driver_places")
+driver_trips_coll = LocalPersistenceCollection(persistence_provider, "driver_trips")
 
 
 def _configure_local_first_collections() -> None:
@@ -235,6 +251,9 @@ IMAGE_STUDIO_QUALITIES = {"draft", "standard", "high", "ultra"}
 
 app = FastAPI(title="Lumina AI Desktop API")
 api = APIRouter(prefix="/api")
+DRIVER_ASSISTANT_DIR = Path(__file__).resolve().parents[1] / "drive-assistant"
+if DRIVER_ASSISTANT_DIR.is_dir():
+    app.mount("/driver-assistant", StaticFiles(directory=str(DRIVER_ASSISTANT_DIR), html=True), name="driver-assistant")
 
 
 def _image_studio_prompt_context(identity_lock: str, metadata: dict | None = None) -> str:
@@ -785,8 +804,17 @@ async def update_pack(pack_id: str, body: IdentityPackUpdate, owner: str = Depen
     pack = await _get_pack(pack_id, owner)
     data = body.model_dump(exclude_unset=True)
     if "photo_ids" in data:
-        pack.photo_ids = data["photo_ids"]
+        requested = list(dict.fromkeys(data["photo_ids"] or []))
+        if len(requested) > MAX_PHOTOS_PER_PACK:
+            raise HTTPException(400, f"An Identity Pack can contain at most {MAX_PHOTOS_PER_PACK} photos")
+        for photo_id in requested:
+            media = await media_coll.find_one({"id": photo_id, "owner_email": owner, "kind": "reference"}, {"_id": 0})
+            if not media:
+                raise HTTPException(400, f"Reference photo is unavailable: {photo_id}")
+        pack.photo_ids = requested
     if "primary_photo_id" in data:
+        if data["primary_photo_id"] and data["primary_photo_id"] not in pack.photo_ids:
+            raise HTTPException(400, "Primary photo must belong to this Identity Pack")
         pack.primary_photo_id = data["primary_photo_id"]
     if "name" in data and data["name"]:
         pack.name = data["name"]
@@ -795,6 +823,37 @@ async def update_pack(pack_id: str, body: IdentityPackUpdate, owner: str = Depen
     pack.updated_at = now_iso()
     await packs_coll.replace_one({"id": pack.id}, pack.model_dump())
     return pack
+
+
+def _validate_identity_photo_bytes(data: bytes, mime: str) -> dict:
+    """Validate both the declared media type and the actual decoded image."""
+    if not data:
+        raise HTTPException(400, "Empty file")
+    expected_formats = {
+        "image/png": {"PNG"},
+        "image/jpeg": {"JPEG"},
+        "image/jpg": {"JPEG"},
+        "image/webp": {"WEBP"},
+    }
+    allowed = expected_formats.get(mime)
+    if not allowed:
+        raise HTTPException(400, f"Unsupported file type: {mime}")
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            image_format = image.format
+            width, height = image.size
+            image.verify()
+        if image_format not in allowed:
+            raise HTTPException(400, "The file contents do not match the declared image format.")
+        with Image.open(io.BytesIO(data)) as image:
+            width, height = image.size
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(400, "Reference image could not be decoded as a valid image.") from exc
+    if width <= 0 or height <= 0:
+        raise HTTPException(400, "Reference image must have positive dimensions.")
+    return {"format": image_format, "width": width, "height": height}
 
 
 @api.delete("/identity-packs/{pack_id}")
@@ -827,15 +886,17 @@ async def upload_photos(
         raise HTTPException(400, f"Identity Pack already has {MAX_PHOTOS_PER_PACK} photos")
 
     accepted = files[:remaining]
+    prepared: list[tuple[bytes, str, dict]] = []
     for f in accepted:
         mime = (f.content_type or "").lower()
         if mime not in ALLOWED_MIMES:
             raise HTTPException(400, f"Unsupported file type: {mime}")
         data = await f.read()
-        if len(data) == 0:
-            raise HTTPException(400, "Empty file")
         if len(data) > MAX_UPLOAD_BYTES:
             raise HTTPException(400, f"File exceeds {MAX_UPLOAD_BYTES // (1024*1024)} MB")
+        metadata = _validate_identity_photo_bytes(data, mime)
+        prepared.append((data, mime, metadata))
+    for data, mime, metadata in prepared:
         filename, _abs, size = save_bytes(data, mime, kind="reference")
         media = MediaAsset(
             owner_email=owner,
@@ -843,6 +904,9 @@ async def upload_photos(
             mime_type=mime,
             kind="reference",
             size_bytes=size,
+            width=metadata["width"],
+            height=metadata["height"],
+            metadata={"format": metadata["format"]},
         )
         await media_coll.insert_one(media.model_dump())
         pack.photo_ids.append(media.id)
@@ -900,6 +964,17 @@ async def get_media_file(media_id: str, owner: str = Depends(require_owner)):
 
 
 # ---------- Generation ----------
+def _validate_generated_image(image) -> None:
+    """Reject provider payloads that are not decodable image files."""
+    if not image.data:
+        raise ProviderInvalidResponseError("manager", "Provider returned an empty image payload.")
+    try:
+        with Image.open(io.BytesIO(image.data)) as decoded:
+            decoded.verify()
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise ProviderInvalidResponseError("manager", "Provider returned invalid image data.") from exc
+
+
 async def _run_generation(job_id: str, owner: str, spec: GenerationRequest) -> None:
     """Background task to execute an image generation job."""
     await jobs_coll.update_one(
@@ -913,18 +988,22 @@ async def _run_generation(job_id: str, owner: str, spec: GenerationRequest) -> N
             pack_doc = await packs_coll.find_one(
                 {"id": spec.identity_pack_id, "owner_email": owner}, {"_id": 0}
             )
-            if pack_doc:
-                pack = IdentityPack(**pack_doc)
-                for pid in pack.photo_ids:
-                    mdoc = await media_coll.find_one({"id": pid, "owner_email": owner}, {"_id": 0})
-                    if not mdoc:
-                        continue
-                    try:
-                        b = read_bytes(mdoc["filename"], kind="reference")
-                        ref_bytes.append(b)
-                        ref_mimes.append(mdoc.get("mime_type", "image/png"))
-                    except Exception as e:
-                        logger.warning("Missing reference file: %s", e)
+            if not pack_doc:
+                raise RuntimeError("Selected Identity Pack is no longer available")
+            pack = IdentityPack(**pack_doc)
+            for pid in pack.photo_ids:
+                mdoc = await media_coll.find_one({"id": pid, "owner_email": owner}, {"_id": 0})
+                if not mdoc:
+                    raise RuntimeError("Selected Identity Pack contains a missing reference")
+                try:
+                    b = read_bytes(mdoc["filename"], kind="reference")
+                    _validate_identity_photo_bytes(b, mdoc.get("mime_type", "image/png"))
+                    ref_bytes.append(b)
+                    ref_mimes.append(mdoc.get("mime_type", "image/png"))
+                except HTTPException as exc:
+                    raise RuntimeError(exc.detail) from exc
+                except Exception as exc:
+                    raise RuntimeError("Selected Identity Pack reference is unavailable") from exc
         for ref_id in [*(spec.reference_media_ids or []), spec.style_reference_id, spec.composition_reference_id]:
             if not ref_id:
                 continue
@@ -962,6 +1041,8 @@ async def _run_generation(job_id: str, owner: str, spec: GenerationRequest) -> N
 
         route, runtime_job = await _runtime_execute(owner, "photo", "image_generation", spec.provider, {"prompt": spec.prompt, "aspect_ratio": spec.aspect_ratio, "count": spec.count}, image_executor)
         provider_name, results = route.provider, route.images
+        for image in results:
+            _validate_generated_image(image)
 
         output_ids: list[str] = []
         for img in results:
@@ -1038,6 +1119,8 @@ async def generate(
         raise HTTPException(400, "Unsupported quality preset")
     if body.identity_lock not in IMAGE_STUDIO_IDENTITY_LOCKS:
         raise HTTPException(400, "Unsupported Identity Lock level")
+    if body.identity_pack_id and not await packs_coll.find_one({"id": body.identity_pack_id, "owner_email": owner}, {"_id": 0}):
+        raise HTTPException(404, "Identity pack not found")
     if body.project_id:
         await _attach_to_project(owner, body.project_id, activity="Image generation queued")
     provider_name = (body.provider or os.environ.get("IMAGE_PROVIDER") or "gemini").lower()
@@ -1138,7 +1221,8 @@ async def upload_image_media(
         raise HTTPException(400, "Empty file")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, f"File exceeds {MAX_UPLOAD_BYTES // (1024*1024)} MB")
-    filename, _, size = save_bytes(data, mime, kind="generated")
+    _validate_editor_image_bytes(data, mime, label="upload")
+    filename, _, size = save_bytes(data, mime, kind="reference")
     media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, project_id=project_id, edit_note=edit_note, tags=_clean_tags([t for t in re.split(r"[,\n]", tags) if t.strip()]), metadata={"original_name": file.filename or "image"})
     await media_coll.insert_one(media.model_dump())
     gallery = GalleryItem(owner_email=owner, media_id=media.id, project_id=project_id, prompt=edit_note, provider="upload", tags=media.tags)
@@ -1285,6 +1369,24 @@ def _clean_tags(raw) -> list[str]:
     return tags[:30]
 
 
+def _validate_editor_image_bytes(data: bytes, mime: str, *, label: str = "image") -> None:
+    """Validate editor inputs and outputs as real images with matching MIME."""
+    normalized = (mime or "").lower()
+    expected_formats = {"image/png": "PNG", "image/jpeg": "JPEG", "image/jpg": "JPEG", "image/webp": "WEBP"}
+    if normalized not in expected_formats:
+        raise HTTPException(400, f"Unsupported {label} mime: {normalized}")
+    if not data:
+        raise HTTPException(400, f"Empty {label}")
+    try:
+        with Image.open(io.BytesIO(data)) as decoded:
+            decoded.verify()
+            actual_format = decoded.format
+    except (UnidentifiedImageError, OSError, ValueError) as exc:
+        raise HTTPException(400, f"Invalid {label} image data") from exc
+    if actual_format != expected_formats[normalized]:
+        raise HTTPException(400, f"{label} MIME does not match image format")
+
+
 async def _run_ai_edit(job_id: str, owner: str) -> None:
     """Background task: run one AI edit job."""
     doc = await ai_edit_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
@@ -1303,6 +1405,7 @@ async def _run_ai_edit(job_id: str, owner: str) -> None:
         src_kind = "reference" if src_doc.get("kind") == "reference" else "generated"
         src_bytes = read_bytes(src_doc["filename"], kind=src_kind)
         src_mime = src_doc.get("mime_type", "image/png")
+        _validate_editor_image_bytes(src_bytes, src_mime, label="source")
 
         # Load mask if any
         mask_bytes: Optional[bytes] = None
@@ -1313,19 +1416,26 @@ async def _run_ai_edit(job_id: str, owner: str) -> None:
                 m_kind = "reference" if m_doc.get("kind") == "reference" else "generated"
                 mask_bytes = read_bytes(m_doc["filename"], kind=m_kind)
                 mask_mime = m_doc.get("mime_type", "image/png")
+                _validate_editor_image_bytes(mask_bytes, mask_mime, label="mask")
 
         # Load identity refs
         identity_refs: list[bytes] = []
         if job.identity_pack_id:
             pack = await packs_coll.find_one({"id": job.identity_pack_id, "owner_email": owner}, {"_id": 0})
-            if pack:
-                for pid in pack.get("photo_ids", []):
-                    md = await media_coll.find_one({"id": pid, "owner_email": owner}, {"_id": 0})
-                    if md:
-                        try:
-                            identity_refs.append(read_bytes(md["filename"], kind="reference"))
-                        except Exception:
-                            pass
+            if not pack:
+                raise RuntimeError("Selected Identity Pack is no longer available")
+            for pid in pack.get("photo_ids", []):
+                md = await media_coll.find_one({"id": pid, "owner_email": owner}, {"_id": 0})
+                if not md:
+                    raise RuntimeError("Selected Identity Pack contains a missing reference")
+                try:
+                    image_bytes = read_bytes(md["filename"], kind="reference")
+                    _validate_identity_photo_bytes(image_bytes, md.get("mime_type", "image/png"))
+                    identity_refs.append(image_bytes)
+                except HTTPException as exc:
+                    raise RuntimeError(exc.detail) from exc
+                except Exception as exc:
+                    raise RuntimeError("Selected Identity Pack reference is unavailable") from exc
         for ref_id in job.reference_media_ids:
             md = await media_coll.find_one({"id": ref_id, "owner_email": owner}, {"_id": 0})
             if md:
@@ -1353,6 +1463,7 @@ async def _run_ai_edit(job_id: str, owner: str) -> None:
 
         route, runtime_job = await _runtime_execute(owner, "photo", "image_editing", job.provider, {"tool": job.tool, "source_media_id": job.source_media_id}, image_edit_executor)
         result = route.images[0]
+        _validate_editor_image_bytes(result.data, result.mime_type, label="provider output")
 
         filename, _abs, size = save_bytes(result.data, result.mime_type, kind="generated")
         out_media = MediaAsset(
@@ -1360,6 +1471,7 @@ async def _run_ai_edit(job_id: str, owner: str) -> None:
             filename=filename,
             mime_type=result.mime_type,
             kind="edited",
+            source_module="image-editor",
             parent_media_id=job.source_media_id,
             edit_note=f"AI: {job.tool}",
             size_bytes=size,
@@ -1449,10 +1561,17 @@ async def create_ai_edit(
         raise HTTPException(400, f"Unknown tool: {tool}")
     if identity_lock not in IMAGE_STUDIO_IDENTITY_LOCKS:
         raise HTTPException(400, "Unsupported Identity Lock level")
+    if identity_pack_id and not await packs_coll.find_one({"id": identity_pack_id, "owner_email": owner}, {"_id": 0}):
+        raise HTTPException(404, "Identity pack not found")
 
     src = await media_coll.find_one({"id": source_media_id, "owner_email": owner}, {"_id": 0})
     if not src:
         raise HTTPException(404, "Source media not found")
+    try:
+        source_bytes = read_bytes(src["filename"], kind="reference" if src.get("kind") == "reference" else "generated")
+    except Exception as exc:
+        raise HTTPException(400, "Source image file is unavailable") from exc
+    _validate_editor_image_bytes(source_bytes, src.get("mime_type", "image/png"), label="source")
 
     refs = [r.strip() for r in reference_media_ids.split(",") if r.strip()][:12]
     for ref_id in refs:
@@ -1473,12 +1592,15 @@ async def create_ai_edit(
     if mask is not None:
         m_mime = (mask.content_type or "").lower()
         if m_mime not in ALLOWED_MIMES:
+            await mask.close()
             raise HTTPException(400, f"Unsupported mask mime: {m_mime}")
         m_data = await mask.read()
+        await mask.close()
         if not m_data:
             raise HTTPException(400, "Empty mask")
         if len(m_data) > MAX_UPLOAD_BYTES:
             raise HTTPException(400, "Mask too large")
+        _validate_editor_image_bytes(m_data, m_mime, label="mask")
         m_filename, _, m_size = save_bytes(m_data, m_mime, kind="reference")
         m_media = MediaAsset(
             owner_email=owner, filename=m_filename, mime_type=m_mime,
@@ -1486,6 +1608,9 @@ async def create_ai_edit(
         )
         await media_coll.insert_one(m_media.model_dump())
         mask_media_id = m_media.id
+
+    if not instruction or not instruction.strip():
+        raise HTTPException(400, "Instruction is required")
 
     job = AiEditJob(
         owner_email=owner,
@@ -1592,12 +1717,15 @@ async def save_edited_version(
     """
     mime = (file.content_type or "").lower()
     if mime not in ALLOWED_MIMES:
+        await file.close()
         raise HTTPException(400, f"Unsupported file type: {mime}")
     data = await file.read()
+    await file.close()
     if not data:
         raise HTTPException(400, "Empty file")
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, f"File exceeds {MAX_UPLOAD_BYTES // (1024*1024)} MB")
+    _validate_editor_image_bytes(data, mime, label="edited upload")
 
     # Verify parent exists and is owned by requester.
     parent = await media_coll.find_one({"id": source_media_id, "owner_email": owner}, {"_id": 0})
@@ -1854,6 +1982,59 @@ video_projects_coll = LocalPersistenceCollection(persistence_provider, "video_pr
 
 
 # ---------- Video Studio: provider-neutral image-to-video generation ----------
+def _probe_video_bytes(data: bytes, mime_type: str) -> dict:
+    """Validate a provider video payload and return basic playable metadata."""
+    if not data:
+        raise VideoProviderError("video", "Provider returned an empty video.", "The video provider returned no playable output.")
+    mime = (mime_type or "").lower().split(";", 1)[0]
+    if mime == "image/gif":
+        try:
+            with Image.open(io.BytesIO(data)) as image:
+                width, height = image.size
+                frames = getattr(image, "n_frames", 1)
+                duration_ms = sum(float(frame.info.get("duration", 0) or 0) for frame in ImageSequence.Iterator(image))
+        except Exception as exc:
+            raise VideoProviderError("video", "Provider returned invalid GIF data.", "The video provider returned an invalid animated image.") from exc
+        duration = duration_ms / 1000.0
+        if width <= 0 or height <= 0 or frames < 2 or duration <= 0:
+            raise VideoProviderError("video", "Provider returned a non-playable GIF.", "The video provider returned an unusable animation.")
+        return {"duration_seconds": duration, "width": width, "height": height, "frames": frames, "container": "gif"}
+
+    if mime not in {"video/mp4", "video/webm"}:
+        raise VideoProviderError("video", "Provider returned an unsupported video format.", "The video provider returned an unsupported output format.")
+    ffprobe = resolve_executable("ffprobe")
+    if not ffprobe:
+        raise VideoProviderError("video", "FFprobe is unavailable for video validation.", "Video validation is unavailable on this server.")
+    import tempfile
+    suffix = ".mp4" if mime == "video/mp4" else ".webm"
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(data)
+            path = handle.name
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height,duration:format=duration", "-of", "json", path],
+            text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30, shell=False,
+        )
+        if result.returncode != 0:
+            raise ValueError(result.stderr or "ffprobe failed")
+        payload = json.loads(result.stdout or "{}")
+        stream = (payload.get("streams") or [{}])[0]
+        duration = float(stream.get("duration") or (payload.get("format") or {}).get("duration") or 0)
+        width, height = int(stream.get("width") or 0), int(stream.get("height") or 0)
+        if duration <= 0 or width <= 0 or height <= 0:
+            raise ValueError("missing duration or dimensions")
+        return {"duration_seconds": duration, "width": width, "height": height, "container": mime.split("/", 1)[1]}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+        raise VideoProviderError("video", "Provider returned invalid video data.", "The video provider returned an invalid or unreadable video.") from exc
+    finally:
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 async def _run_video_generation(job_id: str, owner: str) -> None:
     async def stage(status: str, progress: int, eta: int) -> bool:
         doc = await video_generation_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
@@ -1924,12 +2105,14 @@ async def _run_video_generation(job_id: str, owner: str) -> None:
             return result_value
 
         result, runtime_job = await _runtime_execute(owner, "video", "video", job.provider, {"mode": job.mode, "prompt": job.prompt, "duration_seconds": job.duration_seconds}, video_executor)
+        validation = _probe_video_bytes(result.data, result.mime_type)
         filename, _abs, size = save_bytes(result.data, result.mime_type, kind="generated")
         output = MediaAsset(
             owner_email=owner,
             filename=filename,
             mime_type=result.mime_type,
             kind="generated",
+            source_module="video",
             parent_media_id=job.source_media_id,
             edit_note=f"video-studio:{job.provider}",
             size_bytes=size,
@@ -1944,9 +2127,10 @@ async def _run_video_generation(job_id: str, owner: str) -> None:
                 "output_media_id": output.id,
                 "output_mime_type": result.mime_type,
                 "preview_kind": result.preview_kind,
-                "metadata.provider_output": result.metadata,
-                "metadata.output_duration_seconds": result.duration_seconds or job.duration_seconds,
-                "metadata.output_resolution": result.resolution or job.resolution,
+                 "metadata.provider_output": result.metadata,
+                 "metadata.video_validation": validation,
+                 "metadata.output_duration_seconds": validation["duration_seconds"],
+                 "metadata.output_resolution": f"{validation['width']}x{validation['height']}",
                 "metadata.runtime_job_id": runtime_job.id,
                 "updated_at": now_iso(),
             }},
@@ -2017,6 +2201,7 @@ async def create_video_generation(
         source_bytes = await upload.read()
         if not source_bytes or len(source_bytes) > MAX_UPLOAD_BYTES:
             raise HTTPException(400, "Each source image must be between 1 byte and 15 MB.")
+        _validate_editor_image_bytes(source_bytes, mime, label="source image")
         filename, _abs, size = save_bytes(source_bytes, mime, kind="reference")
         source = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="video-studio-source")
         await media_coll.insert_one(source.model_dump())
@@ -2130,7 +2315,7 @@ async def retry_video_generation_job(job_id: str, background: BackgroundTasks, o
     doc = await video_generation_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
     if not doc: raise HTTPException(404, "Video job not found")
     if doc.get("status") not in {"failed", "cancelled"}: raise HTTPException(400, "Only failed or cancelled video jobs can be retried.")
-    payload = {k: v for k, v in doc.items() if k not in {"id", "_id", "owner_email", "output_media_id", "output_mime_type", "preview_kind", "error", "created_at", "updated_at", "cancelled_at", "progress", "estimated_seconds_remaining"}}
+    payload = {k: v for k, v in doc.items() if k not in {"id", "_id", "owner_email", "output_media_id", "output_mime_type", "preview_kind", "error", "created_at", "updated_at", "cancelled_at", "progress", "estimated_seconds_remaining", "retry_of", "status"}}
     retry = VideoGenerationJob(**payload, owner_email=owner, retry_of=job_id, status="queued", progress=0)
     await video_generation_jobs_coll.insert_one(retry.model_dump())
     background.add_task(_run_video_generation, retry.id, owner)
@@ -2443,6 +2628,52 @@ async def _get_or_create_personal_voice_model(owner: str) -> PersonalVoiceModel:
 def _audio_capability_matrix() -> dict:
     return {"recording": ["microphone-selection", "input-level-monitoring", "waveform", "timer", "pause", "resume", "retake", "history", "monitoring", "quality-presets"], "speech": sorted([m for m in VOICE_MODES if "speech" in m or "voice" in m]), "enhancement": ["noise-removal", "echo-removal", "click-removal", "pop-removal", "breath-control", "de-esser", "normalize", "compressor", "equalizer", "limiter", "reverb", "delay", "stereo-enhancement", "loudness-correction"], "singing": ["singing-conversion", "vocal-isolation", "instrumental-separation", "stem-separation", "pitch-detection", "pitch-correction", "timing-correction", "harmony-generation", "vocal-layering", "backing-vocals", "vibrato-preservation", "emotion-preservation"], "podcast": ["intro", "outro", "chapters", "silence-detection", "automatic-cleanup", "podcast-mastering"], "editor": ["cut", "trim", "split", "merge", "fade-in", "fade-out", "timeline", "undo", "redo", "non-destructive-editing"], "library": ["projects", "versions", "favorites", "tags", "search", "presets", "voice-models", "recordings", "songs"], "video_integration": ["replace-narration", "replace-voice", "lip-sync-preparation", "voice-export", "audio-import"], "exports": sorted(VOICE_EXPORT_FORMATS)}
 
+def _probe_audio_bytes(data: bytes, mime_type: str) -> dict:
+    """Decode provider/upload audio and return trustworthy playback metadata."""
+    if not data:
+        raise ValueError("Audio output is empty.")
+    mime = (mime_type or "").lower().split(";", 1)[0]
+    if mime not in ALLOWED_AUDIO_MIMES:
+        raise ValueError("Audio output format is unsupported.")
+    if mime in {"audio/wav", "audio/x-wav"}:
+        try:
+            with wave.open(io.BytesIO(data), "rb") as audio:
+                sample_rate = audio.getframerate()
+                channels = audio.getnchannels()
+                frames = audio.getnframes()
+                duration = frames / sample_rate if sample_rate else 0
+        except (wave.Error, EOFError, OSError) as exc:
+            raise ValueError("Audio output is not a readable WAV file.") from exc
+        if sample_rate <= 0 or channels <= 0 or frames <= 0 or duration <= 0:
+            raise ValueError("Audio output has no playable duration or stream metadata.")
+        return {"container": "wav", "codec": "pcm", "duration_seconds": round(duration, 6), "sample_rate": sample_rate, "channels": channels}
+    ffprobe = resolve_executable("ffprobe")
+    if not ffprobe:
+        raise ValueError("FFprobe is unavailable for this audio format.")
+    suffix = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/webm": ".webm", "audio/ogg": ".ogg"}.get(mime, ".audio")
+    path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+            handle.write(data)
+            path = handle.name
+        result = subprocess.run([ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_name,sample_rate,channels,duration:format=format_name,duration", "-of", "json", path], text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, shell=False)
+        if result.returncode != 0:
+            raise ValueError(result.stderr or "ffprobe failed")
+        payload = json.loads(result.stdout or "{}")
+        stream = (payload.get("streams") or [{}])[0]
+        fmt = payload.get("format") or {}
+        duration = float(stream.get("duration") or fmt.get("duration") or 0)
+        sample_rate, channels = int(stream.get("sample_rate") or 0), int(stream.get("channels") or 0)
+        if not stream.get("codec_name") or duration <= 0 or sample_rate <= 0 or channels <= 0:
+            raise ValueError("Audio stream metadata is incomplete.")
+        return {"container": str(fmt.get("format_name") or mime.split("/", 1)[1]), "codec": stream["codec_name"], "duration_seconds": round(duration, 6), "sample_rate": sample_rate, "channels": channels}
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+        raise ValueError("Audio output is not decodable or has invalid metadata.") from exc
+    finally:
+        if path:
+            try: Path(path).unlink(missing_ok=True)
+            except OSError: pass
+
 async def _run_voice_job(job_id: str, owner: str) -> None:
     try:
         await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "preparing", "progress": 15, "updated_at": now_iso()}})
@@ -2458,10 +2689,11 @@ async def _run_voice_job(job_id: str, owner: str) -> None:
             await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Voice provider returned audio")
             return generated
         (data, mime, metadata), runtime_job = await _runtime_execute(owner, "voice", "speech", job.provider, {"mode": job.mode, "title": job.title, "format": job.output_format}, voice_executor)
+        audio_metadata = _probe_audio_bytes(data, mime)
         filename, _, size = save_bytes(data, mime, kind="generated")
-        media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="generated", size_bytes=size, edit_note=f"voice-studio:{job.provider}")
+        media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="generated", source_module="voice", size_bytes=size, edit_note=f"voice-studio:{job.provider}")
         await media_coll.insert_one(media.model_dump())
-        await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "completed", "progress": 100, "output_media_id": media.id, "metadata": {**metadata, "runtime_job_id": runtime_job.id}, "updated_at": now_iso()}})
+        await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "completed", "progress": 100, "output_media_id": media.id, "metadata": {**metadata, **audio_metadata, "runtime_job_id": runtime_job.id}, "updated_at": now_iso()}})
     except Exception as exc:
         logger.exception("Voice job failed: %s", exc)
         await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "failed", "error": "Audio processing could not be completed.", "updated_at": now_iso()}})
@@ -2564,6 +2796,12 @@ async def list_voice_jobs(owner: str = Depends(require_owner), search: str = "",
     if favorite is not None: query["favorite"] = favorite
     return [VoiceJob(**doc) async for doc in voice_jobs_coll.find(query, {"_id": 0}).sort("created_at", -1).limit(100)]
 
+@api.get("/voice/jobs/{job_id}", response_model=VoiceJob)
+async def get_voice_job(job_id: str, owner: str = Depends(require_owner)) -> VoiceJob:
+    doc = await voice_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
+    if not doc: raise HTTPException(404, "Voice job not found")
+    return VoiceJob(**doc)
+
 @api.patch("/voice/jobs/{job_id}", response_model=VoiceJob)
 async def update_voice_job(job_id: str, body: dict, owner: str = Depends(require_owner)) -> VoiceJob:
     doc = await voice_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
@@ -2662,12 +2900,61 @@ async def delete_project(project_id: str, owner: str = Depends(require_owner)) -
     return {"ok": True}
 
 
+def _job_status(status: str | None) -> str:
+    """Map provider-specific states to the small Jobs Center vocabulary."""
+    value = str(status or "unknown").lower()
+    if value in {"queued", "pending", "waiting"}: return "queued"
+    if value in {"preparing", "uploading", "processing", "rendering", "running"}: return "processing"
+    if value in {"completed", "succeeded", "success"}: return "completed"
+    if value in {"failed", "error"}: return "failed"
+    if value in {"cancelled", "canceled"}: return "cancelled"
+    return "unknown"
+
+
+def _job_view(doc: dict, module: str, job_type: str) -> dict:
+    result_id = doc.get("output_media_id") or ((doc.get("output_media_ids") or [None])[0])
+    prompt = doc.get("prompt") or doc.get("instruction") or doc.get("text") or ""
+    metadata = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+    return {
+        "id": doc.get("id"), "module": module, "source_module": module, "job_type": job_type,
+        "status": doc.get("status", "unknown"), "normalized_status": _job_status(doc.get("status")),
+        "progress": doc.get("progress") if isinstance(doc.get("progress"), (int, float)) else None,
+        "provider": doc.get("provider") or doc.get("selected_provider"),
+        "model": doc.get("model") or metadata.get("model"),
+        "title": doc.get("title") or "", "prompt": prompt,
+        "created_at": doc.get("created_at"), "updated_at": doc.get("updated_at"),
+        "started_at": doc.get("started_at"), "completed_at": doc.get("completed_at"),
+        "duration_ms": doc.get("generation_duration_ms") or metadata.get("duration_ms"),
+        "error": str(doc.get("error"))[:1000] if doc.get("error") else None,
+        "result_media_id": result_id, "retry_of": doc.get("retry_of"),
+        "metadata": {key: value for key, value in metadata.items() if key not in {"authorization", "api_key", "token", "secret"}},
+    }
+
+
 async def _central_jobs(owner: str) -> list[dict]:
-    image = [dict(doc, module="image") async for doc in jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
-    video = [dict(doc, module="video") async for doc in video_generation_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
-    voice = [dict(doc, module="voice") async for doc in voice_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
-    talking_portrait = [dict(doc, module="talking-portrait") async for doc in talking_portrait_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
-    return sorted(image + video + voice + talking_portrait, key=lambda item: item.get("updated_at") or item.get("created_at", ""), reverse=True)[:200]
+    editor_docs = [doc async for doc in ai_edit_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    editor_ids = {doc.get("id") for doc in editor_docs}
+    image_docs = [doc async for doc in jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    # AI editor retries create a companion GenerationJob with the same id; expose it once.
+    image = [_job_view(doc, "image", "image-generation") for doc in image_docs if doc.get("id") not in editor_ids and not str(doc.get("mode", "")).startswith("edit:")]
+    editor = [_job_view(doc, "image-editor", "image-edit") for doc in editor_docs]
+    video = [_job_view(doc, "video", "video-generation") async for doc in video_generation_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    voice = [_job_view(doc, "voice", "voice-generation") async for doc in voice_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    talking_portrait = [_job_view(doc, "talking-portrait", "talking-portrait") async for doc in talking_portrait_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    return sorted(image + editor + video + voice + talking_portrait, key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)[:400]
+
+
+async def _sync_job_notifications(owner: str, jobs: list[dict]) -> None:
+    """Create one owner-scoped notification for each terminal job transition."""
+    for job in jobs:
+        state = job.get("normalized_status") or _job_status(job.get("status"))
+        if state not in {"completed", "failed", "cancelled"}:
+            continue
+        category = f"job_{state}"
+        module = str(job.get("module") or "workspace")
+        title = str(job.get("title") or job.get("prompt") or job.get("job_type") or "Workspace job")[:200]
+        message = f"{module.replace('-', ' ').title()} job {state}."
+        await emit_notification(notifications_coll, owner, category, title, message, "job", str(job.get("id")), module)
 
 
 @api.get("/workspace/overview")
@@ -2679,19 +2966,7 @@ async def workspace_overview(owner: str = Depends(require_owner)) -> dict:
         jobs = []
         errors["jobs"] = "Job information is unavailable."
     try:
-        for job in jobs:
-            state = job.get("status")
-            if state in {"completed", "failed", "cancelled"}:
-                await emit_notification(
-                    notifications_coll,
-                    owner,
-                    f"job_{state}",
-                    f"Job {state}",
-                    str(job.get("title") or job.get("prompt") or "Workspace job"),
-                    "job",
-                    str(job.get("id")),
-                    str(job.get("module") or "workspace"),
-                )
+        await _sync_job_notifications(owner, jobs)
     except Exception:
         logger.exception("Workspace notification sync failed")
         errors["notifications"] = "Job notifications could not be refreshed."
@@ -2769,15 +3044,217 @@ async def save_preferences(body: dict, owner: str = Depends(require_owner)) -> d
     return await get_preferences(owner)
 
 
+# ---------- Driver Assistance persistence ----------
+DRIVER_PLACE_CATEGORIES = {"home", "work", "favorite", "custom"}
+DRIVER_ROUTE_MODES = {"drive", "walk"}
+
+def _driver_text(value: object, field: str, maximum: int, *, required: bool = False) -> str:
+    text = str(value or "").strip()
+    if required and not text:
+        raise HTTPException(400, f"{field} is required.")
+    if len(text) > maximum:
+        raise HTTPException(400, f"{field} is too long.")
+    return text
+
+def _driver_coordinate(value: object, field: str, minimum: float, maximum: float, *, required: bool = True):
+    if value is None and not required:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"Invalid {field}.")
+    if not math.isfinite(number) or number < minimum or number > maximum:
+        raise HTTPException(400, f"Invalid {field}.")
+    return number
+
+
+@api.get("/driver-assistance/preferences", response_model=DriverPreferences)
+async def get_driver_preferences(owner: str = Depends(require_owner)) -> DriverPreferences:
+    doc = await driver_preferences_coll.find_one({"owner_email": owner}, {"_id": 0})
+    if not doc:
+        return DriverPreferences(owner_email=owner)
+    return DriverPreferences(**doc)
+
+
+@api.put("/driver-assistance/preferences", response_model=DriverPreferences)
+@api.patch("/driver-assistance/preferences", response_model=DriverPreferences)
+async def save_driver_preferences(body: dict, owner: str = Depends(require_owner)) -> DriverPreferences:
+    allowed = {"voice", "speed", "camera", "weather", "auto_reroute", "strict_hands_free", "preferred_route_mode"}
+    update = {key: body[key] for key in allowed if key in body}
+    for key in allowed - {"preferred_route_mode"}:
+        if key in update and not isinstance(update[key], bool):
+            raise HTTPException(400, f"{key} must be boolean.")
+    if "preferred_route_mode" in update and update["preferred_route_mode"] not in DRIVER_ROUTE_MODES:
+        raise HTTPException(400, "Invalid preferred route mode.")
+    update.update({"owner_email": owner, "updated_at": now_iso()})
+    if await driver_preferences_coll.find_one({"owner_email": owner}, {"_id": 1}):
+        await driver_preferences_coll.update_one({"owner_email": owner}, {"$set": update})
+    else:
+        await driver_preferences_coll.insert_one({"owner_email": owner, "voice": True, "speed": True, "camera": True, "weather": True, "auto_reroute": True, "strict_hands_free": False, "preferred_route_mode": "drive", **update})
+    return await get_driver_preferences(owner)
+
+
+@api.get("/driver-assistance/places", response_model=List[DriverSavedPlace])
+async def list_driver_places(owner: str = Depends(require_owner)) -> List[DriverSavedPlace]:
+    return [DriverSavedPlace(**doc) async for doc in driver_places_coll.find({"owner_email": owner}, {"_id": 0}).sort("updated_at", -1)]
+
+
+@api.post("/driver-assistance/places", response_model=DriverSavedPlace)
+async def create_driver_place(body: dict, owner: str = Depends(require_owner)) -> DriverSavedPlace:
+    label = _driver_text(body.get("label"), "label", 80, required=True)
+    name = _driver_text(body.get("name"), "name", 160, required=True)
+    address = _driver_text(body.get("address"), "address", 300)
+    category = _driver_text(body.get("category") or "custom", "category", 20)
+    if category not in DRIVER_PLACE_CATEGORIES:
+        raise HTTPException(400, "Invalid place category.")
+    place = DriverSavedPlace(owner_email=owner, label=label, name=name, address=address,
+                             latitude=_driver_coordinate(body.get("latitude"), "latitude", -90, 90),
+                             longitude=_driver_coordinate(body.get("longitude"), "longitude", -180, 180), category=category)
+    await driver_places_coll.insert_one(place.model_dump())
+    return place
+
+
+@api.patch("/driver-assistance/places/{place_id}", response_model=DriverSavedPlace)
+async def update_driver_place(place_id: str, body: dict, owner: str = Depends(require_owner)) -> DriverSavedPlace:
+    current = await driver_places_coll.find_one({"id": place_id, "owner_email": owner}, {"_id": 0})
+    if not current:
+        raise HTTPException(404, "Saved place not found.")
+    update = {}
+    for field, maximum in (("label", 80), ("name", 160), ("address", 300), ("category", 20)):
+        if field in body:
+            update[field] = _driver_text(body[field], field, maximum, required=field in {"label", "name"})
+    if "category" in update and update["category"] not in DRIVER_PLACE_CATEGORIES:
+        raise HTTPException(400, "Invalid place category.")
+    if "latitude" in body: update["latitude"] = _driver_coordinate(body["latitude"], "latitude", -90, 90)
+    if "longitude" in body: update["longitude"] = _driver_coordinate(body["longitude"], "longitude", -180, 180)
+    update["updated_at"] = now_iso()
+    result = await driver_places_coll.find_one_and_update({"id": place_id, "owner_email": owner}, {"$set": update}, return_document=True, projection={"_id": 0})
+    return DriverSavedPlace(**result)
+
+
+@api.delete("/driver-assistance/places/{place_id}")
+async def delete_driver_place(place_id: str, owner: str = Depends(require_owner)) -> dict:
+    result = await driver_places_coll.delete_one({"id": place_id, "owner_email": owner})
+    if not result.deleted_count:
+        raise HTTPException(404, "Saved place not found.")
+    return {"ok": True, "place_id": place_id}
+
+
+@api.get("/driver-assistance/trips", response_model=dict)
+async def list_driver_trips(page: int = 1, page_size: int = 20, owner: str = Depends(require_owner)) -> dict:
+    page, page_size = max(1, page), max(1, min(50, page_size))
+    query = {"owner_email": owner}
+    total = await driver_trips_coll.count_documents(query)
+    cursor = driver_trips_coll.find(query, {"_id": 0}).sort("completed_at", -1)
+    if hasattr(cursor, "rows"):
+        cursor.rows = cursor.rows[(page - 1) * page_size: page * page_size]
+    else:
+        cursor = cursor.skip((page - 1) * page_size).limit(page_size)
+    items = [DriverTrip(**doc) async for doc in cursor]
+    return {"items": items, "count": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size}
+
+
+@api.post("/driver-assistance/trips", response_model=DriverTrip)
+async def create_driver_trip(body: dict, owner: str = Depends(require_owner)) -> DriverTrip:
+    client_id = _driver_text(body.get("client_id"), "client_id", 120, required=True)
+    existing = await driver_trips_coll.find_one({"owner_email": owner, "client_id": client_id}, {"_id": 0})
+    if existing:
+        return DriverTrip(**existing)
+    mode = _driver_text(body.get("route_mode") or "drive", "route_mode", 20)
+    if mode not in DRIVER_ROUTE_MODES: raise HTTPException(400, "Invalid route mode.")
+    started_at = _driver_text(body.get("started_at"), "started_at", 80, required=True)
+    completed_at = _driver_text(body.get("completed_at"), "completed_at", 80, required=True)
+    duration = float(body.get("duration_seconds") or 0); distance = float(body.get("distance_meters") or 0)
+    if not math.isfinite(duration) or duration < 0 or not math.isfinite(distance) or distance < 0: raise HTTPException(400, "Invalid trip metrics.")
+    trip = DriverTrip(owner_email=owner, client_id=client_id, route_mode=mode, started_at=started_at, completed_at=completed_at,
+                      origin_label=_driver_text(body.get("origin_label"), "origin_label", 160), destination_label=_driver_text(body.get("destination_label"), "destination_label", 160, required=True),
+                      origin_latitude=_driver_coordinate(body.get("origin_latitude"), "origin_latitude", -90, 90, required=False), origin_longitude=_driver_coordinate(body.get("origin_longitude"), "origin_longitude", -180, 180, required=False),
+                      destination_latitude=_driver_coordinate(body.get("destination_latitude"), "destination_latitude", -90, 90, required=False), destination_longitude=_driver_coordinate(body.get("destination_longitude"), "destination_longitude", -180, 180, required=False), duration_seconds=duration, distance_meters=distance,
+                      average_speed_kmh=body.get("average_speed_kmh"), source_module="driver-assistance")
+    await driver_trips_coll.insert_one(trip.model_dump())
+    return trip
+
+
+@api.delete("/driver-assistance/trips/{trip_id}")
+async def delete_driver_trip(trip_id: str, owner: str = Depends(require_owner)) -> dict:
+    result = await driver_trips_coll.delete_one({"id": trip_id, "owner_email": owner})
+    if not result.deleted_count: raise HTTPException(404, "Trip not found.")
+    return {"ok": True, "trip_id": trip_id}
+
+
+@api.get("/driver-assistance/provider-status")
+async def driver_assistance_provider_status(owner: str = Depends(require_owner)) -> dict:
+    del owner
+    status = traffic_provider_status()
+    return {"traffic": status, "weather": {"provider": "open-meteo", "configured": True, "mode": "route-weather"}}
+
+
+@api.post("/driver-assistance/traffic-route")
+async def driver_assistance_traffic_route(body: dict, owner: str = Depends(require_owner)) -> dict:
+    del owner
+    try:
+        origin = {"lat": float(body["origin"]["lat"]), "lng": float(body["origin"]["lng"])}
+        destination = {"lat": float(body["destination"]["lat"]), "lng": float(body["destination"]["lng"])}
+    except (KeyError, TypeError, ValueError):
+        raise HTTPException(400, "Origin and destination coordinates are required.")
+    if any(not math.isfinite(value) for value in (*origin.values(), *destination.values())):
+        raise HTTPException(400, "Invalid route coordinates.")
+    result = await fetch_traffic_route(origin, destination)
+    return result or {"status": "unavailable", **traffic_provider_status()}
+
+
+@api.post("/driver-assistance/route-weather")
+async def driver_assistance_route_weather(body: dict, owner: str = Depends(require_owner)) -> dict:
+    del owner
+    coordinates = body.get("coordinates") if isinstance(body, dict) else None
+    if not isinstance(coordinates, list) or len(coordinates) > 2000:
+        raise HTTPException(400, "Route coordinates are required and bounded.")
+    points = sample_route_points(coordinates, 8)
+    return await fetch_route_weather(points)
+
+
 @api.get("/media-library")
-async def media_library(q: str = "", media_type: str = "", favorite: Optional[bool] = None, project_id: str = "", owner: str = Depends(require_owner)) -> dict:
+async def media_library(q: str = "", media_type: str = "", source_module: str = "", favorite: Optional[bool] = None, project_id: str = "", folder: str = "", collection_id: str = "", sort: str = "newest", page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> dict:
     query: dict = {"owner_email": owner}
     if favorite is not None: query["favorite"] = favorite
     if project_id: query["project_id"] = project_id
     if media_type: query["mime_type"] = {"$regex": f"^{re.escape(media_type)}/", "$options": "i"}
-    if q.strip(): query["$or"] = [{"edit_note": {"$regex": re.escape(q.strip()), "$options": "i"}}, {"tags": {"$regex": re.escape(q.strip()), "$options": "i"}}]
-    items = [doc async for doc in media_coll.find(query, {"_id": 0}).sort("created_at", -1).limit(100)]
-    return {"items": items, "count": len(items)}
+    if source_module: query["source_module"] = source_module
+    if folder: query["folder"] = folder
+    if collection_id: query["collection_ids"] = collection_id
+    if q.strip():
+        pattern = re.escape(q.strip())
+        query["$or"] = [{"filename": {"$regex": pattern, "$options": "i"}}, {"edit_note": {"$regex": pattern, "$options": "i"}}, {"source_module": {"$regex": pattern, "$options": "i"}}, {"provider": {"$regex": pattern, "$options": "i"}}, {"tags": {"$regex": pattern, "$options": "i"}}, {"metadata.original_name": {"$regex": pattern, "$options": "i"}}, {"metadata.prompt": {"$regex": pattern, "$options": "i"}}]
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+    sort_field = "created_at" if sort not in {"oldest", "name"} else ("created_at" if sort == "oldest" else "filename")
+    sort_direction = 1 if sort in {"oldest", "name"} else -1
+    total = await media_coll.count_documents(query)
+    cursor = media_coll.find(query, {"_id": 0}).sort(sort_field, sort_direction)
+    if hasattr(cursor, "rows"):
+        cursor.rows = cursor.rows[(page - 1) * page_size: page * page_size]
+    else:
+        cursor = cursor.skip((page - 1) * page_size).limit(page_size)
+    items = [doc async for doc in cursor]
+    return {"items": items, "count": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size}
+
+@api.get("/media-library/{media_id}")
+async def media_library_metadata(media_id: str, owner: str = Depends(require_owner)) -> dict:
+    media = await media_coll.find_one({"id": media_id, "owner_email": owner}, {"_id": 0})
+    if not media: raise HTTPException(404, "Media not found.")
+    return media
+
+@api.get("/media-library/{media_id}/download")
+async def download_media_library(media_id: str, owner: str = Depends(require_owner)) -> Response:
+    media = await media_coll.find_one({"id": media_id, "owner_email": owner}, {"_id": 0})
+    if not media: raise HTTPException(404, "Media not found.")
+    kind = "reference" if media.get("kind") == "reference" else "generated"
+    try:
+        data = read_bytes(media["filename"], kind=kind)
+    except (FileNotFoundError, ValueError):
+        raise HTTPException(404, "Media file is missing")
+    safe_name = Path(media["filename"]).name
+    return Response(content=data, media_type=media.get("mime_type") or "application/octet-stream", headers={"Content-Disposition": f'attachment; filename="{safe_name}"'})
 
 
 @api.patch("/media-library/{media_id}")
@@ -2789,6 +3266,26 @@ async def update_media_library(media_id: str, body: dict, owner: str = Depends(r
     if not result: raise HTTPException(404, "Media not found.")
     return result
 
+@api.delete("/media-library/{media_id}")
+async def delete_media_library(media_id: str, owner: str = Depends(require_owner)) -> dict:
+    media = await media_coll.find_one({"id": media_id, "owner_email": owner}, {"_id": 0})
+    if not media: raise HTTPException(404, "Media not found.")
+    pack_references = [pack async for pack in packs_coll.find({"owner_email": owner}, {"_id": 0}) if media_id in (pack.get("photo_ids") or [])]
+    if pack_references:
+        raise HTTPException(409, "Identity Pack reference media must be removed from its pack first.")
+    if await ai_edit_jobs_coll.find_one({"owner_email": owner, "$or": [{"source_media_id": media_id}, {"mask_media_id": media_id}]}, {"_id": 1}):
+        raise HTTPException(409, "Media is required by an editor job and cannot be deleted from the library.")
+    kind = "reference" if media.get("kind") == "reference" else "generated"
+    try:
+        delete_file(media["filename"], kind=kind)
+    except (FileNotFoundError, ValueError):
+        await media_coll.delete_one({"id": media_id, "owner_email": owner})
+        await gallery_coll.delete_many({"media_id": media_id, "owner_email": owner})
+        raise HTTPException(404, "Media file is missing")
+    await media_coll.delete_one({"id": media_id, "owner_email": owner})
+    await gallery_coll.delete_many({"media_id": media_id, "owner_email": owner})
+    return {"ok": True, "media_id": media_id}
+
 
 @api.get("/media-library/{media_id}/actions")
 async def media_actions(media_id: str, owner: str = Depends(require_owner)) -> dict:
@@ -2799,32 +3296,54 @@ async def media_actions(media_id: str, owner: str = Depends(require_owner)) -> d
 
 @api.get("/workspace/jobs/{module}/{job_id}/actions")
 async def workspace_job_actions(module: str, job_id: str, owner: str = Depends(require_owner)) -> dict:
-    collections = {"image": jobs_coll, "video": video_generation_jobs_coll, "voice": voice_jobs_coll, "talking-portrait": talking_portrait_jobs_coll}
+    collections = {"image": jobs_coll, "image-editor": ai_edit_jobs_coll, "video": video_generation_jobs_coll, "voice": voice_jobs_coll, "talking-portrait": talking_portrait_jobs_coll}
     coll = collections.get(module)
     if not coll: raise HTTPException(400, "Unsupported job module.")
     job = await coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
     if not job: raise HTTPException(404, "Job not found.")
     active = job.get("status") in {"queued", "preparing", "uploading", "processing", "rendering"}
-    retry = module == "video" and job.get("status") in {"failed", "cancelled"}
-    return {"cancel": active and module in {"video", "voice", "talking-portrait"}, "retry": retry or (module == "talking-portrait" and job.get("status") in {"failed", "cancelled"}), "output_media_id": job.get("output_media_id") or (job.get("output_media_ids") or [None])[0], "failure_reason": job.get("error")}
+    retry = module in {"video", "image-editor"} and job.get("status") in {"failed", "cancelled", "canceled"}
+    output_id = job.get("output_media_id") or (job.get("output_media_ids") or [None])[0]
+    result_available = bool(output_id and await media_coll.find_one({"id": output_id, "owner_email": owner}, {"_id": 1}))
+    return {"cancel": active and module in {"video", "voice", "image-editor", "talking-portrait"}, "retry": retry, "output_media_id": output_id, "result_available": result_available, "failure_reason": str(job.get("error"))[:1000] if job.get("error") else None}
 
 
 @api.get("/workspace/jobs")
-async def workspace_jobs(status: str = "", owner: str = Depends(require_owner)) -> dict:
+async def workspace_jobs(status: str = "", module: str = "", sort: str = "newest", page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> dict:
     jobs = await _central_jobs(owner)
-    if status: jobs = [job for job in jobs if job.get("status") == status]
-    active = {"queued", "preparing", "uploading", "processing", "rendering"}
-    return {"jobs": jobs, "active_count": len([job for job in jobs if job.get("status") in active]), "failed_count": len([job for job in jobs if job.get("status") == "failed"])}
+    await _sync_job_notifications(owner, jobs)
+    if status: jobs = [job for job in jobs if job.get("normalized_status") == status or job.get("status") == status]
+    if module: jobs = [job for job in jobs if job.get("module") == module]
+    jobs.sort(key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=sort != "oldest")
+    page = max(1, page); page_size = max(1, min(100, page_size)); total = len(jobs)
+    active = {"queued", "preparing", "uploading", "processing", "rendering", "running"}
+    start = (page - 1) * page_size
+    return {"jobs": jobs[start:start + page_size], "count": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size, "active_count": len([job for job in jobs if job.get("status") in active]), "failed_count": len([job for job in jobs if job.get("normalized_status") == "failed"])}
 
 
 @api.get("/notifications", response_model=List[WorkspaceNotification])
-async def list_notifications(owner: str = Depends(require_owner)) -> List[WorkspaceNotification]:
-    return [WorkspaceNotification(**doc) async for doc in notifications_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+async def list_notifications(unread_only: bool = False, page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> List[WorkspaceNotification]:
+    query = {"owner_email": owner}
+    if unread_only: query["read"] = False
+    page, page_size = max(1, page), max(1, min(100, page_size))
+    cursor = notifications_coll.find(query, {"_id": 0}).sort("created_at", -1)
+    if hasattr(cursor, "rows"):
+        cursor.rows = cursor.rows[(page - 1) * page_size: page * page_size]
+    else:
+        cursor = cursor.skip((page - 1) * page_size).limit(page_size)
+    return [WorkspaceNotification(**doc) async for doc in cursor]
+
+
+@api.get("/notifications/unread-count")
+async def unread_notification_count(owner: str = Depends(require_owner)) -> dict:
+    return {"count": await notifications_coll.count_documents({"owner_email": owner, "read": False})}
 
 
 @api.patch("/notifications/{notification_id}", response_model=WorkspaceNotification)
 async def update_notification(notification_id: str, body: dict, owner: str = Depends(require_owner)) -> WorkspaceNotification:
-    doc = await notifications_coll.find_one_and_update({"id": notification_id, "owner_email": owner}, {"$set": {"read": bool(body.get("read", True))}}, return_document=True, projection={"_id": 0})
+    if "read" not in body or not isinstance(body.get("read"), bool):
+        raise HTTPException(400, "Notification read state must be boolean.")
+    doc = await notifications_coll.find_one_and_update({"id": notification_id, "owner_email": owner}, {"$set": {"read": body["read"]}}, return_document=True, projection={"_id": 0})
     if not doc: raise HTTPException(404, "Notification not found.")
     return WorkspaceNotification(**doc)
 
@@ -2913,18 +3432,12 @@ async def upload_voice_sample(pack_id: str, file: UploadFile = File(...), owner:
 
 def _inspect_voice_sample(data: bytes, mime: str) -> dict:
     """Reject empty/disguised content; extract reliable WAV details locally."""
-    if mime in {"audio/wav", "audio/x-wav"}:
-        try:
-            with wave.open(io.BytesIO(data), "rb") as audio:
-                rate, channels, frames = audio.getframerate(), audio.getnchannels(), audio.getnframes()
-                duration = frames / max(rate, 1)
-        except (wave.Error, EOFError) as exc: raise HTTPException(400, "The WAV audio sample is corrupted or unreadable.") from exc
-        if not 0 < duration <= 300: raise HTTPException(400, "Voice samples must be no longer than 5 minutes.")
-        return {"duration_seconds": round(duration, 3), "sample_rate": rate, "channels": channels}
-    signatures = {"audio/webm": b"\x1aE\xdf\xa3", "audio/ogg": b"OggS", "audio/mpeg": b"\xff", "audio/mp3": b"\xff"}
-    signature = signatures.get(mime)
-    if not signature or not data.startswith(signature): raise HTTPException(400, "The file contents do not match the declared audio format.")
-    return {"duration_seconds": 0, "sample_rate": None, "channels": None}
+    try:
+        metadata = _probe_audio_bytes(data, mime)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not 0 < metadata["duration_seconds"] <= 300: raise HTTPException(400, "Voice samples must be no longer than 5 minutes.")
+    return {key: metadata[key] for key in ("duration_seconds", "sample_rate", "channels", "codec", "container")}
 
 @api.delete("/voice/packs/{pack_id}/samples/{media_id}")
 async def remove_voice_sample(pack_id: str, media_id: str, owner: str = Depends(require_owner)) -> dict:
@@ -2944,6 +3457,8 @@ async def transcription_providers(_: str = Depends(require_owner)) -> dict:
 async def create_transcription(background: BackgroundTasks, file: UploadFile = File(...), language: str = Form("auto"), owner: str = Depends(require_owner)) -> TranscriptionJob:
     mime = (file.content_type or "").lower(); data = await file.read()
     if mime not in ALLOWED_AUDIO_MIMES or not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Provide a supported audio file up to 25 MB.")
+    try: _probe_audio_bytes(data, mime)
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     filename, _, size = save_bytes(data, mime, "reference"); media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="transcription-source"); await media_coll.insert_one(media.model_dump())
     job = TranscriptionJob(owner_email=owner, source_media_id=media.id, language=language); await transcription_jobs_coll.insert_one(job.model_dump())
     async def run():
@@ -3424,15 +3939,29 @@ def _active_private_lan_ip() -> str | None:
 
 def _cors_origins() -> list[str]:
     configured = [origin.strip().rstrip("/") for origin in os.environ.get("CORS_ORIGINS", "").split(",") if origin.strip()]
-    defaults = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    production = os.environ.get("LUMINA_ENV", "development").strip().lower() in {"production", "prod"}
+    if production:
+        # Fail closed: production must name the deployed frontend origins.
+        return sorted(set(configured))
+    # Keep the historical 3000 development port while supporting the current
+    # 3001 launcher; same-origin production deployments do not need CORS.
+    defaults = [
+        "http://localhost:3000", "http://127.0.0.1:3000",
+        "http://localhost:3001", "http://127.0.0.1:3001",
+    ]
     lan_ip = _active_private_lan_ip()
     if lan_ip:
-        defaults.append(f"http://{lan_ip}:3000")
+        defaults.extend([f"http://{lan_ip}:3000", f"http://{lan_ip}:3001"])
     return sorted(set(configured + defaults))
 
 
 def _trusted_hosts() -> list[str]:
     configured = [host.strip() for host in os.environ.get("TRUSTED_HOSTS", "").split(",") if host.strip()]
+    production = os.environ.get("LUMINA_ENV", "development").strip().lower() in {"production", "prod"}
+    if production:
+        # Do not accept arbitrary Host headers in production. Configure the
+        # deployed API hostname explicitly through TRUSTED_HOSTS.
+        return sorted(set(configured))
     defaults = ["localhost", "127.0.0.1", socket.gethostname(), f"{socket.gethostname()}.local"]
     lan_ip = _active_private_lan_ip()
     if lan_ip:
@@ -3449,7 +3978,10 @@ app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
     allow_origins=_cors_origins(),
-    allow_origin_regex=os.environ.get("CORS_ORIGIN_REGEX", r"^http://(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?::3000)?$"),
+    allow_origin_regex=(
+        os.environ.get("CORS_ORIGIN_REGEX")
+        or (None if os.environ.get("LUMINA_ENV", "development").strip().lower() in {"production", "prod"} else r"^https?://(localhost|127\.0\.0\.1|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2})(?::(?:3000|3001))?$")
+    ),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -3470,3 +4002,35 @@ async def _startup() -> None:
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     return None
+
+# Serve the React production build from the same FastAPI/Render origin.
+FRONTEND_BUILD_DIR = ROOT_DIR.parent / "frontend" / "build"
+
+if FRONTEND_BUILD_DIR.exists():
+    frontend_static = FRONTEND_BUILD_DIR / "static"
+    if frontend_static.exists():
+        app.mount(
+            "/static",
+            StaticFiles(directory=frontend_static),
+            name="frontend-static",
+        )
+
+    @app.get("/", include_in_schema=False)
+    async def frontend_root():
+        return FileResponse(FRONTEND_BUILD_DIR / "index.html")
+
+    @app.get("/{frontend_path:path}", include_in_schema=False)
+    async def frontend_spa(frontend_path: str):
+        if frontend_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        build_root = FRONTEND_BUILD_DIR.resolve()
+        candidate = (build_root / frontend_path).resolve()
+
+        if candidate.is_file() and (
+            candidate == build_root or build_root in candidate.parents
+        ):
+            return FileResponse(candidate)
+
+        return FileResponse(build_root / "index.html")
+
