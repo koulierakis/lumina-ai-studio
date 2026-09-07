@@ -4,6 +4,16 @@ import { useAuth } from '../context/AuthContext';
 import { toast } from 'sonner';
 import { Sparkles } from 'lucide-react';
 
+function safeLoginErrorMessage(error) {
+  const status = error?.response?.status;
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (typeof detail?.message === 'string' && detail.message.trim()) return detail.message;
+  if (status === 401) return 'Authentication required. Please check your email and password.';
+  if (status === 429) return 'Too many login attempts. Please wait and try again.';
+  return 'Unable to sign in. Please try again.';
+}
+
 export default function Login() {
   const { login, user, ready } = useAuth();
   const nav = useNavigate();
@@ -21,7 +31,7 @@ export default function Login() {
       toast.success('Welcome to Lumina');
       nav('/studio/generate', { replace: true });
     } catch (err) {
-      toast.error(err?.response?.data?.detail || 'Invalid credentials');
+      toast.error(safeLoginErrorMessage(err));
     } finally {
       setBusy(false);
     }
