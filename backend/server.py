@@ -242,7 +242,7 @@ ALLOWED_VIDEO_MIMES = {"video/mp4", "video/quicktime", "video/webm", "video/x-ms
 ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (images / mask; verified for 20 MB uploads)
 MAX_VIDEO_ASSET_BYTES = 500 * 1024 * 1024  # 500 MB (video / audio for editor)
-MAX_PHOTOS_PER_PACK = 5
+MAX_PHOTOS_PER_PACK = 15
 VIDEO_STUDIO_DURATIONS = {3, 5, 8}
 VIDEO_STUDIO_ASPECT_RATIOS = {"16:9", "9:16"}
 IMAGE_STUDIO_IDENTITY_LOCKS = {"low", "medium", "high", "maximum"}
@@ -885,7 +885,10 @@ async def upload_photos(
     if remaining <= 0:
         raise HTTPException(400, f"Identity Pack already has {MAX_PHOTOS_PER_PACK} photos")
 
-    accepted = files[:remaining]
+    if len(files) > remaining:
+        raise HTTPException(400, f"Only {remaining} more reference photo(s) can be added to this Identity Pack")
+
+    accepted = files
     prepared: list[tuple[bytes, str, dict]] = []
     for f in accepted:
         mime = (f.content_type or "").lower()

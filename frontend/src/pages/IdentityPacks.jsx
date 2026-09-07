@@ -4,6 +4,8 @@ import AuthImage from '../components/AuthImage';
 import { toast } from 'sonner';
 import { Plus, Trash2, Upload, Star, Check } from 'lucide-react';
 
+const MAX_REFERENCE_PHOTOS = 15;
+
 export default function IdentityPacks() {
   const [packs, setPacks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,7 +59,16 @@ export default function IdentityPacks() {
   };
 
   const uploadFiles = async (files) => {
-    if (!selected) return;
+    if (!selected || !files?.length) return;
+    const remaining = MAX_REFERENCE_PHOTOS - selected.photo_ids.length;
+    if (remaining <= 0) {
+      toast.error(`This Identity Pack already has ${MAX_REFERENCE_PHOTOS} reference photographs.`);
+      return;
+    }
+    if (files.length > remaining) {
+      toast.error(`Only ${remaining} more reference photo${remaining === 1 ? '' : 's'} can be added to this Identity Pack.`);
+      return;
+    }
     const fd = new FormData();
     Array.from(files).forEach((f) => fd.append('files', f));
     try {
@@ -259,7 +270,7 @@ export default function IdentityPacks() {
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm truncate">{p.name}</div>
-                <div className="text-[11px] text-white/40">{p.photo_ids.length} / 5 refs</div>
+                <div className="text-[11px] text-white/40">{p.photo_ids.length} / {MAX_REFERENCE_PHOTOS} refs</div>
               </div>
               </button>
             </div>
@@ -292,7 +303,7 @@ export default function IdentityPacks() {
               </button>
             </div>
             <p className="text-white/50 text-sm mb-8">
-              {selected.photo_ids.length} of 5 reference photographs
+              {selected.photo_ids.length} of {MAX_REFERENCE_PHOTOS} reference photographs
             </p>
 
             <div
@@ -318,7 +329,7 @@ export default function IdentityPacks() {
                 <Upload strokeWidth={1.25} className="w-8 h-8 mx-auto text-gold/70 mb-3" />
                 <p className="text-white text-sm">Drop reference photos here, or click to browse</p>
                 <p className="text-white/40 text-xs mt-1">
-                  JPEG, PNG or WEBP · max 15MB each · up to 5 per pack
+                  JPEG, PNG or WEBP · max 15MB each · up to {MAX_REFERENCE_PHOTOS} per pack
                 </p>
               </div>
             </div>

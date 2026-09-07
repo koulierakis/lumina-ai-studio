@@ -2,7 +2,8 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import IdentityPacks from './IdentityPacks';
-import { apiDelete, apiGet } from '../lib/api';
+import { apiDelete, apiGet, uploadFormData } from '../lib/api';
+import { toast } from 'sonner';
 
 jest.mock('../lib/api', () => ({
   apiDelete: jest.fn(() => Promise.resolve({})),
@@ -159,4 +160,25 @@ describe('Identity Packs recovery', () => {
     expect(host.querySelector('[data-testid="select-pack-beta"]').checked).toBe(true);
     expect(host.querySelector('[data-testid="bulk-delete-result"]')?.textContent).toContain('1 could not be deleted');
   });
+
+  it('reports the fifteen-reference capacity in the pack detail', async () => {
+    const fullPack = { ...alpha, photo_ids: Array.from({ length: 15 }, (_, index) => 'photo-' + index), primary_photo_id: 'photo-0' };
+    apiGet.mockResolvedValue([fullPack]);
+    await act(async () => { root.render(<IdentityPacks />); await flush(); });
+    expect(host.textContent).toContain('15 of 15 reference photographs');
+    expect(host.textContent).toContain('15 / 15 refs');
+  });
+
+  it('rejects a multi-file upload that exceeds the remaining capacity before calling the API', async () => {
+    const packWithTwelve = { ...alpha, photo_ids: Array.from({ length: 12 }, (_, index) => 'photo-' + index), primary_photo_id: 'photo-0' };
+    apiGet.mockResolvedValue([packWithTwelve]);
+    await act(async () => { root.render(<IdentityPacks />); await flush(); });
+    const input = host.querySelector('[data-testid="upload-input"]');
+    const files = Array.from({ length: 4 }, (_, index) => new File(['image-' + index], 'face-' + index + '.png', { type: 'image/png' }));
+    Object.defineProperty(input, 'files', { configurable: true, value: files });
+    await act(async () => { input.dispatchEvent(new Event('change', { bubbles: true })); await flush(); });
+    expect(uploadFormData).not.toHaveBeenCalled();
+    expect(toast.error).toHaveBeenCalledWith('Only 3 more reference photos can be added to this Identity Pack.');
+  });
+
 });
