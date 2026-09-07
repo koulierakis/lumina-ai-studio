@@ -64,7 +64,58 @@ class WorkspaceNotification(BaseModel):
     message: str = ""
     resource_type: Optional[str] = None
     resource_id: Optional[str] = None
+    source_module: str = "workspace"
+    dedupe_key: Optional[str] = None
     read: bool = False
+    created_at: str = Field(default_factory=now_iso)
+
+
+# ---------- Driver Assistance ----------
+class DriverPreferences(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    owner_email: str
+    voice: bool = True
+    speed: bool = True
+    camera: bool = True
+    weather: bool = True
+    auto_reroute: bool = True
+    strict_hands_free: bool = False
+    preferred_route_mode: str = "drive"
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class DriverSavedPlace(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    label: str
+    name: str
+    address: str = ""
+    latitude: float
+    longitude: float
+    category: str = "custom"
+    created_at: str = Field(default_factory=now_iso)
+    updated_at: str = Field(default_factory=now_iso)
+
+
+class DriverTrip(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=new_id)
+    owner_email: str
+    client_id: str
+    origin_label: str = ""
+    destination_label: str = ""
+    origin_latitude: Optional[float] = None
+    origin_longitude: Optional[float] = None
+    destination_latitude: Optional[float] = None
+    destination_longitude: Optional[float] = None
+    route_mode: str = "drive"
+    started_at: str
+    completed_at: str
+    duration_seconds: float = 0
+    distance_meters: float = 0
+    average_speed_kmh: Optional[float] = None
+    source_module: str = "driver-assistance"
     created_at: str = Field(default_factory=now_iso)
 
 
