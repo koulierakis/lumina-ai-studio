@@ -11,6 +11,9 @@ export default function IdentityPacks() {
   const [selected, setSelected] = useState(null);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [selectedPackIds, setSelectedPackIds] = useState(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkResult, setBulkResult] = useState('');
   const fileRef = useRef(null);
 
   const load = async (preferredId = null) => {
@@ -19,6 +22,7 @@ export default function IdentityPacks() {
     try {
       const data = await apiGet('/identity-packs');
       setPacks(data);
+      setSelectedPackIds((current) => new Set([...current].filter((id) => data.some((pack) => pack.id === id))));
       const rememberedId = preferredId || selected?.id || localStorage.getItem('lumina_active_pack');
       const nextSelected = data.find((pack) => pack.id === rememberedId) || data[0] || null;
       setSelected(nextSelected);
@@ -84,11 +88,65 @@ export default function IdentityPacks() {
     if (!window.confirm('Permanently delete this Identity Pack and its photos?')) return;
     try {
       await apiDelete(`/identity-packs/${id}`);
+      setSelectedPackIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
       toast.success('Pack deleted');
       await load();
     } catch (err) {
       toast.error(err?.message || 'Failed to delete Identity Pack');
     }
+  };
+
+  const removeSelectedPacks = async () => {
+    const ids = [...selectedPackIds];
+    if (!ids.length || bulkDeleting) return;
+    const label = ids.length === 1 ? 'Identity Pack' : 'Identity Packs';
+    if (!window.confirm(`Permanently delete ${ids.length} selected ${label} and their photos?`)) return;
+
+    setBulkDeleting(true);
+    setBulkResult('');
+    const results = await Promise.allSettled(ids.map((id) => apiDelete(`/identity-packs/${id}`)));
+    const deletedIds = ids.filter((_, index) => results[index].status === 'fulfilled');
+    const failedIds = ids.filter((_, index) => results[index].status === 'rejected');
+
+    setSelectedPackIds(new Set(failedIds));
+    if (deletedIds.length) {
+      await load(deletedIds.includes(selected?.id) ? null : selected?.id);
+    }
+
+    if (failedIds.length) {
+      const message = deletedIds.length
+        ? `Deleted ${deletedIds.length} Identity Pack${deletedIds.length === 1 ? '' : 's'}, but ${failedIds.length} could not be deleted.`
+        : `None of the ${failedIds.length} selected Identity Pack${failedIds.length === 1 ? '' : 's'} could be deleted.`;
+      setBulkResult(message);
+      toast.error(message);
+    } else {
+      const message = `Deleted ${deletedIds.length} Identity Pack${deletedIds.length === 1 ? '' : 's'}.`;
+      setBulkResult(message);
+      toast.success(message);
+    }
+    setBulkDeleting(false);
+  };
+
+  const togglePackSelection = (id) => {
+    setSelectedPackIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allPacksSelected = packs.length > 0 && packs.every((pack) => selectedPackIds.has(pack.id));
+
+  const toggleSelectAll = () => {
+    setSelectedPackIds((current) => {
+      if (allPacksSelected) return new Set();
+      return new Set(packs.map((pack) => pack.id));
+    });
   };
 
   const selectPack = (p) => {
@@ -134,6 +192,34 @@ export default function IdentityPacks() {
         )}
 
         <div className="px-2 pb-6 space-y-1">
+          <div className="px-2 pb-3" data-testid="bulk-pack-controls">
+            <div className="flex items-center justify-between gap-2 rounded-md border border-white/[0.06] bg-white/[0.02] px-3 py-2">
+              <label className="flex items-center gap-2 text-xs text-white/60 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allPacksSelected}
+                  onChange={toggleSelectAll}
+                  disabled={!packs.length || bulkDeleting}
+                  data-testid="select-all-packs"
+                  aria-label="Select all Identity Packs"
+                />
+                Select All
+              </label>
+              {selectedPackIds.size > 0 && <span className="text-xs text-white/45">{selectedPackIds.size} selected</span>}
+            </div>
+            {selectedPackIds.size > 0 && (
+              <button
+                type="button"
+                onClick={removeSelectedPacks}
+                disabled={bulkDeleting}
+                data-testid="delete-selected-packs"
+                className="mt-2 w-full rounded bg-red-500/15 px-3 py-2 text-xs text-red-200 hover:bg-red-500/25 disabled:opacity-50"
+              >
+                {bulkDeleting ? 'Deleting…' : 'Delete Selected'}
+              </button>
+            )}
+            {bulkResult && <p role="alert" data-testid="bulk-delete-result" className="mt-2 text-xs text-amber-200">{bulkResult}</p>}
+          </div>
           {loading && <div className="px-4 text-sm text-white/40">Loading…</div>}
           {!loading && loadError && (
             <div className="mx-2 rounded border border-red-400/20 bg-red-400/5 px-3 py-3" role="alert">
@@ -148,16 +234,24 @@ export default function IdentityPacks() {
             </div>
           )}
           {packs.map((p) => (
-            <button
+            <div
               key={p.id}
-              onClick={() => selectPack(p)}
               data-testid={`pack-item-${p.id}`}
-              className={`w-full text-left px-4 py-3 rounded-md flex items-center gap-3 group transition-colors border-l-2 ${
+              className={`w-full px-2 py-2 rounded-md flex items-center gap-2 group transition-colors border-l-2 ${
                 selected?.id === p.id
                   ? 'bg-white/[0.04] border-gold text-white'
                   : 'border-transparent text-white/60 hover:text-white hover:bg-white/[0.02]'
               }`}
             >
+              <input
+                type="checkbox"
+                checked={selectedPackIds.has(p.id)}
+                onChange={() => togglePackSelection(p.id)}
+                disabled={bulkDeleting}
+                data-testid={`select-pack-${p.id}`}
+                aria-label={`Select ${p.name}`}
+              />
+              <button type="button" onClick={() => selectPack(p)} className="min-w-0 flex-1 text-left flex items-center gap-3">
               <div className="w-10 h-10 rounded overflow-hidden bg-white/5 shrink-0">
                 {p.primary_photo_id ? (
                   <AuthImage mediaId={p.primary_photo_id} className="w-full h-full object-cover" alt="" />
@@ -167,7 +261,8 @@ export default function IdentityPacks() {
                 <div className="text-sm truncate">{p.name}</div>
                 <div className="text-[11px] text-white/40">{p.photo_ids.length} / 5 refs</div>
               </div>
-            </button>
+              </button>
+            </div>
           ))}
         </div>
       </div>

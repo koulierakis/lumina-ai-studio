@@ -89,4 +89,74 @@ describe('Identity Packs recovery', () => {
     expect(host.querySelector('[role="alert"]')?.textContent).toContain('Identity service unavailable.');
     expect([...host.querySelectorAll('button')].some((button) => button.textContent === 'Retry')).toBe(true);
   });
+
+  it('selects, deselects, and selects all packs without changing the active pack', async () => {
+    apiGet.mockResolvedValue([alpha, beta]);
+    await act(async () => { root.render(<IdentityPacks />); await flush(); });
+
+    const alphaCheckbox = host.querySelector('[data-testid="select-pack-alpha"]');
+    const betaCheckbox = host.querySelector('[data-testid="select-pack-beta"]');
+    await act(async () => { alphaCheckbox.click(); await flush(); });
+    expect(alphaCheckbox.checked).toBe(true);
+    expect(host.textContent).toContain('1 selected');
+
+    await act(async () => { betaCheckbox.click(); await flush(); });
+    expect(host.textContent).toContain('2 selected');
+    await act(async () => { alphaCheckbox.click(); await flush(); });
+    expect(host.textContent).toContain('1 selected');
+    expect(betaCheckbox.checked).toBe(true);
+
+    await act(async () => { host.querySelector('[data-testid="select-all-packs"]').click(); await flush(); });
+    expect(host.querySelector('[data-testid="select-pack-alpha"]').checked).toBe(true);
+    expect(host.querySelector('[data-testid="select-pack-beta"]').checked).toBe(true);
+    expect(host.textContent).toContain('2 selected');
+    await act(async () => { host.querySelector('[data-testid="select-all-packs"]').click(); await flush(); });
+    expect(host.querySelector('[data-testid="select-pack-alpha"]').checked).toBe(false);
+    expect(host.querySelector('[data-testid="select-pack-beta"]').checked).toBe(false);
+  });
+
+  it('requires confirmation and never deletes a non-selected pack', async () => {
+    apiGet.mockResolvedValue([alpha, beta]);
+    apiDelete.mockResolvedValue({});
+    window.confirm.mockReturnValueOnce(false).mockReturnValueOnce(true);
+    await act(async () => { root.render(<IdentityPacks />); await flush(); });
+    await act(async () => { host.querySelector('[data-testid="select-pack-alpha"]').click(); await flush(); });
+
+    await act(async () => { host.querySelector('[data-testid="delete-selected-packs"]').click(); await flush(); });
+    expect(apiDelete).not.toHaveBeenCalled();
+
+    await act(async () => { host.querySelector('[data-testid="delete-selected-packs"]').click(); await flush(); });
+    expect(window.confirm).toHaveBeenLastCalledWith('Permanently delete 1 selected Identity Pack and their photos?');
+    expect(apiDelete).toHaveBeenCalledTimes(1);
+    expect(apiDelete).toHaveBeenCalledWith('/identity-packs/alpha');
+    expect(apiDelete).not.toHaveBeenCalledWith('/identity-packs/beta');
+  });
+
+  it('deletes all explicitly selected packs and refreshes the list', async () => {
+    apiGet.mockResolvedValueOnce([alpha, beta]).mockResolvedValueOnce([]);
+    apiDelete.mockResolvedValue({});
+    await act(async () => { root.render(<IdentityPacks />); await flush(); });
+    await act(async () => { host.querySelector('[data-testid="select-all-packs"]').click(); await flush(); });
+    await act(async () => { host.querySelector('[data-testid="delete-selected-packs"]').click(); await flush(); });
+
+    expect(window.confirm).toHaveBeenCalledWith('Permanently delete 2 selected Identity Packs and their photos?');
+    expect(apiDelete).toHaveBeenCalledWith('/identity-packs/alpha');
+    expect(apiDelete).toHaveBeenCalledWith('/identity-packs/beta');
+    expect(host.querySelector('[data-testid="pack-item-alpha"]')).toBeNull();
+    expect(host.querySelector('[data-testid="pack-item-beta"]')).toBeNull();
+    expect(host.textContent).toContain('Deleted 2 Identity Packs.');
+  });
+
+  it('preserves failed packs and reports partial deletion failures', async () => {
+    apiGet.mockResolvedValueOnce([alpha, beta]).mockResolvedValueOnce([beta]);
+    apiDelete.mockImplementation((path) => path.endsWith('/alpha') ? Promise.resolve({}) : Promise.reject(new Error('Delete failed')));
+    await act(async () => { root.render(<IdentityPacks />); await flush(); });
+    await act(async () => { host.querySelector('[data-testid="select-all-packs"]').click(); await flush(); });
+    await act(async () => { host.querySelector('[data-testid="delete-selected-packs"]').click(); await flush(); });
+
+    expect(host.querySelector('[data-testid="pack-item-alpha"]')).toBeNull();
+    expect(host.querySelector('[data-testid="pack-item-beta"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="select-pack-beta"]').checked).toBe(true);
+    expect(host.querySelector('[data-testid="bulk-delete-result"]')?.textContent).toContain('1 could not be deleted');
+  });
 });
