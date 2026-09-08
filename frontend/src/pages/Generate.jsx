@@ -60,8 +60,11 @@ export default function Generate() {
 
   useEffect(() => {
     apiGet('/providers').then((data) => {
-      setProviders(data.providers || []);
-      setProvider(data.active || '');
+      const providerList = data.providers || [];
+      setProviders(providerList);
+      const flux = providerList.find((item) => item.name === 'flux' && item.configured && item.healthy !== false);
+      const active = providerList.find((item) => item.name === data.active && item.configured && item.healthy !== false);
+      setProvider(flux?.name || active?.name || '');
     }).catch(() => {});
     apiGet('/identity-packs').then((data) => {
       setPacks(data);
