@@ -1,22 +1,27 @@
-"""Hugging Face / fal adapter for LUMINA Video Studio.
+"""Hugging Face adapter for LUMINA Video Studio.
 
-Text-to-video can use Hugging Face Inference Providers. Image-to-video is
-routed directly to fal.ai because Hugging Face Inference Providers currently
-expose Wan2.2-TI2V-5B as text-to-video only.
+Text-to-video uses Hugging Face Inference Providers. Image-to-video uses a
+public Hugging Face Gradio Space so it does not require fal.ai credits.
 """
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import os
+import tempfile
+from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
+from gradio_client import Client, handle_file
 from huggingface_hub import InferenceClient
 
 from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderCapabilities, VideoProviderError
 
 logger = logging.getLogger("lumina.video.huggingface")
+
+DEFAULT_I2V_SPACE = "zerogpu-aoti/wan2-2-fp8da-aoti-faster"
+DEFAULT_I2V_API_NAME = "/generate_video"
 
 
 class HuggingFaceVideoProvider(VideoProvider):
@@ -40,11 +45,9 @@ class HuggingFaceVideoProvider(VideoProvider):
 
     @classmethod
     def is_configured(cls) -> bool:
-        return bool(
-            os.environ.get("HF_TOKEN")
-            or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
-            or os.environ.get("FAL_KEY")
-        )
+        # Public Gradio I2V works without a token. HF_TOKEN remains optional and
+        # is only required for text-to-video or authenticated Space quota.
+        return True
 
     def _hf_client(self) -> InferenceClient:
         token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
@@ -58,108 +61,135 @@ class HuggingFaceVideoProvider(VideoProvider):
         provider = os.environ.get("HF_VIDEO_PROVIDER", "fal-ai")
         return InferenceClient(provider=provider, api_key=token, timeout=timeout)
 
-    async def _generate_image_to_video_via_fal(self, spec: VideoGenerationInput) -> GeneratedVideo:
-        fal_key = os.environ.get("FAL_KEY", "").strip()
-        if not fal_key:
+    @staticmethod
+    def _suffix_for_mime(mime: str) -> str:
+        mime = (mime or "").lower()
+        if "png" in mime:
+            return ".png"
+        if "webp" in mime:
+            return ".webp"
+        return ".jpg"
+
+    async def _read_gradio_video(self, value, timeout: float) -> bytes:
+        if isinstance(value, (tuple, list)) and value:
+            value = value[0]
+        if isinstance(value, dict):
+            value = value.get("path") or value.get("url") or value.get("video")
+
+        if not isinstance(value, str) or not value:
             raise VideoProviderError(
                 self.name,
-                "FAL_KEY is missing for image-to-video",
-                "Image-to-video requires a fal.ai API key on the server.",
+                f"Gradio Space returned an invalid video result: {value!r}",
+                "The free Hugging Face Space returned an invalid result.",
             )
+
+        parsed = urlparse(value)
+        if parsed.scheme in {"http", "https"}:
+            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False) as client:
+                response = await client.get(value)
+                response.raise_for_status()
+                return response.content
+
+        path = Path(value)
+        if not path.exists():
+            raise VideoProviderError(
+                self.name,
+                f"Gradio result file does not exist: {value}",
+                "The free Hugging Face Space returned a missing video file.",
+            )
+        return await asyncio.to_thread(path.read_bytes)
+
+    async def _generate_image_to_video_via_gradio(self, spec: VideoGenerationInput) -> GeneratedVideo:
         if not spec.source_images:
             raise VideoProviderError(self.name, "Source image missing", "Please upload a source image.")
 
+        space = os.environ.get("HF_GRADIO_I2V_SPACE", DEFAULT_I2V_SPACE).strip()
+        api_name = os.environ.get("HF_GRADIO_I2V_API_NAME", DEFAULT_I2V_API_NAME).strip()
+        token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+        timeout = float(os.environ.get("HF_VIDEO_TIMEOUT_SECONDS", "900"))
+
+        # The current ZeroGPU Space accepts up to 5 seconds. Clamp older UI
+        # presets rather than failing a request that asked for 8 seconds.
+        duration = max(0.5, min(float(spec.duration_seconds), 5.0))
+        seed = int(spec.seed if spec.seed is not None else 42)
+        negative_prompt = spec.negative_prompt or ""
+        steps = int(os.environ.get("HF_GRADIO_I2V_STEPS", "6"))
+        guidance = float(os.environ.get("HF_GRADIO_I2V_GUIDANCE", "1"))
+
+        suffix = self._suffix_for_mime(spec.source_mimes[0] if spec.source_mimes else "image/jpeg")
+        temp_path = None
         try:
-            import fal_client
-        except ImportError as exc:
-            raise VideoProviderError(
-                self.name,
-                "fal-client dependency is missing",
-                "The image-to-video engine is not installed correctly.",
-            ) from exc
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as image_file:
+                image_file.write(spec.source_images[0])
+                temp_path = image_file.name
 
-        mime = spec.source_mimes[0] if spec.source_mimes else "image/jpeg"
-        encoded = base64.b64encode(spec.source_images[0]).decode("ascii")
-        image_url = f"data:{mime};base64,{encoded}"
-        endpoint = os.environ.get("FAL_VIDEO_I2V_ENDPOINT", "fal-ai/wan/v2.2-5b/image-to-video")
+            logger.info(
+                "Starting Hugging Face Gradio image-to-video space=%s api_name=%s duration=%ss steps=%s source_bytes=%s",
+                space,
+                api_name,
+                duration,
+                steps,
+                len(spec.source_images[0]),
+            )
 
-        fps = spec.fps if spec.fps in {12, 16, 24, 30, 60} else 24
-        num_frames = max(17, min(161, int(spec.duration_seconds * fps) + 1))
-        arguments = {
-            "image_url": image_url,
-            "prompt": spec.prompt,
-            "negative_prompt": spec.negative_prompt or "",
-            "num_frames": num_frames,
-            "frames_per_second": fps,
-            "image_size": "landscape_16_9" if spec.aspect_ratio == "16:9" else "portrait_16_9",
-        }
-        if spec.seed is not None:
-            arguments["seed"] = spec.seed
+            def run_prediction():
+                client_kwargs = {"download_files": True, "verbose": False}
+                if token:
+                    client_kwargs["hf_token"] = token
+                client = Client(space, **client_kwargs)
+                return client.predict(
+                    handle_file(temp_path),
+                    spec.prompt,
+                    steps,
+                    negative_prompt,
+                    duration,
+                    guidance,
+                    guidance,
+                    seed,
+                    False,
+                    api_name=api_name,
+                )
 
-        logger.info(
-            "Starting direct fal image-to-video endpoint=%s duration=%ss fps=%s frames=%s aspect_ratio=%s source_bytes=%s",
-            endpoint,
-            spec.duration_seconds,
-            fps,
-            num_frames,
-            spec.aspect_ratio,
-            len(spec.source_images[0]),
-        )
+            result = await asyncio.wait_for(asyncio.to_thread(run_prediction), timeout=timeout)
+            video_bytes = await self._read_gradio_video(result, timeout)
+            if not video_bytes:
+                raise VideoProviderError(
+                    self.name,
+                    "Gradio Space returned an empty video",
+                    "The free Hugging Face Space returned an empty result.",
+                )
 
-        previous_fal_key = os.environ.get("FAL_KEY")
-        os.environ["FAL_KEY"] = fal_key
-        try:
-            result = await asyncio.to_thread(
-                fal_client.subscribe,
-                endpoint,
-                arguments=arguments,
-                with_logs=True,
+            logger.info(
+                "Hugging Face Gradio image-to-video completed space=%s output_bytes=%s",
+                space,
+                len(video_bytes),
+            )
+            return GeneratedVideo(
+                data=video_bytes,
+                mime_type="video/mp4",
+                preview_kind="video",
+                duration_seconds=duration,
+                resolution=spec.resolution,
+                metadata={
+                    "provider": "huggingface-gradio-space",
+                    "space": space,
+                    "api_name": api_name,
+                    "mode": spec.mode,
+                },
             )
         finally:
-            if previous_fal_key is None:
-                os.environ.pop("FAL_KEY", None)
-            else:
-                os.environ["FAL_KEY"] = previous_fal_key
-
-        video_url = ((result or {}).get("video") or {}).get("url")
-        if not video_url:
-            raise VideoProviderError(
-                self.name,
-                f"fal.ai returned no video URL: {result!r}",
-                "The video provider returned an invalid result.",
-            )
-
-        timeout = float(os.environ.get("HF_VIDEO_TIMEOUT_SECONDS", "600"))
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False) as client:
-            response = await client.get(video_url)
-            response.raise_for_status()
-            video_bytes = response.content
-        if not video_bytes:
-            raise VideoProviderError(
-                self.name,
-                "fal.ai returned an empty video",
-                "The video engine returned an empty result.",
-            )
-
-        logger.info("Direct fal image-to-video completed endpoint=%s output_bytes=%s", endpoint, len(video_bytes))
-        return GeneratedVideo(
-            data=video_bytes,
-            mime_type="video/mp4",
-            preview_kind="video",
-            duration_seconds=spec.duration_seconds,
-            resolution=spec.resolution,
-            metadata={"provider": "fal-ai-direct", "endpoint": endpoint, "mode": spec.mode},
-        )
+            if temp_path:
+                try:
+                    Path(temp_path).unlink(missing_ok=True)
+                except Exception:
+                    logger.warning("Could not remove temporary I2V source image: %s", temp_path)
 
     async def generate(self, spec: VideoGenerationInput) -> GeneratedVideo:
-        if not self.is_configured():
-            raise VideoProviderError(self.name, "Video credentials are missing", "Video generation is not configured.")
-
         model = "unknown"
         provider_name = "unknown"
         try:
             if spec.mode == "image-to-video":
-                return await self._generate_image_to_video_via_fal(spec)
+                return await self._generate_image_to_video_via_gradio(spec)
 
             if spec.mode == "text-to-video":
                 client = self._hf_client()
@@ -193,9 +223,18 @@ class HuggingFaceVideoProvider(VideoProvider):
             else:
                 video_bytes = bytes(result)
             if not video_bytes:
-                raise VideoProviderError(self.name, "Hugging Face returned an empty video", "The video engine returned an empty result.")
+                raise VideoProviderError(
+                    self.name,
+                    "Hugging Face returned an empty video",
+                    "The video engine returned an empty result.",
+                )
 
-            logger.info("Hugging Face video completed provider=%s model=%s output_bytes=%s", provider_name, model, len(video_bytes))
+            logger.info(
+                "Hugging Face video completed provider=%s model=%s output_bytes=%s",
+                provider_name,
+                model,
+                len(video_bytes),
+            )
             return GeneratedVideo(
                 data=video_bytes,
                 mime_type="video/mp4",
@@ -220,5 +259,24 @@ class HuggingFaceVideoProvider(VideoProvider):
                 response_text[:1000],
                 message,
             )
-            retryable = any(marker in message.lower() for marker in ("timeout", "timed out", "429", "503", "temporarily unavailable", "rate limit", "loading"))
-            raise VideoProviderError(self.name, message, "Video generation failed. Please try again.", retryable=retryable) from exc
+            retryable = any(
+                marker in message.lower()
+                for marker in (
+                    "timeout",
+                    "timed out",
+                    "429",
+                    "503",
+                    "temporarily unavailable",
+                    "rate limit",
+                    "loading",
+                    "queue",
+                    "quota",
+                    "zero gpu",
+                )
+            )
+            raise VideoProviderError(
+                self.name,
+                message,
+                "Video generation failed. Please try again.",
+                retryable=retryable,
+            ) from exc
