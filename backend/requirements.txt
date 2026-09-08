@@ -30,4 +30,4 @@ jq>=1.6.0
 typer>=0.9.0
 reportlab>=4.0.0,<6.0.0
 pypdf>=5.0.0,<7.0.0
-
+huggingface_hub>=0.35.0,<2.0.0
