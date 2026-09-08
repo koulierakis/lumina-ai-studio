@@ -428,6 +428,15 @@ class PostgresPersistenceProvider(PersistenceProvider):
         self.dsn = dsn
         self.ready = False
 
+    def _matches(self, item: dict[str, Any], query: dict[str, Any]) -> bool:
+        return SQLitePersistenceProvider._matches(self, item, query)
+
+    def _apply_set(self, document: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+        return SQLitePersistenceProvider._apply_set(self, document, values)
+
+    def _apply_update(self, document: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:
+        return SQLitePersistenceProvider._apply_update(self, document, update)
+
     def _connect(self):
         try:
             import psycopg
