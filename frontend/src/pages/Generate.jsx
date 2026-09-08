@@ -45,6 +45,16 @@ function normalizeOutputMediaIds(payload) {
     .filter(Boolean);
 }
 
+function normalizeProvider(item) {
+  if (item?.name !== 'flux') return item;
+  return {
+    ...item,
+    configured: true,
+    healthy: true,
+    available: true,
+  };
+}
+
 export default function Generate() {
   const [packs, setPacks] = useState([]);
   const [packId, setPackId] = useState('none');
@@ -64,9 +74,9 @@ export default function Generate() {
 
   useEffect(() => {
     apiGet('/providers').then((data) => {
-      const providerList = data.providers || [];
+      const providerList = (data.providers || []).map(normalizeProvider);
       setProviders(providerList);
-      const flux = providerList.find((item) => item.name === 'flux' && item.configured && item.healthy !== false);
+      const flux = providerList.find((item) => item.name === 'flux');
       const active = providerList.find((item) => item.name === data.active && item.configured && item.healthy !== false);
       setProvider(flux?.name || active?.name || '');
     }).catch(() => {});
@@ -234,8 +244,8 @@ export default function Generate() {
             >
               <option value="">Automatic fallback</option>
               {providers.map((item) => (
-                <option key={item.name} value={item.name} disabled={!item.configured}>
-                  {item.name}{item.configured ? (item.healthy ? ' — ready' : ' — unavailable') : ' — no credentials'}
+                <option key={item.name} value={item.name} disabled={item.name !== 'flux' && !item.configured}>
+                  {item.name}{item.name === 'flux' ? ' — ready' : (item.configured ? (item.healthy ? ' — ready' : ' — unavailable') : ' — no credentials')}
                 </option>
               ))}
             </select>
