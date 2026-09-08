@@ -143,7 +143,6 @@ class FluxHFProvider(ImageProvider):
         api_name = os.getenv("HF_GRADIO_FLUX_API_NAME", DEFAULT_FLUX_API_NAME).strip() or DEFAULT_FLUX_API_NAME
         token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
         timeout = float(os.getenv("HF_IMAGE_TIMEOUT_SECONDS", "300"))
-        steps = max(1, min(int(os.getenv("HF_FLUX_STEPS", "4")), 8))
         width, height = self._dimensions(spec.aspect_ratio, spec.resolution)
         count = max(1, min(int(spec.count or 1), self.capabilities.maximum_outputs))
 
@@ -157,12 +156,12 @@ class FluxHFProvider(ImageProvider):
         for _index in range(count):
             def run_prediction():
                 return client.predict(
-                    prompt=prediction_prompt,
-                    seed=0,
-                    randomize_seed=True,
-                    width=width,
-                    height=height,
-                    num_inference_steps=steps,
+                    prediction_prompt,
+                    0,
+                    True,
+                    width,
+                    height,
+                    4,
                     api_name=api_name,
                 )
 
