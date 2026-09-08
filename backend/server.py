@@ -2150,6 +2150,28 @@ async def _run_video_generation(job_id: str, owner: str) -> None:
         )
 
 
+async def _run_video_generation_guarded(job_id: str, owner: str) -> None:
+    """Catch failures that happen before _run_video_generation reaches its internal try/except."""
+    logger.info("Video background job starting job_id=%s owner=%s", job_id, owner)
+    try:
+        await _run_video_generation(job_id, owner)
+    except Exception as exc:
+        logger.exception("Video background job crashed before normal error handling job_id=%s: %s", job_id, exc)
+        try:
+            await video_generation_jobs_coll.update_one(
+                {"id": job_id, "owner_email": owner},
+                {"$set": {
+                    "status": "failed",
+                    "error": getattr(exc, "safe_message", None) or "Video generation could not be started.",
+                    "progress": 0,
+                    "estimated_seconds_remaining": None,
+                    "updated_at": now_iso(),
+                }},
+            )
+        except Exception:
+            logger.exception("Could not persist guarded video failure job_id=%s", job_id)
+
+
 @api.get("/video/providers")
 async def list_video_providers(_: str = Depends(require_owner)) -> dict:
     return {"active": os.environ.get("VIDEO_PROVIDER", "mock"), "available": available_video_providers(), "providers": video_provider_catalog()}
@@ -2222,7 +2244,7 @@ async def create_video_generation(
         title=(prompt.strip()[:80] or "Untitled video"),
     )
     await video_generation_jobs_coll.insert_one(job.model_dump())
-    background.add_task(_run_video_generation, job.id, owner)
+    background.add_task(_run_video_generation_guarded, job.id, owner)
     return job
 
 
@@ -2321,7 +2343,7 @@ async def retry_video_generation_job(job_id: str, background: BackgroundTasks, o
     payload = {k: v for k, v in doc.items() if k not in {"id", "_id", "owner_email", "output_media_id", "output_mime_type", "preview_kind", "error", "created_at", "updated_at", "cancelled_at", "progress", "estimated_seconds_remaining", "retry_of", "status"}}
     retry = VideoGenerationJob(**payload, owner_email=owner, retry_of=job_id, status="queued", progress=0)
     await video_generation_jobs_coll.insert_one(retry.model_dump())
-    background.add_task(_run_video_generation, retry.id, owner)
+    background.add_task(_run_video_generation_guarded, retry.id, owner)
     return retry
 
 
