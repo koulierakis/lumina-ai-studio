@@ -48,8 +48,8 @@ export default function Generate() {
   const [packId, setPackId] = useState(localStorage.getItem('lumina_active_pack') || '');
   const [prompt, setPrompt] = useState('Cinematic photograph of the person walking through the location, natural mid-morning light');
   const [negative, setNegative] = useState('cartoon, illustration, deformed, extra fingers, plastic skin');
-  const [scene, setScene] = useState('Chania Old Town');
-  const [outfit, setOutfit] = useState('White Linen Shirt');
+  const [scene, setScene] = useState('');
+  const [outfit, setOutfit] = useState('');
   const [aspect, setAspect] = useState('4:5');
   const [count, setCount] = useState(2);
   const [job, setJob] = useState(null);
@@ -77,7 +77,6 @@ export default function Generate() {
     if (packId) localStorage.setItem('lumina_active_pack', packId);
   }, [packId]);
 
-  // Poll job status
   useEffect(() => {
     if (!job || job.status === 'completed' || job.status === 'failed') return;
     const t = setInterval(async () => {
@@ -121,8 +120,8 @@ export default function Generate() {
         identity_pack_id: packId,
         prompt,
         negative_prompt: negative,
-        scene,
-        outfit,
+        scene: scene || undefined,
+        outfit: outfit || undefined,
         aspect_ratio: aspect,
         count,
         provider: provider || undefined,
@@ -143,7 +142,6 @@ export default function Generate() {
 
   return (
     <div className="h-full w-full flex">
-      {/* Center canvas */}
       <div className="flex-1 h-full overflow-y-auto p-10">
         <div className="flex items-baseline justify-between mb-8">
           <div>
@@ -209,7 +207,6 @@ export default function Generate() {
         )}
       </div>
 
-      {/* Right control panel */}
       <div className="w-96 shrink-0 border-l border-white/[0.06] h-full overflow-y-auto bg-ink-950">
         <div className="p-6 space-y-6">
           <div>
@@ -252,7 +249,7 @@ export default function Generate() {
               data-testid="prompt-input"
               rows={4}
               className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none resize-none"
-              placeholder="Describe the photograph…"
+              placeholder="Describe the complete scene, clothing and style…"
             />
           </div>
 
@@ -268,8 +265,15 @@ export default function Generate() {
           </div>
 
           <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Scene</label>
+            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Scene <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
             <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setScene('')}
+                data-testid="scene-prompt-only"
+                className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
+                  scene === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                }`}
+              >Prompt only</button>
               {SCENES.map((s) => (
                 <button
                   key={s}
@@ -288,8 +292,15 @@ export default function Generate() {
           </div>
 
           <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Outfit</label>
+            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Outfit <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
             <div className="flex flex-wrap gap-1.5">
+              <button
+                onClick={() => setOutfit('')}
+                data-testid="outfit-prompt-only"
+                className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
+                  outfit === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                }`}
+              >Prompt only</button>
               {OUTFITS.map((o) => (
                 <button
                   key={o}
