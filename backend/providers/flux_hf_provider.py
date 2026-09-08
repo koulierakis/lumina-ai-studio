@@ -1,13 +1,10 @@
-"""Free Hugging Face Gradio provider for FLUX.1 [schnell]."""
+"""Replicate-backed FLUX.1 [schnell] image provider."""
 from __future__ import annotations
 
 import asyncio
 import os
-from pathlib import Path
-from urllib.parse import urlparse
 
-import httpx
-from gradio_client import Client
+import replicate
 
 from .base import (
     ErrorKind,
@@ -20,14 +17,11 @@ from .base import (
 )
 
 
-# Public ZeroGPU mirror. Keep HF_GRADIO_FLUX_SPACE as an environment override
-# so the backend can be moved to another compatible mirror without a code change.
-DEFAULT_FLUX_SPACE = "rmarcosmw/FLUX.1-schnell"
-DEFAULT_FLUX_API_NAME = "/predict"
+REPLICATE_FLUX_MODEL = "black-forest-labs/flux-schnell"
 
 
 class FluxHFProvider(ImageProvider):
-    """Text-to-image generation through a public FLUX.1 schnell HF Space."""
+    """FLUX.1 schnell text-to-image generation through Replicate's official API."""
 
     name = "flux"
     priority = 5
@@ -38,78 +32,30 @@ class FluxHFProvider(ImageProvider):
         masks=False,
         multiple_outputs=True,
         aspect_ratios=("1:1", "16:9", "9:16", "4:5", "3:2"),
-        models=("black-forest-labs/FLUX.1-schnell",),
+        models=(REPLICATE_FLUX_MODEL,),
         maximum_reference_images=0,
         maximum_outputs=4,
     )
 
     @classmethod
     def is_configured(cls) -> bool:
-        # The public Hugging Face Space supports anonymous Gradio requests.
-        # A Hugging Face token is optional, never a configuration requirement.
-        return True
-
-    @staticmethod
-    def _dimensions(aspect_ratio: str, resolution: str) -> tuple[int, int]:
-        try:
-            base = int(str(resolution).lower().replace("px", "").strip())
-        except (TypeError, ValueError):
-            base = 1024
-        base = max(512, min(base, 1536))
-
-        ratios = {
-            "1:1": (1, 1),
-            "16:9": (16, 9),
-            "9:16": (9, 16),
-            "4:5": (4, 5),
-            "3:2": (3, 2),
-        }
-        rw, rh = ratios.get(aspect_ratio, (1, 1))
-        if rw >= rh:
-            width = base
-            height = round(base * rh / rw)
-        else:
-            height = base
-            width = round(base * rw / rh)
-
-        def snap(value: int) -> int:
-            return max(256, min(2048, int(round(value / 32) * 32)))
-
-        return snap(width), snap(height)
+        return bool(os.getenv("REPLICATE_API_TOKEN", "").strip())
 
     @staticmethod
     def _clean_text_to_image_prompt(prompt: str) -> str:
-        """Return only the user's prompt when no identity/reference image is used."""
         value = (prompt or "").strip()
         marker = "User prompt:"
         if marker in value:
             value = value.rsplit(marker, 1)[1].strip()
         return value
 
-    async def _read_image(self, value, timeout: float) -> bytes:
-        # The Space returns (image_path, seed); use the first output.
-        if isinstance(value, (tuple, list)) and value:
-            value = value[0]
-        if isinstance(value, dict):
-            value = value.get("path") or value.get("url") or value.get("image")
-
-        if not isinstance(value, str) or not value:
-            raise ProviderInvalidResponseError(
-                self.name,
-                f"FLUX Space returned an invalid image result: {value!r}",
-            )
-
-        parsed = urlparse(value)
-        if parsed.scheme in {"http", "https"}:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, trust_env=False) as client:
-                response = await client.get(value)
-                response.raise_for_status()
-                return response.content
-
-        path = Path(value)
-        if not path.exists():
-            raise ProviderInvalidResponseError(self.name, f"FLUX output file does not exist: {value}")
-        return await asyncio.to_thread(path.read_bytes)
+    @staticmethod
+    def _read_output_bytes(value) -> bytes:
+        if hasattr(value, "read"):
+            data = value.read()
+            if isinstance(data, bytes):
+                return data
+        raise ProviderInvalidResponseError("flux", "Replicate returned an invalid image output.")
 
     async def generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         if spec.mode not in {"text-to-image", "generate", ""}:
@@ -121,18 +67,28 @@ class FluxHFProvider(ImageProvider):
                 safe_message="FLUX.1 schnell supports text-to-image generation only.",
             )
 
-        reference_images = list(getattr(spec, "reference_images", None) or [])
-        if reference_images:
+        if list(getattr(spec, "reference_images", None) or []):
             raise ProviderError(
                 self.name,
-                "FLUX.1 schnell public Space does not accept reference images.",
+                "Replicate FLUX Schnell text-to-image does not accept reference images.",
                 kind=ErrorKind.UNSUPPORTED,
                 retryable=False,
                 safe_message="This FLUX provider does not support reference-image generation.",
             )
 
-        prediction_prompt = self._clean_text_to_image_prompt(spec.prompt)
-        if not prediction_prompt:
+        token = os.getenv("REPLICATE_API_TOKEN", "").strip()
+        if not token:
+            raise ProviderError(
+                self.name,
+                "REPLICATE_API_TOKEN is not configured.",
+                kind=ErrorKind.AUTHENTICATION,
+                retryable=False,
+                status_code=401,
+                safe_message="Replicate API credentials are not configured.",
+            )
+
+        prompt = self._clean_text_to_image_prompt(spec.prompt)
+        if not prompt:
             raise ProviderError(
                 self.name,
                 "Prompt is required for FLUX text-to-image generation.",
@@ -141,60 +97,61 @@ class FluxHFProvider(ImageProvider):
                 safe_message="Please enter a prompt before generating an image.",
             )
 
-        space = os.getenv("HF_GRADIO_FLUX_SPACE", DEFAULT_FLUX_SPACE).strip()
-        api_name = os.getenv("HF_GRADIO_FLUX_API_NAME", DEFAULT_FLUX_API_NAME).strip() or DEFAULT_FLUX_API_NAME
-        token = os.environ.get("HF_TOKEN")
-        timeout = float(os.getenv("HF_IMAGE_TIMEOUT_SECONDS", "300"))
-        width, height = self._dimensions(spec.aspect_ratio, spec.resolution)
         count = max(1, min(int(spec.count or 1), self.capabilities.maximum_outputs))
+        input_payload = {
+            "prompt": prompt,
+            "aspect_ratio": spec.aspect_ratio or "1:1",
+            "num_outputs": count,
+            "num_inference_steps": 4,
+            "output_format": "png",
+        }
+        if spec.seed is not None:
+            input_payload["seed"] = int(spec.seed)
 
-        if token:
-            # Authenticate the public Space request with the Render HF_TOKEN.
-            client = Client(space, hf_token=token)
-        else:
-            # Keep anonymous access as a fallback when HF_TOKEN is not configured.
-            client = Client(space)
-
-        images: list[GeneratedImage] = []
-
-        for _index in range(count):
-            def run_prediction():
-                return client.predict(
-                    prediction_prompt,
-                    0,
-                    True,
-                    width,
-                    height,
-                    4,
-                    api_name=api_name,
-                )
-
-            try:
-                result = await asyncio.wait_for(asyncio.to_thread(run_prediction), timeout=timeout)
-                image_bytes = await self._read_image(result, timeout)
-            except ProviderError:
-                raise
-            except asyncio.TimeoutError as exc:
-                raise ProviderError(
-                    self.name,
-                    "FLUX Hugging Face Space timed out.",
-                    kind=ErrorKind.TIMEOUT,
-                    retryable=True,
-                    safe_message="The free FLUX image service timed out. Please try again.",
-                ) from exc
-            except Exception as exc:
-                message = str(exc)
-                retryable = any(marker in message.lower() for marker in ("429", "503", "queue", "quota", "zero gpu", "timeout", "timed out"))
-                raise ProviderError(
-                    self.name,
-                    message,
-                    kind=ErrorKind.UNAVAILABLE,
-                    retryable=retryable,
-                    safe_message="The free FLUX image service is temporarily unavailable.",
-                ) from exc
-
-            if not image_bytes:
-                raise ProviderInvalidResponseError(self.name, "FLUX Space returned an empty image.")
-            images.append(GeneratedImage(data=image_bytes, mime_type="image/png"))
-
-        return images
+        try:
+            # Replicate reads REPLICATE_API_TOKEN from the environment.
+            output = await asyncio.to_thread(
+                replicate.run,
+                REPLICATE_FLUX_MODEL,
+                input=input_payload,
+            )
+            values = list(output or [])
+            if not values:
+                raise ProviderInvalidResponseError(self.name, "Replicate returned no FLUX images.")
+            images = [
+                GeneratedImage(data=await asyncio.to_thread(self._read_output_bytes, value), mime_type="image/png")
+                for value in values
+            ]
+            return images
+        except ProviderError:
+            raise
+        except Exception as exc:
+            message = str(exc)
+            lowered = message.lower()
+            if any(marker in lowered for marker in ("401", "unauthorized", "authentication", "api token")):
+                kind = ErrorKind.AUTHENTICATION
+                retryable = False
+                safe = "Replicate rejected the API credentials."
+            elif any(marker in lowered for marker in ("402", "payment", "billing", "credit", "quota")):
+                kind = ErrorKind.QUOTA
+                retryable = False
+                safe = "Replicate billing or quota is unavailable for this request."
+            elif any(marker in lowered for marker in ("429", "rate limit", "too many requests")):
+                kind = ErrorKind.RATE_LIMIT
+                retryable = True
+                safe = "Replicate is rate-limiting image generation. Please try again shortly."
+            elif any(marker in lowered for marker in ("timeout", "timed out")):
+                kind = ErrorKind.TIMEOUT
+                retryable = True
+                safe = "Replicate image generation timed out. Please try again."
+            else:
+                kind = ErrorKind.UNAVAILABLE
+                retryable = True
+                safe = "Replicate FLUX image generation is temporarily unavailable."
+            raise ProviderError(
+                self.name,
+                message,
+                kind=kind,
+                retryable=retryable,
+                safe_message=safe,
+            ) from exc
