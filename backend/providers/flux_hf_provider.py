@@ -75,6 +75,15 @@ class FluxHFProvider(ImageProvider):
 
         return snap(width), snap(height)
 
+    @staticmethod
+    def _clean_text_to_image_prompt(prompt: str) -> str:
+        """Return only the user's prompt when no identity/reference image is used."""
+        value = (prompt or "").strip()
+        marker = "User prompt:"
+        if marker in value:
+            value = value.rsplit(marker, 1)[1].strip()
+        return value
+
     async def _read_image(self, value, timeout: float) -> bytes:
         if isinstance(value, (tuple, list)) and value:
             value = value[0]
@@ -108,13 +117,25 @@ class FluxHFProvider(ImageProvider):
                 retryable=False,
                 safe_message="FLUX.1 schnell supports text-to-image generation only.",
             )
-        if spec.reference_images:
+
+        reference_images = list(getattr(spec, "reference_images", None) or [])
+        if reference_images:
             raise ProviderError(
                 self.name,
                 "FLUX.1 schnell public Space does not accept reference images.",
                 kind=ErrorKind.UNSUPPORTED,
                 retryable=False,
                 safe_message="This FLUX provider does not support reference-image generation.",
+            )
+
+        prediction_prompt = self._clean_text_to_image_prompt(spec.prompt)
+        if not prediction_prompt:
+            raise ProviderError(
+                self.name,
+                "Prompt is required for FLUX text-to-image generation.",
+                kind=ErrorKind.INVALID_REQUEST,
+                retryable=False,
+                safe_message="Please enter a prompt before generating an image.",
             )
 
         space = os.getenv("HF_GRADIO_FLUX_SPACE", DEFAULT_FLUX_SPACE).strip()
@@ -137,7 +158,7 @@ class FluxHFProvider(ImageProvider):
 
             def run_prediction():
                 return client.predict(
-                    spec.prompt,
+                    prediction_prompt,
                     seed,
                     False,
                     width,
