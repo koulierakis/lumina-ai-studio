@@ -1,0 +1,48 @@
+name: Patch Postgres persistence helpers
+
+on:
+  push:
+    branches:
+      - work/code-builder-v2-from-scratch
+    paths:
+      - .github/workflows/patch-postgres-persistence-helpers.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/code-builder-v2-from-scratch
+      - name: Patch Postgres helper compatibility
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('backend/persistence.py')
+          text = path.read_text()
+          needle = '''    def _connect(self):\n        try:\n'''
+          insert = '''    def _matches(self, item: dict[str, Any], query: dict[str, Any]) -> bool:\n        return SQLitePersistenceProvider._matches(self, item, query)\n\n    def _apply_set(self, document: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:\n        return SQLitePersistenceProvider._apply_set(self, document, values)\n\n    def _apply_update(self, document: dict[str, Any], update: dict[str, Any]) -> dict[str, Any]:\n        return SQLitePersistenceProvider._apply_update(self, document, update)\n\n    def _connect(self):\n        try:\n'''
+          if insert in text:
+              print('Patch already present')
+          elif needle not in text:
+              raise SystemExit('Expected Postgres _connect anchor not found')
+          else:
+              text = text.replace(needle, insert, 1)
+              path.write_text(text)
+          PY
+      - name: Validate syntax
+        run: python -m py_compile backend/persistence.py
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/persistence.py
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "fix(persistence): make Postgres updates use shared helpers"
+            git push origin HEAD:work/code-builder-v2-from-scratch
+          fi
