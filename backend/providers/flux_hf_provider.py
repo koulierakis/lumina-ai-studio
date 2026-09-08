@@ -143,15 +143,16 @@ class FluxHFProvider(ImageProvider):
 
         space = os.getenv("HF_GRADIO_FLUX_SPACE", DEFAULT_FLUX_SPACE).strip()
         api_name = os.getenv("HF_GRADIO_FLUX_API_NAME", DEFAULT_FLUX_API_NAME).strip() or DEFAULT_FLUX_API_NAME
-        token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
+        token = os.environ.get("HF_TOKEN")
         timeout = float(os.getenv("HF_IMAGE_TIMEOUT_SECONDS", "300"))
         width, height = self._dimensions(spec.aspect_ratio, spec.resolution)
         count = max(1, min(int(spec.count or 1), self.capabilities.maximum_outputs))
 
         if token:
-            client = Client(space, hf_token=token, download_files=True, verbose=False)
+            # Authenticate the public Space request with the Render HF_TOKEN.
+            client = Client(space, hf_token=token)
         else:
-            # Anonymous public-Space client: do not pass any token argument.
+            # Keep anonymous access as a fallback when HF_TOKEN is not configured.
             client = Client(space)
 
         images: list[GeneratedImage] = []
