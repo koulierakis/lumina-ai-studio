@@ -20,12 +20,14 @@ from .base import (
 )
 
 
-DEFAULT_FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
+# Public ZeroGPU mirror. Keep HF_GRADIO_FLUX_SPACE as an environment override
+# so the backend can be moved to another compatible mirror without a code change.
+DEFAULT_FLUX_SPACE = "rmarcosmw/FLUX.1-schnell"
 DEFAULT_FLUX_API_NAME = "/predict"
 
 
 class FluxHFProvider(ImageProvider):
-    """Text-to-image generation through the public FLUX.1 schnell HF Space."""
+    """Text-to-image generation through a public FLUX.1 schnell HF Space."""
 
     name = "flux"
     priority = 5
