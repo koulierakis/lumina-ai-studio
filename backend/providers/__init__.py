@@ -21,6 +21,7 @@ from .base import (
     ProviderUnsupportedCapabilityError,
 )
 from .comfyui_provider import ComfyUIProvider
+from .flux_hf_provider import FluxHFProvider
 from .gemini_provider import GeminiImageProvider
 from .manager import ProviderManager
 from .mock_provider import MockImageProvider
@@ -29,6 +30,7 @@ from .skeletons import BflImageProvider, FalImageProvider, ReplicateImageProvide
 from .stable_diffusion_provider import LocalImageProvider, StableDiffusionProvider
 
 _REGISTRY: Dict[str, Type[ImageProvider]] = {
+    "flux": FluxHFProvider,
     "comfyui": ComfyUIProvider,
     "fal": FalImageProvider,
     "bfl": BflImageProvider,
@@ -48,7 +50,7 @@ def available_providers() -> list[str]:
 
 
 def get_provider(name: str | None = None) -> ImageProvider:
-    key = (name or "gemini").lower()
+    key = (name or "flux").lower()
     if key not in _REGISTRY:
         raise ValueError(f"Unknown provider: {key}")
     return _REGISTRY[key]()
@@ -70,6 +72,7 @@ __all__ = [
     "ProviderUnsupportedCapabilityError",
     "ProviderContentPolicyError",
     "ProviderInvalidResponseError",
+    "FluxHFProvider",
     "get_provider",
     "available_providers",
     "manager",
