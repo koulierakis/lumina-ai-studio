@@ -181,7 +181,9 @@ export const MODULE_REGISTRY = [
   },
 ];
 
+const isDesktopStudioRoute = (route = '') => !route.startsWith('/driver-assistant');
+
 export const navigationModules = () =>
   MODULE_REGISTRY
-    .filter((item) => item.visible)
+    .filter((item) => item.visible && isDesktopStudioRoute(item.route))
     .sort((a, b) => a.navigationOrder - b.navigationOrder);
