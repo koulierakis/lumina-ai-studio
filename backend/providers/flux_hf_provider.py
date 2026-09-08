@@ -43,8 +43,8 @@ class FluxHFProvider(ImageProvider):
 
     @classmethod
     def is_configured(cls) -> bool:
-        # Public Space requires no paid API key. HF_TOKEN is optional and can
-        # be supplied only to use an authenticated Hugging Face session/quota.
+        # The public Hugging Face Space supports anonymous Gradio requests.
+        # A Hugging Face token is optional, never a configuration requirement.
         return True
 
     @staticmethod
@@ -146,11 +146,12 @@ class FluxHFProvider(ImageProvider):
         width, height = self._dimensions(spec.aspect_ratio, spec.resolution)
         count = max(1, min(int(spec.count or 1), self.capabilities.maximum_outputs))
 
-        client_kwargs = {"download_files": True, "verbose": False}
         if token:
-            client_kwargs["hf_token"] = token
+            client = Client(space, hf_token=token, download_files=True, verbose=False)
+        else:
+            # Anonymous public-Space client: do not pass any token argument.
+            client = Client(space)
 
-        client = Client(space, **client_kwargs)
         images: list[GeneratedImage] = []
 
         for _index in range(count):
