@@ -4,6 +4,8 @@ import AuthImage from '../components/AuthImage';
 import { toast } from 'sonner';
 import { Sparkles, Loader2, Download, ImageIcon } from 'lucide-react';
 
+const PROMPT_ONLY_PACK = { id: 'none', name: 'None / Prompt Only (Γενικό)' };
+
 const SCENES = [
   'Chania Old Town', 'Venetian Harbor', 'Cretan village', 'Marina',
   'Airport', 'Ferry', 'Luxury Hotel', 'Restaurant', 'Café', 'Delicatessen',
@@ -45,18 +47,20 @@ function normalizeOutputMediaIds(payload) {
 
 export default function Generate() {
   const [packs, setPacks] = useState([]);
-  const [packId, setPackId] = useState(localStorage.getItem('lumina_active_pack') || '');
-  const [prompt, setPrompt] = useState('Cinematic photograph of the person walking through the location, natural mid-morning light');
+  const [packId, setPackId] = useState('none');
+  const [prompt, setPrompt] = useState('');
   const [negative, setNegative] = useState('cartoon, illustration, deformed, extra fingers, plastic skin');
   const [scene, setScene] = useState('');
   const [outfit, setOutfit] = useState('');
   const [aspect, setAspect] = useState('4:5');
-  const [count, setCount] = useState(2);
+  const [count, setCount] = useState(1);
   const [job, setJob] = useState(null);
   const [outputMediaIds, setOutputMediaIds] = useState([]);
   const [running, setRunning] = useState(false);
   const [providers, setProviders] = useState([]);
   const [provider, setProvider] = useState('');
+
+  const promptOnly = packId === 'none';
 
   useEffect(() => {
     apiGet('/providers').then((data) => {
@@ -68,13 +72,18 @@ export default function Generate() {
     }).catch(() => {});
     apiGet('/identity-packs').then((data) => {
       setPacks(data);
-      if (!packId && data.length) setPackId(data[0].id);
     }).catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (packId) localStorage.setItem('lumina_active_pack', packId);
+    if (promptOnly) {
+      setScene('');
+      setOutfit('');
+    }
+  }, [promptOnly]);
+
+  useEffect(() => {
+    localStorage.setItem('lumina_active_pack', packId);
   }, [packId]);
 
   useEffect(() => {
@@ -108,24 +117,27 @@ export default function Generate() {
       toast.error('Prompt required');
       return;
     }
-    if (!packId) {
-      toast.error('Select an Identity Pack first');
-      return;
-    }
+
     setRunning(true);
     setOutputMediaIds([]);
     setJob({ id: 'pending', status: 'queued', output_media_ids: [] });
+
     try {
-      const data = await apiPost('/generate', {
-        identity_pack_id: packId,
-        prompt,
+      const payload = {
+        prompt: prompt.trim(),
         negative_prompt: negative,
-        scene: scene || undefined,
-        outfit: outfit || undefined,
         aspect_ratio: aspect,
         count,
         provider: provider || undefined,
-      });
+      };
+
+      if (!promptOnly) {
+        payload.identity_pack_id = packId;
+        payload.scene = scene || undefined;
+        payload.outfit = outfit || undefined;
+      }
+
+      const data = await apiPost('/generate', payload);
       setJob(data);
       setOutputMediaIds(normalizeOutputMediaIds(data));
     } catch (err) {
@@ -137,7 +149,7 @@ export default function Generate() {
   };
 
   const gridCols = outputMediaIds.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
-  const activePack = packs.find((p) => p.id === packId);
+  const activePack = promptOnly ? PROMPT_ONLY_PACK : packs.find((p) => p.id === packId);
   const showResults = job?.status === 'completed' && outputMediaIds.length > 0;
 
   return (
@@ -147,13 +159,13 @@ export default function Generate() {
           <div>
             <h2 className="font-display text-4xl text-white tracking-tight">New Generation</h2>
             <p className="text-white/50 text-sm mt-1">
-              Identity-preserving photography through{' '}
+              {promptOnly ? 'General text-to-image generation through ' : 'Identity-preserving photography through '}
               <span className="text-gold">{provider || 'automatic provider selection'}</span>
             </p>
           </div>
           {activePack && (
             <div className="text-right">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-white/40">Active identity</div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-white/40">{promptOnly ? 'Mode' : 'Active identity'}</div>
               <div className="text-white text-sm" data-testid="active-pack-label">{activePack.name}</div>
             </div>
           )}
@@ -165,8 +177,11 @@ export default function Generate() {
               <ImageIcon strokeWidth={1} className="w-12 h-12 mx-auto text-white/20 mb-4" />
               <h3 className="font-display text-2xl text-white mb-2">Your canvas awaits</h3>
               <p className="text-white/50 text-sm">
-                Set your prompt on the right, then press <span className="text-gold">Generate</span> to place your
-                identity into any scene.
+                {promptOnly ? (
+                  <>Describe any image you want in the prompt, then press <span className="text-gold">Generate</span>.</>
+                ) : (
+                  <>Set your prompt on the right, then press <span className="text-gold">Generate</span> to place your identity into a scene.</>
+                )}
               </p>
             </div>
           </div>
@@ -183,7 +198,7 @@ export default function Generate() {
               job.status === 'failed' ? 'Generation failed' :
               'Preparing generation…'
             }</p>
-            <p className="text-white/40 text-sm">This usually takes 15–45 seconds per image</p>
+            <p className="text-white/40 text-sm">Generation time depends on provider availability</p>
           </div>
         )}
 
@@ -234,7 +249,7 @@ export default function Generate() {
               data-testid="pack-select"
               className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none"
             >
-              <option value="">— select pack —</option>
+              <option value="none">None / Prompt Only (Γενικό)</option>
               {packs.map((p) => (
                 <option key={p.id} value={p.id}>{p.name} ({p.photo_ids.length} refs)</option>
               ))}
@@ -247,9 +262,9 @@ export default function Generate() {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               data-testid="prompt-input"
-              rows={4}
+              rows={5}
               className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none resize-none"
-              placeholder="Describe the complete scene, clothing and style…"
+              placeholder={promptOnly ? 'Describe any image you want…' : 'Describe the complete scene, clothing and style…'}
             />
           </div>
 
@@ -264,58 +279,62 @@ export default function Generate() {
             />
           </div>
 
-          <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Scene <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => setScene('')}
-                data-testid="scene-prompt-only"
-                className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                  scene === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                }`}
-              >Prompt only</button>
-              {SCENES.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setScene(s)}
-                  data-testid={`scene-${s.replace(/\s+/g, '-').toLowerCase()}`}
-                  className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                    scene === s
-                      ? 'bg-gold/15 border-gold/60 text-gold'
-                      : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
+          {!promptOnly && (
+            <>
+              <div>
+                <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Scene <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setScene('')}
+                    data-testid="scene-prompt-only"
+                    className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
+                      scene === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                    }`}
+                  >Prompt only</button>
+                  {SCENES.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setScene(s)}
+                      data-testid={`scene-${s.replace(/\s+/g, '-').toLowerCase()}`}
+                      className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
+                        scene === s
+                          ? 'bg-gold/15 border-gold/60 text-gold'
+                          : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-          <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Outfit <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                onClick={() => setOutfit('')}
-                data-testid="outfit-prompt-only"
-                className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                  outfit === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                }`}
-              >Prompt only</button>
-              {OUTFITS.map((o) => (
-                <button
-                  key={o}
-                  onClick={() => setOutfit(o)}
-                  className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                    outfit === o
-                      ? 'bg-gold/15 border-gold/60 text-gold'
-                      : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                  }`}
-                >
-                  {o}
-                </button>
-              ))}
-            </div>
-          </div>
+              <div>
+                <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Outfit <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setOutfit('')}
+                    data-testid="outfit-prompt-only"
+                    className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
+                      outfit === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                    }`}
+                  >Prompt only</button>
+                  {OUTFITS.map((o) => (
+                    <button
+                      key={o}
+                      onClick={() => setOutfit(o)}
+                      className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
+                        outfit === o
+                          ? 'bg-gold/15 border-gold/60 text-gold'
+                          : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                      }`}
+                    >
+                      {o}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
