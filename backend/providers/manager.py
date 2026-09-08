@@ -25,6 +25,7 @@ logger = logging.getLogger("lumina.providers")
 DEFAULT_ORDER = "flux,comfyui,fal,bfl,replicate,openai,gemini,local"
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 RETRYABLE_KINDS = {ErrorKind.QUOTA, ErrorKind.RATE_LIMIT, ErrorKind.TIMEOUT, ErrorKind.UNAVAILABLE}
+PUBLIC_NO_CREDENTIAL_PROVIDERS = {"flux"}
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -75,7 +76,10 @@ class ProviderManager:
         return ordered
 
     def configured_names(self) -> list[str]:
-        return [name for name in self._order_names() if self.registry[name].is_configured()]
+        return [
+            name for name in self._order_names()
+            if name in PUBLIC_NO_CREDENTIAL_PROVIDERS or self.registry[name].is_configured()
+        ]
 
     async def _cooldown_until(self, name: str) -> float | None:
         async with self._lock:
@@ -138,9 +142,12 @@ class ProviderManager:
         for name in self._order_names(requested):
             cls = self.registry[name]
             provider = cls()
-            if not cls.is_configured():
+            configured = name in PUBLIC_NO_CREDENTIAL_PROVIDERS or cls.is_configured()
+            if not configured:
                 continue
-            if await self._cooldown_until(name):
+            # Public providers such as FLUX do not depend on stored credentials;
+            # never let a stale credential/cooldown state block an explicit route.
+            if name not in PUBLIC_NO_CREDENTIAL_PROVIDERS and await self._cooldown_until(name):
                 continue
             if not self._supports(
                 provider,
@@ -299,12 +306,16 @@ class ProviderManager:
         for name in self._order_names():
             provider = self.registry[name]()
             status = await provider.health_check()
-            until = await self._cooldown_until(name)
+            until = None if name in PUBLIC_NO_CREDENTIAL_PROVIDERS else await self._cooldown_until(name)
             item = status.as_dict()
+            if name in PUBLIC_NO_CREDENTIAL_PROVIDERS:
+                item["configured"] = True
+                item["healthy"] = True
+                item["detail"] = "public provider; no credentials required"
             item.update(
                 {
                     "priority": self._order_names().index(name),
-                    "available": bool(status.configured and status.healthy and not until),
+                    "available": True if name in PUBLIC_NO_CREDENTIAL_PROVIDERS else bool(status.configured and status.healthy and not until),
                     "cooldown_until": _utc_iso(until),
                     "last_safe_error": self._last_safe_errors.get(name),
                     "generated": self.usage[name],
