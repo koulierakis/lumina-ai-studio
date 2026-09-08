@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
-from gradio_client import Client, handle_file
+from gradio_client import Client
 from huggingface_hub import InferenceClient
 
 from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderCapabilities, VideoProviderError
@@ -121,15 +121,17 @@ class HuggingFaceVideoProvider(VideoProvider):
         try:
             with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as image_file:
                 image_file.write(spec.source_images[0])
+                image_file.flush()
                 temp_path = image_file.name
 
             logger.info(
-                "Starting Hugging Face Gradio image-to-video space=%s api_name=%s duration=%ss steps=%s source_bytes=%s",
+                "Starting Hugging Face Gradio image-to-video space=%s api_name=%s duration=%ss steps=%s source_bytes=%s temp_path=%s",
                 space,
                 api_name,
                 duration,
                 steps,
                 len(spec.source_images[0]),
+                temp_path,
             )
 
             def run_prediction():
@@ -138,7 +140,7 @@ class HuggingFaceVideoProvider(VideoProvider):
                     client_kwargs["hf_token"] = token
                 client = Client(space, **client_kwargs)
                 return client.predict(
-                    handle_file(temp_path),
+                    temp_path,
                     spec.prompt,
                     steps,
                     negative_prompt,
