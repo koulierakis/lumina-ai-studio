@@ -21,7 +21,7 @@ from .base import (
 
 
 DEFAULT_FLUX_SPACE = "black-forest-labs/FLUX.1-schnell"
-DEFAULT_FLUX_API_NAME = "/infer"
+DEFAULT_FLUX_API_NAME = "/predict"
 
 
 class FluxHFProvider(ImageProvider):
@@ -85,6 +85,7 @@ class FluxHFProvider(ImageProvider):
         return value
 
     async def _read_image(self, value, timeout: float) -> bytes:
+        # The Space returns (image_path, seed); use the first output.
         if isinstance(value, (tuple, list)) and value:
             value = value[0]
         if isinstance(value, dict):
@@ -139,7 +140,7 @@ class FluxHFProvider(ImageProvider):
             )
 
         space = os.getenv("HF_GRADIO_FLUX_SPACE", DEFAULT_FLUX_SPACE).strip()
-        api_name = os.getenv("HF_GRADIO_FLUX_API_NAME", DEFAULT_FLUX_API_NAME).strip()
+        api_name = os.getenv("HF_GRADIO_FLUX_API_NAME", DEFAULT_FLUX_API_NAME).strip() or DEFAULT_FLUX_API_NAME
         token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACEHUB_API_TOKEN")
         timeout = float(os.getenv("HF_IMAGE_TIMEOUT_SECONDS", "300"))
         steps = max(1, min(int(os.getenv("HF_FLUX_STEPS", "4")), 8))
@@ -153,17 +154,15 @@ class FluxHFProvider(ImageProvider):
         client = Client(space, **client_kwargs)
         images: list[GeneratedImage] = []
 
-        for index in range(count):
-            seed = int(spec.seed if spec.seed is not None else 42) + index
-
+        for _index in range(count):
             def run_prediction():
                 return client.predict(
-                    prediction_prompt,
-                    seed,
-                    False,
-                    width,
-                    height,
-                    steps,
+                    prompt=prediction_prompt,
+                    seed=0,
+                    randomize_seed=True,
+                    width=width,
+                    height=height,
+                    num_inference_steps=steps,
                     api_name=api_name,
                 )
 
