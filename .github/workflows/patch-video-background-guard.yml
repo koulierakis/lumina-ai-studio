@@ -1,0 +1,39 @@
+name: Patch video background guard
+
+on:
+  push:
+    branches:
+      - work/code-builder-v2-from-scratch
+    paths:
+      - scripts/patch_video_background_guard.py
+      - .github/workflows/patch-video-background-guard.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/code-builder-v2-from-scratch
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply patch
+        run: python scripts/patch_video_background_guard.py
+      - name: Validate backend syntax
+        run: python -m py_compile backend/server.py
+      - name: Commit patched server
+        shell: bash
+        run: |
+          if git diff --quiet -- backend/server.py; then
+            echo "No server.py changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add backend/server.py
+          git commit -m "fix(video): guard background job startup failures"
+          git push origin HEAD:work/code-builder-v2-from-scratch
