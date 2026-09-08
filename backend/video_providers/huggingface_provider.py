@@ -10,6 +10,15 @@ from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProv
 
 logger = logging.getLogger("lumina.video.huggingface")
 
+# This larger checkpoint is downloadable from the Hub, but it is not reliably
+# available through serverless Inference Providers. Existing Render deployments
+# may still have it in HF_VIDEO_I2V_MODEL, so migrate it transparently.
+_LEGACY_UNROUTED_I2V_MODELS = {
+    "Wan-AI/Wan2.2-I2V-A14B",
+    "Wan-AI/Wan2.2-I2V-A14B-Diffusers",
+}
+_DEFAULT_ROUTED_VIDEO_MODEL = "Wan-AI/Wan2.2-TI2V-5B"
+
 
 class HuggingFaceVideoProvider(VideoProvider):
     name = "huggingface"
@@ -42,6 +51,18 @@ class HuggingFaceVideoProvider(VideoProvider):
         inference_provider = os.environ.get("HF_VIDEO_INFERENCE_PROVIDER", "fal-ai").strip() or "fal-ai"
         return InferenceClient(api_key=token, timeout=timeout, provider=inference_provider)
 
+    @staticmethod
+    def _i2v_model() -> str:
+        configured = os.environ.get("HF_VIDEO_I2V_MODEL", _DEFAULT_ROUTED_VIDEO_MODEL).strip() or _DEFAULT_ROUTED_VIDEO_MODEL
+        if configured in _LEGACY_UNROUTED_I2V_MODELS:
+            logger.warning(
+                "HF_VIDEO_I2V_MODEL=%s is not reliably routed by Hugging Face Inference Providers; using %s instead",
+                configured,
+                _DEFAULT_ROUTED_VIDEO_MODEL,
+            )
+            return _DEFAULT_ROUTED_VIDEO_MODEL
+        return configured
+
     async def generate(self, spec: VideoGenerationInput) -> GeneratedVideo:
         if not self.is_configured():
             raise VideoProviderError(self.name, "Hugging Face credentials are missing", "Hugging Face video generation is not configured.")
@@ -53,10 +74,7 @@ class HuggingFaceVideoProvider(VideoProvider):
             if spec.mode == "image-to-video":
                 if not spec.source_images:
                     raise VideoProviderError(self.name, "Source image missing", "Please upload a source image.")
-                # Wan2.2 TI2V-5B supports both text-to-video and image-to-video and is
-                # available through Hugging Face Inference Providers. The larger A14B
-                # I2V checkpoint is a Hub model but is not reliably serverless-routed.
-                model = os.environ.get("HF_VIDEO_I2V_MODEL", "Wan-AI/Wan2.2-TI2V-5B")
+                model = self._i2v_model()
                 logger.info(
                     "Starting Hugging Face image-to-video provider=%s model=%s duration=%ss resolution=%s aspect_ratio=%s source_bytes=%s",
                     inference_provider,
@@ -74,7 +92,7 @@ class HuggingFaceVideoProvider(VideoProvider):
                     seed=spec.seed,
                 )
             elif spec.mode == "text-to-video":
-                model = os.environ.get("HF_VIDEO_T2V_MODEL", "Wan-AI/Wan2.2-TI2V-5B")
+                model = os.environ.get("HF_VIDEO_T2V_MODEL", _DEFAULT_ROUTED_VIDEO_MODEL).strip() or _DEFAULT_ROUTED_VIDEO_MODEL
                 logger.info(
                     "Starting Hugging Face text-to-video provider=%s model=%s duration=%ss resolution=%s aspect_ratio=%s",
                     inference_provider,
