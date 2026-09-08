@@ -139,14 +139,16 @@ class ProviderManager:
         has_mask: bool = False,
     ) -> list[ImageProvider]:
         candidates: list[ImageProvider] = []
-        for name in self._order_names(requested):
+        requested_name = (requested or "").strip().lower()
+        names = [requested_name] if requested_name in PUBLIC_NO_CREDENTIAL_PROVIDERS else self._order_names(requested)
+        for name in names:
+            if name not in self.registry:
+                continue
             cls = self.registry[name]
             provider = cls()
             configured = name in PUBLIC_NO_CREDENTIAL_PROVIDERS or cls.is_configured()
             if not configured:
                 continue
-            # Public providers such as FLUX do not depend on stored credentials;
-            # never let a stale credential/cooldown state block an explicit route.
             if name not in PUBLIC_NO_CREDENTIAL_PROVIDERS and await self._cooldown_until(name):
                 continue
             if not self._supports(
@@ -183,7 +185,8 @@ class ProviderManager:
                 f"No configured provider supports {operation} for the requested capabilities.",
             )
 
-        auto_fallback = _env_bool("IMAGE_PROVIDER_AUTO_FALLBACK", True)
+        requested_name = (requested or "").strip().lower()
+        auto_fallback = False if requested_name in PUBLIC_NO_CREDENTIAL_PROVIDERS else _env_bool("IMAGE_PROVIDER_AUTO_FALLBACK", True)
         max_attempts = max(1, _env_int("IMAGE_PROVIDER_MAX_ATTEMPTS_PER_PROVIDER", 1))
         started = time.perf_counter()
         attempted: list[str] = []
@@ -218,7 +221,7 @@ class ProviderManager:
                         continue
                     if not auto_fallback or not self._is_failover_error(exc):
                         raise ProviderError(
-                            "manager",
+                            provider.name if requested_name in PUBLIC_NO_CREDENTIAL_PROVIDERS else "manager",
                             exc.public_message(),
                             kind=exc.kind,
                             retryable=False,
@@ -257,6 +260,45 @@ class ProviderManager:
         ) from preferred_exception
 
     async def generate_result(self, spec: GenerationInput, requested: str | None = None) -> ProviderRoutingResult:
+        requested_name = (requested or "").strip().lower()
+        if requested_name == "flux":
+            cls = self.registry.get("flux")
+            if cls is None:
+                raise ProviderUnsupportedCapabilityError("flux", "FLUX provider is not registered.")
+            provider = cls()
+            if not self._supports(
+                provider,
+                operation="generate",
+                aspect_ratio=spec.aspect_ratio or "1:1",
+                reference_count=len(spec.reference_images),
+                has_mask=False,
+            ):
+                raise ProviderUnsupportedCapabilityError("flux", "FLUX does not support the requested generation capabilities.")
+            started = time.perf_counter()
+            try:
+                images = await provider.generate(spec)
+            except ProviderError:
+                raise
+            except Exception as exc:
+                raise ProviderError(
+                    "flux",
+                    str(exc) or "FLUX request failed.",
+                    kind=ErrorKind.UNAVAILABLE,
+                    retryable=True,
+                    safe_message="The public FLUX image service is temporarily unavailable.",
+                ) from exc
+            if not images or any(not image.data for image in images):
+                raise ProviderInvalidResponseError("flux")
+            self.usage["flux"] += len(images)
+            return ProviderRoutingResult(
+                provider="flux",
+                images=images,
+                attempted_providers=["flux"],
+                provider_failures=[],
+                fallback_used=False,
+                generation_duration_ms=int((time.perf_counter() - started) * 1000),
+            )
+
         return await self._route(
             operation="generate",
             requested=requested,
