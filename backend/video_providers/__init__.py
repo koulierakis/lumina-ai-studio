@@ -4,8 +4,13 @@ from __future__ import annotations
 from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderError
 from .mock_provider import MockVideoProvider
 from .luma_provider import LumaVideoProvider
+from .huggingface_provider import HuggingFaceVideoProvider
 
-_REGISTRY: dict[str, type[VideoProvider]] = {"mock": MockVideoProvider, "luma": LumaVideoProvider}
+_REGISTRY: dict[str, type[VideoProvider]] = {
+    "mock": MockVideoProvider,
+    "luma": LumaVideoProvider,
+    "huggingface": HuggingFaceVideoProvider,
+}
 
 
 def get_video_provider(name: str | None = None) -> VideoProvider:
@@ -24,7 +29,7 @@ def available_video_providers() -> list[str]:
 
 def video_provider_catalog() -> list[dict]:
     """Safe UI metadata; credentials and vendor implementation details stay server-side."""
-    planned = ("google", "openai", "runway", "kling", "pika", "luma", "veo")
+    planned = ("huggingface", "google", "openai", "runway", "kling", "pika", "luma", "veo")
     configured = set(available_video_providers())
     catalog = []
     for name in ("mock", *planned):
@@ -50,7 +55,7 @@ def video_provider_catalog() -> list[dict]:
                 "max_image_inputs": getattr(capabilities, "max_image_inputs", 0),
                 "max_prompt_length": getattr(capabilities, "max_prompt_length", 0),
                 "credential_ready": name in configured,
-            } if capabilities else {"modes": [], "resolutions": [], "durations": [], "output_formats": []},
+            } if capabilities else {"modes": [], "resolutions": [], "durations": [], "aspect_ratios": [], "output_formats": []},
         })
     return catalog
 
