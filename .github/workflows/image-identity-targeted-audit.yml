@@ -6,6 +6,7 @@ on:
       - work/platform-auth-five-fixes-20260911
     paths:
       - '.github/workflows/image-identity-targeted-audit.yml'
+      - 'backend/tests/test_editor_upload_pipeline.py'
   workflow_dispatch:
 
 jobs:
