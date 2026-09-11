@@ -109,6 +109,12 @@ class ExecutiveAdvisorService:
     def openai_configured(self) -> bool:
         return bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
+    def groq_model_name(self) -> str:
+        return os.environ.get("LUMINA_GROQ_MODEL", "llama-3.3-70b-versatile").strip() or "llama-3.3-70b-versatile"
+
+    def groq_configured(self) -> bool:
+        return bool(os.environ.get("GROQ_API_KEY", "").strip())
+
     def route_role(self, message: str, requested: str) -> str:
         normalized = requested.strip().casefold()
         if normalized in ADVISOR_ROLES and normalized != "auto":
@@ -284,6 +290,30 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             raise RuntimeError("OpenAI Responses API returned no output text")
         return answer, sources, model
 
+    async def _ask_groq(self, *, messages: list[dict[str, str]]) -> tuple[str, list[dict[str, str]], str]:
+        api_key = os.environ.get("GROQ_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not configured")
+        model = self.groq_model_name()
+        payload = {"model": model, "messages": messages, "temperature": 0.2}
+        timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            response = await client.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError(f"Groq API returned HTTP {response.status_code}: {response.text[:500]}")
+        data = response.json()
+        try:
+            answer = str(data["choices"][0]["message"]["content"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("Groq API returned no output text") from exc
+        if not answer:
+            raise RuntimeError("Groq API returned no output text")
+        return answer, [], model
+
     async def ask(self, owner: str, request: AdvisorRequest) -> dict[str, Any]:
         requested_role = request.role.strip().casefold()
         role = "board" if requested_role == "board" else self.route_role(request.message, requested_role)
@@ -303,16 +333,26 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
         messages.append({"role": "user", "content": request.message + context_text})
 
         requested_provider = request.provider.strip().casefold()
-        if requested_provider not in {"auto", "local", "openai"}:
+        if requested_provider not in {"auto", "local", "groq", "openai"}:
             requested_provider = "auto"
         use_openai = requested_provider == "openai" or request.web_research
-        if requested_provider == "auto" and not request.web_research:
-            use_openai = False
+        use_groq = requested_provider == "groq" or (requested_provider == "auto" and not request.web_research and self.groq_configured())
 
         started = time.monotonic()
         sources: list[dict[str, str]] = []
         error = None
-        if use_openai:
+        if use_groq:
+            try:
+                answer, sources, model = await self._ask_groq(messages=messages)
+                provider = "groq"
+                provider_status = "ok"
+            except Exception as exc:
+                answer = "Groq cloud mode is currently unavailable. Check GROQ_API_KEY, rate limits, network access, and the configured model, then retry or switch provider."
+                model = self.groq_model_name()
+                provider = "groq"
+                provider_status = "unavailable"
+                error = str(exc)
+        elif use_openai:
             try:
                 answer, sources, model = await self._ask_openai(
                     messages=messages,
@@ -374,10 +414,12 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
         model = self.model_name()
         installed = [item.name for item in health.installed_models]
         return {
-            "available": health.available or self.openai_configured(),
+            "available": health.available or self.groq_configured() or self.openai_configured(),
             "local_available": health.available,
+            "groq_configured": self.groq_configured(),
             "openai_configured": self.openai_configured(),
             "model": model,
+            "groq_model": self.groq_model_name(),
             "openai_model": self.openai_model_name(),
             "model_installed": any(name.casefold() == model.casefold() or name.casefold().startswith(model.casefold() + ":") for name in installed),
             "ollama": health.to_dict(),

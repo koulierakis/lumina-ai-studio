@@ -108,7 +108,7 @@ def test_groq_configured_and_unconfigured_state_is_lazy(monkeypatch):
         "name": "groq",
         "configured": False,
         "available": False,
-        "model": "openai/gpt-oss-120b",
+        "model": "llama-3.3-70b-versatile",
         "network_checked": False,
         "error": "Groq is not configured",
     }
@@ -319,8 +319,8 @@ def test_provider_registry_is_allowlisted_and_default_is_deterministic():
     groq = StubProvider("groq")
     registry = DocumentAIProviderRegistry({"ollama": ollama, "groq": groq})
 
-    assert DEFAULT_PROVIDER == "ollama"
-    assert registry.get() is ollama
+    assert DEFAULT_PROVIDER == "groq"
+    assert registry.get() is groq
     assert registry.get("ollama") is ollama
     assert registry.get("groq") is groq
     assert isinstance(DocumentAIProviderRegistry().get("ollama"), OllamaNaturalDocumentProvider)

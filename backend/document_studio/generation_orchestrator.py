@@ -29,7 +29,7 @@ from .natural_creation import (
 )
 from .ollama_adapter import OllamaDocumentAdapter, get_ollama_adapter
 
-DEFAULT_PROVIDER = "ollama"
+DEFAULT_PROVIDER = "groq"
 SUPPORTED_PROVIDERS = frozenset({"ollama", "groq"})
 
 
@@ -119,6 +119,9 @@ class DocumentAIProviderRegistry:
             raise UnknownDocumentAIProvider(
                 f"Unsupported document AI provider: {sorted(unknown)[0]}"
             )
+
+    def injected_names(self) -> tuple[str, ...]:
+        return tuple(self._providers)
 
     def get(self, name: str | None = None) -> DocumentAIProvider:
         selected = (name or DEFAULT_PROVIDER).strip().casefold()
@@ -310,6 +313,10 @@ async def generate_document(
     """Invoke one selected provider and an optional explicit fallback provider."""
     provider_registry = registry or DocumentAIProviderRegistry()
     requested_name = (provider_name or DEFAULT_PROVIDER).strip().casefold()
+    if provider_name is None and registry is not None:
+        injected_names = provider_registry.injected_names()
+        if requested_name not in injected_names and len(injected_names) == 1:
+            requested_name = injected_names[0]
     primary = provider_registry.get(requested_name)
     started_at = time.monotonic()
     fallback_used = False

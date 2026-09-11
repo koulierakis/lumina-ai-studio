@@ -2757,7 +2757,7 @@ async def _run_voice_job(job_id: str, owner: str) -> None:
 
 @api.get("/voice/providers")
 async def list_voice_providers(_: str = Depends(require_owner)) -> dict:
-    return {"active": os.environ.get("VOICE_PROVIDER", "mock"), "providers": voice_provider_catalog(), "styles": sorted(VOICE_STYLES), "capabilities": _audio_capability_matrix()}
+    return {"active": os.environ.get("VOICE_PROVIDER", "edge-tts"), "providers": voice_provider_catalog(), "styles": sorted(VOICE_STYLES), "capabilities": _audio_capability_matrix()}
 
 @api.get("/voice/studio")
 async def voice_studio_bootstrap(owner: str = Depends(require_owner)) -> dict:
@@ -2815,7 +2815,7 @@ async def list_voice_projects(owner: str = Depends(require_owner), search: str =
 async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mode: str = Form("text-to-speech"), voice: str = Form("personal-user"), style: str = Form("podcast"), preset_id: Optional[str] = Form(None), output_format: str = Form("wav"), sample_rate: int = Form(48000), bit_depth: int = Form(24), bitrate: str = Form("192k"), loudness_lufs: float = Form(-16), title: str = Form(""), tags: str = Form(""), provider: Optional[str] = Form(None), owner: str = Depends(require_owner)) -> VoiceJob:
     if mode not in VOICE_MODES: raise HTTPException(400, "Unsupported voice operation.")
     if style not in VOICE_STYLES: raise HTTPException(400, "Unsupported voice style.")
-    selected = (provider or os.environ.get("VOICE_PROVIDER", "mock")).lower()
+    selected = (provider or os.environ.get("VOICE_PROVIDER", "edge-tts")).lower()
     try: engine = get_voice_provider(selected)
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     if mode not in engine.capabilities["modes"]: raise HTTPException(400, "The selected voice provider does not support this operation.")
@@ -3075,7 +3075,7 @@ async def settings_readiness(_: str = Depends(require_owner)) -> dict:
     statuses = await provider_manager.statuses()
     env = detect_local_environment()
     installation = build_installation_center()
-    return {"security": {"owner_configured": bool(os.environ.get("OWNER_EMAIL")), "jwt_configured": bool(os.environ.get("JWT_SECRET")), "secrets_exposed": False}, "storage": local_system_metrics().get("disk", {"available": False}), "providers": [{"id": item.get("id"), "configured": bool(item.get("configured")), "healthy": bool(item.get("healthy")), "state": "Ready" if item.get("configured") and item.get("healthy") else "Requires API key" if not item.get("configured") else "Failed"} for item in statuses], "defaults": {"image_provider": os.environ.get("IMAGE_PROVIDER", "mock"), "video_provider": os.environ.get("VIDEO_PROVIDER", "mock"), "voice_provider": os.environ.get("VOICE_PROVIDER", "mock")}, "environment": env, "installation_center": installation, "first_run": {"works_now": ["Dashboard", "Developer Center", "Document Studio local text extraction", "Photo Studio non-generative editing", "Code Builder safety workflows"], "needs_installation": [item for item in installation["dependencies"] if item["status"] in {"missing", "optional_missing"}], "needs_configuration": [item for item in statuses if not item.get("configured")], "optional": ["Cloud image/video/voice providers", "Ollama coding model"], "unavailable": [cap for cap, state in env.get("capabilities", {}).items() if state not in {"ready"}]}}
+    return {"security": {"owner_configured": bool(os.environ.get("OWNER_EMAIL")), "jwt_configured": bool(os.environ.get("JWT_SECRET")), "secrets_exposed": False}, "storage": local_system_metrics().get("disk", {"available": False}), "providers": [{"id": item.get("id"), "configured": bool(item.get("configured")), "healthy": bool(item.get("healthy")), "state": "Ready" if item.get("configured") and item.get("healthy") else "Requires API key" if not item.get("configured") else "Failed"} for item in statuses], "defaults": {"image_provider": os.environ.get("IMAGE_PROVIDER", "mock"), "video_provider": os.environ.get("VIDEO_PROVIDER", "mock"), "voice_provider": os.environ.get("VOICE_PROVIDER", "edge-tts")}, "environment": env, "installation_center": installation, "first_run": {"works_now": ["Dashboard", "Developer Center", "Document Studio local text extraction", "Photo Studio non-generative editing", "Code Builder safety workflows"], "needs_installation": [item for item in installation["dependencies"] if item["status"] in {"missing", "optional_missing"}], "needs_configuration": [item for item in statuses if not item.get("configured")], "optional": ["Cloud image/video/voice providers", "Ollama coding model"], "unavailable": [cap for cap, state in env.get("capabilities", {}).items() if state not in {"ready"}]}}
 
 
 @api.get("/settings/preferences")

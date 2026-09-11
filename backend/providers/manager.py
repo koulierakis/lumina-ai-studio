@@ -22,10 +22,10 @@ from .base import (
 
 logger = logging.getLogger("lumina.providers")
 
-DEFAULT_ORDER = "flux,comfyui,fal,bfl,replicate,openai,gemini,local"
+DEFAULT_ORDER = "cloudflare,flux,comfyui,fal,bfl,replicate,openai,gemini,local"
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
 RETRYABLE_KINDS = {ErrorKind.QUOTA, ErrorKind.RATE_LIMIT, ErrorKind.TIMEOUT, ErrorKind.UNAVAILABLE}
-PUBLIC_NO_CREDENTIAL_PROVIDERS = {"flux"}
+PUBLIC_NO_CREDENTIAL_PROVIDERS: set[str] = set()
 
 
 def _env_bool(name: str, default: bool) -> bool:

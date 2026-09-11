@@ -21,6 +21,7 @@ from .base import (
     ProviderUnsupportedCapabilityError,
 )
 from .comfyui_provider import ComfyUIProvider
+from .cloudflare_provider import CloudflareFluxProvider
 from .flux_hf_provider import FluxHFProvider
 from .gemini_provider import GeminiImageProvider
 from .manager import ProviderManager
@@ -30,6 +31,7 @@ from .skeletons import BflImageProvider, FalImageProvider, ReplicateImageProvide
 from .stable_diffusion_provider import LocalImageProvider, StableDiffusionProvider
 
 _REGISTRY: Dict[str, Type[ImageProvider]] = {
+    "cloudflare": CloudflareFluxProvider,
     "flux": FluxHFProvider,
     "comfyui": ComfyUIProvider,
     "fal": FalImageProvider,

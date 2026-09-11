@@ -90,7 +90,7 @@ export default function ExecutiveAdvisor() {
   const [session, setSession] = useState(null);
   const [message, setMessage] = useState('');
   const [role, setRole] = useState('auto');
-  const [provider, setProvider] = useState('local');
+  const [provider, setProvider] = useState('groq');
   const [webResearch, setWebResearch] = useState(false);
   const [deep, setDeep] = useState(true);
   const [rememberMessage, setRememberMessage] = useState(false);
@@ -206,6 +206,10 @@ export default function ExecutiveAdvisor() {
   const send = async () => {
     const value = message.trim();
     if (!value || busy) return;
+    if (provider === 'groq' && !status?.groq_configured) {
+      setError('Groq requires GROQ_API_KEY in the backend environment.');
+      return;
+    }
     if ((provider === 'openai' || webResearch) && !status?.openai_configured) {
       setError('Cloud/Web Research requires OPENAI_API_KEY in the backend environment.');
       return;
@@ -326,6 +330,7 @@ export default function ExecutiveAdvisor() {
                 ))}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                <button onClick={() => { setProvider('groq'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'groq' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Groq</button>
                 <button onClick={() => { setProvider('local'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'local' && !webResearch ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200' : 'border-white/10 text-white/35'}`}><HardDrive className="h-3.5 w-3.5" />Local</button>
                 <button onClick={() => { setProvider('openai'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'openai' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Cloud reasoning</button>
                 <button onClick={() => { setProvider('openai'); setWebResearch(true); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Globe2 className="h-3.5 w-3.5" />Web research</button>
