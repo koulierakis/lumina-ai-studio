@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import os
+import random
 import sys
 from pathlib import Path
 
@@ -38,6 +39,29 @@ def _image_bytes(fmt: str, size: tuple[int, int] = (32, 32)) -> bytes:
     image = Image.new("RGB", size, (128, 96, 64))
     image.save(out, format=fmt)
     return out.getvalue()
+
+
+def _valid_jpeg_between_20_and_25_mb() -> bytes:
+    """Create a real decodable JPEG large enough to exercise the 20 MB upload path."""
+    minimum = 20 * 1024 * 1024
+    maximum = 25 * 1024 * 1024
+    rng = random.Random(20260911)
+
+    for width, height in ((4096, 3072), (4352, 3264), (4608, 3456)):
+        pixels = rng.randbytes(width * height * 3)
+        image = Image.frombytes("RGB", (width, height), pixels)
+        for quality in (95, 97, 98, 99, 100):
+            out = io.BytesIO()
+            image.save(out, format="JPEG", quality=quality, subsampling=0, optimize=False)
+            payload = out.getvalue()
+            if minimum <= len(payload) < maximum:
+                with Image.open(io.BytesIO(payload)) as decoded:
+                    decoded.load()
+                    assert decoded.format == "JPEG"
+                    assert decoded.size == (width, height)
+                return payload
+
+    raise AssertionError("Could not create a valid JPEG fixture between 20 MB and 25 MB")
 
 
 def _create_pack(api_client: TestClient, auth_headers: dict) -> str:
@@ -158,7 +182,7 @@ def test_editor_upload_pipeline_accepts_20mb_multipart_image():
     api_client = _client()
     auth_headers = _headers()
     pack_id = _create_pack(api_client, auth_headers)
-    payload = b"\xff\xd8\xff\xe0" + (b"0" * (20 * 1024 * 1024 - 6)) + b"\xff\xd9"
+    payload = _valid_jpeg_between_20_and_25_mb()
     response = api_client.post(
         f"{API}/identity-packs/{pack_id}/photos",
         headers=auth_headers,
@@ -171,7 +195,9 @@ def test_editor_upload_pipeline_accepts_20mb_multipart_image():
     assert media_response.status_code == 200, media_response.text
     assert media_response.headers.get("Content-Type", "").startswith("image/jpeg")
     assert len(media_response.content) == len(payload)
-    assert media_response.content[:4] == b"\xff\xd8\xff\xe0"
+    with Image.open(io.BytesIO(media_response.content)) as decoded:
+        decoded.load()
+        assert decoded.format == "JPEG"
 
 
 def test_editor_upload_pipeline_validation_error_is_not_empty_object():
