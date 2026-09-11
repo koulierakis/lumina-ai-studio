@@ -1,0 +1,21 @@
+name: Voice Studio Fix Audit
+on:
+  push:
+    branches:
+      - audit/voice-fix-20260911
+permissions:
+  contents: read
+jobs:
+  voice-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4b01fa7b207bc13b2953718c818ec3856e4d185d
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run targeted Voice Studio tests only
+        run: python -m pytest -q backend/tests/test_voice_provider_unit.py backend/tests/test_voice_studio_professional_unit.py
