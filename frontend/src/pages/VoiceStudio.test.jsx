@@ -8,6 +8,7 @@ jest.mock('../lib/api', () => ({
   apiGet: jest.fn(),
   apiPatch: jest.fn(),
   apiPost: jest.fn(),
+  fetchMediaBlobUrl: jest.fn(),
   uploadFormData: jest.fn(),
 }));
 
