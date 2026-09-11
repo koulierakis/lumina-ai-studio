@@ -122,7 +122,7 @@ from providers import (  # noqa: E402
     available_providers,
     manager as provider_manager,
 )
-from storage import delete_file, read_bytes, save_bytes  # noqa: E402
+from storage import delete_file, read_bytes, save_bytes, storage_health  # noqa: E402
 from local_tools import resolve_executable  # noqa: E402
 from video_providers import VideoGenerationInput, VideoProviderError, available_video_providers, get_video_provider, video_provider_catalog  # noqa: E402
 from platform_services import emit_notification  # noqa: E402
@@ -531,15 +531,47 @@ async def provider_timeout_handler(request, exc: ProviderTimeoutError):
 
 
 # ---------- Health / providers ----------
+def _runtime_commit_sha() -> str:
+    for name in ("RENDER_GIT_COMMIT", "GIT_COMMIT_SHA", "COMMIT_SHA", "SOURCE_VERSION"):
+        value = os.environ.get(name, "").strip()
+        if value and re.fullmatch(r"[0-9a-fA-F]{7,64}", value):
+            return value.lower()
+    try:
+        value = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT_DIR.parent,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip()
+        if re.fullmatch(r"[0-9a-fA-F]{7,64}", value):
+            return value.lower()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
 @api.get("/health")
 async def health() -> dict:
     statuses = await provider_manager.statuses()
+    database = dict(persistence_provider.diagnostics())
+    try:
+        await persistence_provider.ping()
+        database["ping"] = "OK"
+    except Exception as exc:
+        logger.warning("Database health ping failed: %s", type(exc).__name__)
+        database["ping"] = "FAIL"
+        database["error"] = type(exc).__name__
+    storage = await asyncio.to_thread(storage_health)
+    status = "ok" if database.get("ping") == "OK" and storage.get("status") == "OK" else "degraded"
     return {
-        "status": "ok",
+        "status": status,
         "backend": "ok",
         "timestamp": now_iso(),
         "version": APP_VERSION,
-        "database": persistence_provider.diagnostics(),
+        "commit_sha": _runtime_commit_sha(),
+        "database": database,
+        "storage": storage,
         "provider_active": os.environ.get("IMAGE_PROVIDER", "gemini"),
         "providers_available": available_providers(),
         "provider_statuses": statuses,

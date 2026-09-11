@@ -65,6 +65,11 @@ class PersistenceProvider(ABC):
     @abstractmethod
     async def verify(self) -> None: ...
 
+    async def ping(self) -> None:
+        # Default compatibility path for custom providers. Concrete database
+        # providers override this with a read-only SELECT/ping operation.
+        await self.verify()
+
     @abstractmethod
     async def recover_active_jobs(self) -> None: ...
 
@@ -212,6 +217,13 @@ class SQLitePersistenceProvider(PersistenceProvider):
         if not found:
             raise RuntimeError("SQLite persistence read/write verification failed")
         await self.update_one("provider_status", {"id": probe["id"]}, {"$set": {"status": "verified", "updated_at": _now_iso()}})
+
+    def _ping_sync(self) -> None:
+        with self._connect() as conn:
+            conn.execute("SELECT 1").fetchone()
+
+    async def ping(self) -> None:
+        await asyncio.to_thread(self._ping_sync)
 
     async def recover_active_jobs(self) -> None:
         interrupted = {"status": "failed", "stage": "interrupted", "safe_error_message": "The backend restarted before this job finished.", "error": "The backend restarted before this job finished.", "updated_at": _now_iso(), "completed_at": _now_iso()}
@@ -444,9 +456,40 @@ class PostgresPersistenceProvider(PersistenceProvider):
             raise RuntimeError("PostgreSQL mode requires the optional psycopg[binary] dependency") from exc
         return psycopg.connect(self.dsn)
 
+    def _sql_where(self, table: str, query: dict[str, Any]) -> tuple[str, tuple[Any, ...]]:
+        """Push direct owner/id predicates into PostgreSQL.
+
+        Complex Mongo-style predicates are still evaluated by the shared
+        matcher after the narrowed result set is returned.
+        """
+        clauses = ["namespace = %s"]
+        params: list[Any] = [table]
+        for field in ("owner_email", "id"):
+            if field not in query:
+                continue
+            expected = query[field]
+            if isinstance(expected, dict):
+                if "$in" not in expected:
+                    continue
+                values = list(expected.get("$in") or [])
+                if not values:
+                    clauses.append("FALSE")
+                    continue
+                placeholders = ", ".join(["%s"] * len(values))
+                clauses.append(f"{field} IN ({placeholders})")
+                params.extend(str(value) if field == "id" else value for value in values)
+                continue
+            if expected is None:
+                clauses.append(f"{field} IS NULL")
+            else:
+                clauses.append(f"{field} = %s")
+                params.append(str(expected) if field == "id" else expected)
+        return " AND ".join(clauses), tuple(params)
+
     def _rows(self, table: str, query: dict[str, Any]) -> list[dict[str, Any]]:
+        where_sql, params = self._sql_where(table, query)
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute("SELECT data_json FROM lumina_records WHERE namespace = %s", (table,))
+            cur.execute(f"SELECT data_json FROM lumina_records WHERE {where_sql}", params)
             rows = [json.loads(row[0]) for row in cur.fetchall()]
         return [row for row in rows if SQLitePersistenceProvider._matches(self, row, query)]
 
@@ -483,6 +526,14 @@ class PostgresPersistenceProvider(PersistenceProvider):
         await self.insert_one("provider_status", probe)
         if not await self.find_one("provider_status", {"id": probe["id"]}):
             raise RuntimeError("PostgreSQL persistence read/write verification failed")
+
+    def _ping_sync(self) -> None:
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+
+    async def ping(self) -> None:
+        await asyncio.to_thread(self._ping_sync)
 
     async def recover_active_jobs(self) -> None:
         for table in ("talking_portrait_jobs", "talking_portrait_install_jobs"):

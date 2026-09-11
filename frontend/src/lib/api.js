@@ -25,6 +25,20 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401) {
+      localStorage.removeItem('lumina_token');
+      localStorage.removeItem('lumina_user');
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 function safeMessageFromStatus(status, backendMessage) {
   switch (status) {
     case 400:

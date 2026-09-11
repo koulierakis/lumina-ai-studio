@@ -1,14 +1,13 @@
 """Storage backends used by Lumina media services.
 
-The application only depends on this small object interface. Local disk is the
-default for development; the S3-compatible backend is suitable for Supabase
-Storage gateways, Cloudflare R2, MinIO, and other private object stores. All
-credentials are read server-side from environment variables.
+All user-file I/O is routed through this interface. Local disk remains available
+for development, while production can use any S3-compatible object store such as
+Supabase Storage, Cloudflare R2, or MinIO.
 """
 from __future__ import annotations
 
-import os
 import mimetypes
+import os
 from pathlib import Path
 from typing import Protocol
 
@@ -19,6 +18,7 @@ class StorageBackend(Protocol):
     def delete(self, key: str) -> None: ...
     def list(self, prefix: str = "") -> list[str]: ...
     def metadata(self, key: str) -> dict: ...
+    def ping(self) -> None: ...
 
 
 def _safe_key(key: str) -> str:
@@ -50,6 +50,8 @@ class LocalStorageBackend:
         safe_prefix = str(prefix or "").replace("\\", "/").strip("/")
         if safe_prefix and any(part in {".", ".."} for part in safe_prefix.split("/")):
             raise ValueError("Invalid storage prefix")
+        if not self.root.exists():
+            return []
         return sorted(
             path.relative_to(self.root).as_posix()
             for path in self.root.rglob("*")
@@ -61,13 +63,29 @@ class LocalStorageBackend:
         stat = path.stat()
         return {"key": _safe_key(key), "size": stat.st_size, "content_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream"}
 
+    def ping(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        if not self.root.is_dir():
+            raise RuntimeError("Local storage root is unavailable")
+
 
 class S3StorageBackend:
     def __init__(self, bucket: str, endpoint_url: str | None, region: str):
         import boto3
 
         self.bucket = bucket
-        self.client = boto3.client("s3", endpoint_url=endpoint_url or None, region_name=region)
+        client_kwargs = {
+            "endpoint_url": endpoint_url or None,
+            "region_name": region,
+        }
+        access_key = (os.environ.get("S3_ACCESS_KEY_ID") or os.environ.get("AWS_ACCESS_KEY_ID") or "").strip()
+        secret_key = (os.environ.get("S3_SECRET_ACCESS_KEY") or os.environ.get("AWS_SECRET_ACCESS_KEY") or "").strip()
+        if bool(access_key) != bool(secret_key):
+            raise RuntimeError("S3 credentials require both access key and secret key")
+        if access_key:
+            client_kwargs["aws_access_key_id"] = access_key
+            client_kwargs["aws_secret_access_key"] = secret_key
+        self.client = boto3.client("s3", **client_kwargs)
 
     def save(self, key: str, data: bytes) -> None:
         self.client.put_object(Bucket=self.bucket, Key=_safe_key(key), Body=data)
@@ -89,6 +107,9 @@ class S3StorageBackend:
         safe_key = _safe_key(key)
         response = self.client.head_object(Bucket=self.bucket, Key=safe_key)
         return {"key": safe_key, "size": int(response.get("ContentLength", 0)), "content_type": response.get("ContentType")}
+
+    def ping(self) -> None:
+        self.client.list_objects_v2(Bucket=self.bucket, Prefix="", MaxKeys=1)
 
 
 def create_storage_backend(root: Path) -> StorageBackend:

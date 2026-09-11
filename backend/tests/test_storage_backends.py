@@ -57,8 +57,9 @@ def test_s3_storage_contract_with_fake_compatible_client():
             if (Bucket, Key) not in self.objects: raise FileNotFoundError(Key)
             return {"Body": Body(self.objects[(Bucket, Key)])}
         def delete_object(self, Bucket, Key): self.objects.pop((Bucket, Key), None)
-        def list_objects_v2(self, Bucket, Prefix):
-            return {"Contents": [{"Key": key} for bucket, key in self.objects if bucket == Bucket and key.startswith(Prefix)]}
+        def list_objects_v2(self, Bucket, Prefix="", MaxKeys=None):
+            items = [{"Key": key} for bucket, key in self.objects if bucket == Bucket and key.startswith(Prefix)]
+            return {"Contents": items[:MaxKeys] if MaxKeys else items}
         def head_object(self, Bucket, Key):
             if (Bucket, Key) not in self.objects: raise FileNotFoundError(Key)
             return {"ContentLength": len(self.objects[(Bucket, Key)]), "ContentType": "text/plain"}
@@ -66,6 +67,7 @@ def test_s3_storage_contract_with_fake_compatible_client():
     backend = object.__new__(S3StorageBackend)
     backend.bucket = "test-bucket"
     backend.client = FakeClient()
+    backend.ping()
     backend.save("generated/result.txt", b"hello")
     assert backend.read("generated/result.txt") == b"hello"
     assert backend.metadata("generated/result.txt")["size"] == 5
@@ -75,3 +77,39 @@ def test_s3_storage_contract_with_fake_compatible_client():
         backend.read("generated/result.txt")
     with pytest.raises(ValueError):
         backend.save("../escape", b"x")
+
+
+def test_legacy_storage_facade_routes_production_to_cloud(monkeypatch):
+    import storage
+
+    class FakeBackend:
+        bucket = "bucket"
+        def __init__(self): self.objects = {}
+        def save(self, key, data): self.objects[key] = data
+        def read(self, key): return self.objects[key]
+        def delete(self, key): self.objects.pop(key, None)
+        def ping(self): return None
+
+    fake = FakeBackend()
+    monkeypatch.setenv("LUMINA_ENV", "production")
+    monkeypatch.setenv("STORAGE_BACKEND", "supabase")
+    monkeypatch.setenv("S3_BUCKET", "bucket")
+    monkeypatch.setattr(storage, "create_storage_backend", lambda root: fake)
+    storage._BACKEND = None
+    storage._BACKEND_SIGNATURE = None
+
+    filename, location, size = storage.save_bytes(b"persistent", "text/plain", "reference")
+    assert size == 10
+    assert location.startswith("s3://bucket/references/")
+    assert storage.read_bytes(filename, "reference") == b"persistent"
+
+
+def test_production_rejects_local_user_file_storage(monkeypatch):
+    import storage
+
+    monkeypatch.setenv("LUMINA_ENV", "production")
+    monkeypatch.setenv("STORAGE_BACKEND", "local")
+    storage._BACKEND = None
+    storage._BACKEND_SIGNATURE = None
+    with pytest.raises(RuntimeError, match="S3-compatible"):
+        storage.save_bytes(b"x", "text/plain", "reference")
