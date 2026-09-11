@@ -110,7 +110,7 @@ class ExecutiveAdvisorService:
         return bool(os.environ.get("OPENAI_API_KEY", "").strip())
 
     def groq_model_name(self) -> str:
-        return os.environ.get("LUMINA_GROQ_MODEL", "llama-3.3-70b-versatile").strip() or "llama-3.3-70b-versatile"
+        return os.environ.get("LUMINA_GROQ_MODEL", "openai/gpt-oss-120b").strip() or "openai/gpt-oss-120b"
 
     def groq_configured(self) -> bool:
         return bool(os.environ.get("GROQ_API_KEY", "").strip())
