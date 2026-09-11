@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import io
 import os
-import random
 import sys
 from pathlib import Path
 
@@ -41,27 +40,39 @@ def _image_bytes(fmt: str, size: tuple[int, int] = (32, 32)) -> bytes:
     return out.getvalue()
 
 
-def _valid_jpeg_between_20_and_25_mb() -> bytes:
-    """Create a real decodable JPEG large enough to exercise the 20 MB upload path."""
+def _valid_jpeg_at_least_20mb() -> bytes:
+    """Create a real, fully decodable JPEG that exercises the 20 MB upload path."""
     minimum = 20 * 1024 * 1024
     maximum = 25 * 1024 * 1024
-    rng = random.Random(20260911)
 
-    for width, height in ((4096, 3072), (4352, 3264), (4608, 3456)):
-        pixels = rng.randbytes(width * height * 3)
-        image = Image.frombytes("RGB", (width, height), pixels)
-        for quality in (95, 97, 98, 99, 100):
-            out = io.BytesIO()
-            image.save(out, format="JPEG", quality=quality, subsampling=0, optimize=False)
-            payload = out.getvalue()
-            if minimum <= len(payload) < maximum:
-                with Image.open(io.BytesIO(payload)) as decoded:
-                    decoded.load()
-                    assert decoded.format == "JPEG"
-                    assert decoded.size == (width, height)
-                return payload
+    image = Image.new("RGB", (2048, 1536))
+    pixels = image.load()
+    for y in range(image.height):
+        for x in range(image.width):
+            pixels[x, y] = ((x * 17 + y * 13) % 256, (x * 7 + y * 19) % 256, (x * 23 + y * 5) % 256)
 
-    raise AssertionError("Could not create a valid JPEG fixture between 20 MB and 25 MB")
+    out = io.BytesIO()
+    image.save(out, format="JPEG", quality=95, subsampling=0, optimize=False)
+    base = out.getvalue()
+    assert base.endswith(b"\xff\xd9")
+
+    body = bytearray(base[:-2])
+    while len(body) + 2 < minimum:
+        remaining = minimum - (len(body) + 2)
+        payload_size = min(65533, max(1, remaining - 4))
+        segment_length = payload_size + 2
+        body.extend(b"\xff\xfe")
+        body.extend(segment_length.to_bytes(2, "big"))
+        body.extend(b"L" * payload_size)
+    body.extend(b"\xff\xd9")
+    payload = bytes(body)
+
+    assert minimum <= len(payload) < maximum
+    with Image.open(io.BytesIO(payload)) as decoded:
+        decoded.load()
+        assert decoded.format == "JPEG"
+        assert decoded.size == (2048, 1536)
+    return payload
 
 
 def _create_pack(api_client: TestClient, auth_headers: dict) -> str:
@@ -182,7 +193,7 @@ def test_editor_upload_pipeline_accepts_20mb_multipart_image():
     api_client = _client()
     auth_headers = _headers()
     pack_id = _create_pack(api_client, auth_headers)
-    payload = _valid_jpeg_between_20_and_25_mb()
+    payload = _valid_jpeg_at_least_20mb()
     response = api_client.post(
         f"{API}/identity-packs/{pack_id}/photos",
         headers=auth_headers,
