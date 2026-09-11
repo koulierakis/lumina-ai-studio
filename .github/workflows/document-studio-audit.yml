@@ -1,0 +1,107 @@
+name: Document Studio Audit
+
+on:
+  push:
+    branches:
+      - audit/document-studio-20260911
+
+jobs:
+  backend-document-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4b01fa7b207bc13b2953718c818ec3856e4d185d
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+      - name: Run Document Studio backend tests
+        env:
+          PYTHONPATH: backend
+          LUMINA_ENV: development
+          STORAGE_BACKEND: local
+        run: >-
+          python -m pytest -q
+          backend/tests/test_document_studio_ai_router.py
+          backend/tests/test_document_studio_ai_service.py
+          backend/tests/test_document_studio_cv_e2e.py
+          backend/tests/test_document_studio_foundation.py
+          backend/tests/test_document_studio_greek_export_acceptance.py
+          backend/tests/test_document_studio_greek_persistence_acceptance.py
+          backend/tests/test_document_studio_import_hardening_completion.py
+          backend/tests/test_document_studio_models.py
+          backend/tests/test_document_studio_ollama_adapter.py
+          backend/tests/test_document_studio_pdf_fonts.py
+          backend/tests/test_document_studio_provider_status.py
+          backend/tests/test_document_studio_safe_smart_fields.py
+          backend/tests/test_document_studio_source_facts_unicode.py
+          backend/tests/test_document_studio_unit.py
+          backend/tests/test_generation_orchestration.py
+          backend/tests/test_natural_creation_foundation.py
+          backend/tests/test_pack_advisor_foundation.py
+      - name: Realistic Greek PDF parser smoke check
+        continue-on-error: true
+        env:
+          PYTHONPATH: backend
+        run: |
+          python - <<'PY'
+          import io
+          from reportlab.pdfgen import canvas
+          from reportlab.pdfbase import pdfmetrics
+          from reportlab.pdfbase.ttfonts import TTFont
+          from document_studio.service import extract_text_from_upload
+          from document_studio.pdf_extraction import extract_pdf_text
+
+          text = "Καλημέρα κόσμε — Ελληνικό βιογραφικό"
+          font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+          pdfmetrics.registerFont(TTFont("DejaVu", font_path))
+          buf = io.BytesIO()
+          c = canvas.Canvas(buf)
+          c.setFont("DejaVu", 12)
+          c.drawString(72, 760, text)
+          c.save()
+          data = buf.getvalue()
+
+          robust = extract_pdf_text(data)
+          active = extract_text_from_upload(data, "application/pdf", "greek.pdf")
+          print("ROBUST_PYPDF_OUTPUT=", repr(robust))
+          print("ACTIVE_IMPORT_OUTPUT=", repr(active))
+          print("ROBUST_HAS_GREEK=", "Καλημέρα" in robust)
+          print("ACTIVE_HAS_GREEK=", "Καλημέρα" in active)
+          assert "Καλημέρα" in robust, "pypdf control extraction failed"
+          assert "Καλημέρα" in active, "active import parser failed to preserve Greek PDF text"
+          PY
+
+  frontend-document-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 4b01fa7b207bc13b2953718c818ec3856e4d185d
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Run Document Studio frontend tests
+        working-directory: frontend
+        env:
+          CI: 'true'
+        run: >-
+          npm test -- --watchAll=false --runInBand
+          src/components/documentstudio/DocumentAIAssistantPanel.providerStatus.test.jsx
+          src/components/documentstudio/DocumentAIAssistantPanel.test.jsx
+          src/components/documentstudio/DocumentRichEditor.test.jsx
+          src/components/documentstudio/DocumentWorkspaceLayout.test.js
+          src/components/documentstudio/PaginatedDocumentWorkspace.test.jsx
+          src/components/documentstudio/editorModel.test.js
+          src/documents/documentAIModel.test.js
+          src/documents/model.test.js
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
