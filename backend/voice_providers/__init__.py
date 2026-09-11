@@ -2,11 +2,11 @@
 from .edge_tts_provider import EdgeTTSVoiceProvider
 from .mock_provider import MockVoiceProvider
 
-# Keep the historical "mock" key mapped to the real free provider so the
-# existing /api/voice/generate default works without requiring a server.py
-# environment change. "microsoft" and "edge-tts" are the canonical names.
+# "mock" must resolve to the deterministic MockVoiceProvider so tests and
+# development callers receive the mock provider contract. "default",
+# "microsoft", and "edge-tts" resolve to the real free Edge TTS provider.
 _REGISTRY = {
-    "mock": EdgeTTSVoiceProvider,
+    "mock": MockVoiceProvider,
     "default": EdgeTTSVoiceProvider,
     "microsoft": EdgeTTSVoiceProvider,
     "edge-tts": EdgeTTSVoiceProvider,
