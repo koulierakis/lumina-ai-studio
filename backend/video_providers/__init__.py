@@ -5,16 +5,20 @@ from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProv
 from .mock_provider import MockVideoProvider
 from .luma_provider import LumaVideoProvider
 from .huggingface_provider import HuggingFaceVideoProvider
+from .pollinations_provider import PollinationsVideoProvider
 
 _REGISTRY: dict[str, type[VideoProvider]] = {
     "mock": MockVideoProvider,
     "luma": LumaVideoProvider,
     "huggingface": HuggingFaceVideoProvider,
+    "pollinations": PollinationsVideoProvider,
 }
 
 
 def get_video_provider(name: str | None = None) -> VideoProvider:
-    key = (name or "mock").strip().lower()
+    # Production/default generation must use a real provider. Mock remains
+    # explicitly addressable for unit tests and local demos only.
+    key = (name or "huggingface").strip().lower()
     provider_class = _REGISTRY.get(key)
     if not provider_class:
         raise VideoProviderError(key, "Unknown video provider", "The selected video engine is not available.")
@@ -29,7 +33,7 @@ def available_video_providers() -> list[str]:
 
 def video_provider_catalog() -> list[dict]:
     """Safe UI metadata; credentials and vendor implementation details stay server-side."""
-    planned = ("huggingface", "google", "openai", "runway", "kling", "pika", "luma", "veo")
+    planned = ("huggingface", "pollinations", "google", "openai", "runway", "kling", "pika", "luma", "veo")
     configured = set(available_video_providers())
     catalog = []
     for name in ("mock", *planned):
