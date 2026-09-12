@@ -186,6 +186,29 @@ class HuggingFaceVideoProvider(VideoProvider):
                 except Exception:
                     logger.warning("Could not remove temporary I2V source image: %s", temp_path)
 
+    async def _fallback_to_pollinations(self, spec: VideoGenerationInput, original_error: Exception) -> GeneratedVideo:
+        """Use Pollinations only when explicitly configured; never fall back to mock."""
+        from .pollinations_provider import PollinationsVideoProvider
+
+        if not PollinationsVideoProvider.is_configured():
+            raise original_error
+        logger.warning("Hugging Face public Space timed out/unavailable; trying Pollinations fallback")
+        try:
+            result = await PollinationsVideoProvider().generate(spec)
+            metadata = dict(result.metadata)
+            metadata["fallback_from"] = self.name
+            return GeneratedVideo(
+                data=result.data,
+                mime_type=result.mime_type,
+                preview_kind=result.preview_kind,
+                duration_seconds=result.duration_seconds,
+                resolution=result.resolution,
+                metadata=metadata,
+            )
+        except Exception:
+            logger.exception("Pollinations fallback also failed")
+            raise original_error
+
     async def generate(self, spec: VideoGenerationInput) -> GeneratedVideo:
         model = "unknown"
         provider_name = "unknown"
@@ -245,7 +268,9 @@ class HuggingFaceVideoProvider(VideoProvider):
                 resolution=spec.resolution,
                 metadata={"provider": self.name, "model": model, "mode": spec.mode},
             )
-        except VideoProviderError:
+        except VideoProviderError as exc:
+            if spec.mode == "image-to-video" and exc.retryable:
+                return await self._fallback_to_pollinations(spec, exc)
             raise
         except Exception as exc:
             message = str(exc)
@@ -261,13 +286,15 @@ class HuggingFaceVideoProvider(VideoProvider):
                 response_text[:1000],
                 message,
             )
-            retryable = any(
+            retryable = isinstance(exc, (asyncio.TimeoutError, httpx.TimeoutException)) or status in {429, 502, 503, 504} or any(
                 marker in message.lower()
                 for marker in (
                     "timeout",
                     "timed out",
                     "429",
+                    "502",
                     "503",
+                    "504",
                     "temporarily unavailable",
                     "rate limit",
                     "loading",
@@ -276,9 +303,12 @@ class HuggingFaceVideoProvider(VideoProvider):
                     "zero gpu",
                 )
             )
-            raise VideoProviderError(
+            wrapped = VideoProviderError(
                 self.name,
-                message,
+                message or exc.__class__.__name__,
                 "Video generation failed. Please try again.",
                 retryable=retryable,
-            ) from exc
+            )
+            if spec.mode == "image-to-video" and retryable:
+                return await self._fallback_to_pollinations(spec, wrapped)
+            raise wrapped from exc
