@@ -1,0 +1,162 @@
+name: personal-voice-implementation
+on:
+  push:
+    branches:
+      - work/platform-auth-five-fixes-20260911
+permissions:
+  contents: write
+jobs:
+  implement:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: work/platform-auth-five-fixes-20260911
+          fetch-depth: 0
+      - name: Sync branch
+        run: git pull --ff-only origin work/platform-auth-five-fixes-20260911
+      - name: Apply Personal Voice pipeline
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(text, old, new, label):
+              if text.count(old) != 1:
+                  raise SystemExit(f'{label}: expected one match, found {text.count(old)}')
+              return text.replace(old, new, 1)
+
+          # ---- backend/storage.py: canonical custom-key persistence ----
+          path = Path('backend/storage.py')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(
+              text,
+              '        "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac",',
+              '        "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac",\n        "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",',
+              'storage m4a extensions',
+          )
+          old_storage_key = '''def _storage_key(filename: str, kind: str) -> str:\n    safe_name = _safe_filename(filename)\n    # Preserve the existing media retrieval contract: reference assets live in\n    # references/, while every generated/document/voice derivative lives in generated/.\n    prefix = "references" if kind == "reference" else "generated"\n    return f"{prefix}/{safe_name}"\n'''
+          new_storage_key = '''def _storage_key(filename: str, kind: str) -> str:\n    # Voice reference samples intentionally keep an owner-scoped canonical S3 key.\n    # Only this controlled prefix may contain path separators in MediaAsset.filename.\n    normalized = str(filename or "").replace("\\\\", "/").lstrip("/")\n    if normalized.startswith("voice_references/"):\n        parts = normalized.split("/")\n        if len(parts) != 3 or any(not part or part in {".", ".."} for part in parts):\n            raise ValueError("Invalid voice reference storage key")\n        if _safe_filename(parts[-1]) != parts[-1]:\n            raise ValueError("Invalid voice reference filename")\n        return normalized\n    safe_name = _safe_filename(filename)\n    # Preserve the existing media retrieval contract: reference assets live in\n    # references/, while every generated/document/voice derivative lives in generated/.\n    prefix = "references" if kind == "reference" else "generated"\n    return f"{prefix}/{safe_name}"\n'''
+          text = replace_once(text, old_storage_key, new_storage_key, 'storage key support')
+          marker = '''def read_bytes(filename: str, kind: str = "reference") -> bytes:\n    return _backend().read(_storage_key(filename, kind))\n'''
+          addition = '''def save_bytes_at_key(data: bytes, mime: str, key: str) -> Tuple[str, str, int]:\n    """Persist bytes at an explicit canonical key (used for owner-scoped voice references)."""\n    if not isinstance(data, (bytes, bytearray)):\n        raise TypeError("Storage payload must be bytes")\n    normalized = _storage_key(key, "reference")\n    if not normalized.startswith("voice_references/"):\n        raise ValueError("Explicit storage keys are restricted to voice_references/")\n    backend = _backend()\n    backend.save(normalized, bytes(data))\n    if isinstance(backend, LocalStorageBackend):\n        location = str((_root() / normalized).resolve())\n    else:\n        location = f"s3://{getattr(backend, 'bucket', 'bucket')}/{normalized}"\n    return normalized, location, len(data)\n\n\ndef read_bytes(filename: str, kind: str = "reference") -> bytes:\n    return _backend().read(_storage_key(filename, kind))\n'''
+          text = replace_once(text, marker, addition, 'storage explicit key function')
+          path.write_text(text, encoding='utf-8')
+
+          # ---- backend/models.py: expose sample metadata and pack link on jobs ----
+          path = Path('backend/models.py')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(
+              text,
+              '    sample_media_ids: List[str] = Field(default_factory=list)\n    sample_count: int = 0',
+              '    sample_media_ids: List[str] = Field(default_factory=list)\n    samples: List[Dict[str, Any]] = Field(default_factory=list)\n    sample_count: int = 0',
+              'VoicePack samples metadata',
+          )
+          voice_job_anchor = '    personal_model_id: Optional[str] = None\n    output_format: str = "wav"'
+          text = replace_once(
+              text,
+              voice_job_anchor,
+              '    personal_model_id: Optional[str] = None\n    voice_pack_id: Optional[str] = None\n    output_format: str = "wav"',
+              'VoiceJob voice_pack_id',
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # ---- backend/server.py: upload persistence + personal voice synthesis contract ----
+          path = Path('backend/server.py')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(
+              text,
+              'from storage import delete_file, read_bytes, save_bytes, storage_health  # noqa: E402',
+              'from storage import delete_file, read_bytes, save_bytes, save_bytes_at_key, storage_health  # noqa: E402',
+              'storage import',
+          )
+          text = replace_once(
+              text,
+              'ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"}',
+              'ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg", "audio/mp4", "audio/x-m4a", "audio/aac"}',
+              'audio mime list',
+          )
+          text = replace_once(
+              text,
+              'suffix = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/webm": ".webm", "audio/ogg": ".ogg"}.get(mime, ".audio")',
+              'suffix = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".aac"}.get(mime, ".audio")',
+              'audio probe suffixes',
+          )
+
+          upload_pattern = re.compile(r'@api\.post\("/voice/packs/\{pack_id\}/samples"\)\nasync def upload_voice_sample\(.*?\n\ndef _inspect_voice_sample', re.S)
+          upload_replacement = '''@api.post("/voice/packs/{pack_id}/samples")\nasync def upload_voice_sample(pack_id: str, file: UploadFile = File(...), owner: str = Depends(require_owner)) -> dict:\n    pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})\n    if not pack:\n        raise HTTPException(404, "Voice Pack not found")\n    mime = (file.content_type or "").lower().split(";", 1)[0]\n    if mime not in ALLOWED_AUDIO_MIMES:\n        raise HTTPException(400, "Upload WAV, MP3, M4A, AAC, OGG, or WebM audio samples only.")\n    data = await file.read()\n    if not data or len(data) > MAX_VOICE_SAMPLE_BYTES:\n        raise HTTPException(400, "Audio sample must be between 1 byte and 25 MB.")\n    metadata = _inspect_voice_sample(data, mime)\n    safe_owner = re.sub(r"[^A-Za-z0-9@._+-]", "_", owner)\n    extension = {\n        "audio/wav": ".wav", "audio/x-wav": ".wav",\n        "audio/mpeg": ".mp3", "audio/mp3": ".mp3",\n        "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",\n        "audio/aac": ".aac", "audio/ogg": ".ogg", "audio/webm": ".webm",\n    }.get(mime, ".audio")\n    s3_key = f"voice_references/{safe_owner}/{new_id()}{extension}"\n    filename, location, size = save_bytes_at_key(data, mime, s3_key)\n    sample = {\n        "media_id": None,\n        "s3_key": s3_key,\n        "duration_seconds": metadata["duration_seconds"],\n        "filename": Path(file.filename or f"voice-sample{extension}").name,\n        "storage_filename": filename,\n        "mime_type": mime,\n        "size_bytes": size,\n        "sample_rate": metadata.get("sample_rate"),\n        "channels": metadata.get("channels"),\n        "codec": metadata.get("codec"),\n        "created_at": now_iso(),\n    }\n    media = MediaAsset(\n        owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size,\n        edit_note="voice-pack-sample", source_module="voice", voice_pack_id=pack_id,\n        metadata={**metadata, "original_name": sample["filename"], "s3_key": s3_key, "storage_location": location},\n    )\n    await media_coll.insert_one(media.model_dump())\n    sample["media_id"] = media.id\n    pack.setdefault("sample_media_ids", []).append(media.id)\n    pack.setdefault("samples", []).append(sample)\n    pack["sample_count"] = len(pack["sample_media_ids"])\n    pack["total_sample_duration_seconds"] = round(sum(float(item.get("duration_seconds") or 0) for item in pack["samples"]), 3)\n    pack["readiness_status"] = "ready"\n    pack["provider"] = "openvoice-v2-pending"\n    pack["updated_at"] = now_iso()\n    await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)\n    return {\n        "media_id": media.id, "mime_type": mime, "size_bytes": size,\n        "filename": sample["filename"], "s3_key": s3_key,\n        "duration_seconds": metadata["duration_seconds"], "metadata": metadata,\n        "pack": VoicePack(**pack).model_dump(),\n    }\n\ndef _inspect_voice_sample'''
+          text, count = upload_pattern.subn(upload_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'voice sample upload replacement count={count}')
+
+          remove_pattern = re.compile(r'@api\.delete\("/voice/packs/\{pack_id\}/samples/\{media_id\}"\)\nasync def remove_voice_sample\(.*?\n\n@api\.get\("/voice/transcription/providers"\)', re.S)
+          remove_replacement = '''@api.delete("/voice/packs/{pack_id}/samples/{media_id}")\nasync def remove_voice_sample(pack_id: str, media_id: str, owner: str = Depends(require_owner)) -> dict:\n    pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})\n    if not pack or media_id not in pack.get("sample_media_ids", []):\n        raise HTTPException(404, "Voice sample not found")\n    media = await media_coll.find_one_and_delete({"id": media_id, "owner_email": owner}, {"_id": 0})\n    if media:\n        try:\n            delete_file(media["filename"], "reference")\n        except (OSError, FileNotFoundError, ValueError):\n            pass\n    pack["sample_media_ids"] = [item for item in pack.get("sample_media_ids", []) if item != media_id]\n    pack["samples"] = [item for item in pack.get("samples", []) if item.get("media_id") != media_id]\n    pack["sample_count"] = len(pack["sample_media_ids"])\n    pack["total_sample_duration_seconds"] = round(sum(float(item.get("duration_seconds") or 0) for item in pack["samples"]), 3)\n    pack["readiness_status"] = "ready" if pack["sample_count"] else "draft"\n    pack["updated_at"] = now_iso()\n    await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)\n    return {"ok": True, "pack": VoicePack(**pack).model_dump()}\n\n@api.get("/voice/transcription/providers")'''
+          text, count = remove_pattern.subn(remove_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'voice sample delete replacement count={count}')
+
+          generate_pattern = re.compile(r'@api\.post\("/voice/generate", response_model=VoiceJob\)\nasync def create_voice_job\(.*?\n    return job\n\n@api\.post\("/voice/export"\)', re.S)
+          generate_replacement = '''@api.post("/voice/generate", response_model=VoiceJob)\nasync def create_voice_job(\n    background: BackgroundTasks,\n    text: str = Form(""),\n    mode: str = Form("text-to-speech"),\n    voice: str = Form("personal-user"),\n    voice_pack_id: Optional[str] = Form(None),\n    style: str = Form("podcast"),\n    preset_id: Optional[str] = Form(None),\n    output_format: str = Form("wav"),\n    sample_rate: int = Form(48000),\n    bit_depth: int = Form(24),\n    bitrate: str = Form("192k"),\n    loudness_lufs: float = Form(-16),\n    title: str = Form(""),\n    tags: str = Form(""),\n    provider: Optional[str] = Form(None),\n    owner: str = Depends(require_owner),\n) -> VoiceJob:\n    if mode not in VOICE_MODES:\n        raise HTTPException(400, "Unsupported voice operation.")\n    if style not in VOICE_STYLES:\n        raise HTTPException(400, "Unsupported voice style.")\n    selected_pack = None\n    if voice_pack_id:\n        selected_pack = await voice_packs_coll.find_one({"id": voice_pack_id, "owner_email": owner}, {"_id": 0})\n        if not selected_pack:\n            raise HTTPException(404, "Voice Pack not found")\n        if not selected_pack.get("sample_media_ids"):\n            raise HTTPException(400, "Upload at least one reference sample before using this Personal Voice.")\n    selected = "edge-tts" if selected_pack else (provider or os.environ.get("VOICE_PROVIDER", "edge-tts")).lower()\n    try:\n        engine = get_voice_provider(selected)\n    except ValueError as exc:\n        raise HTTPException(400, str(exc)) from exc\n    if mode not in engine.capabilities["modes"]:\n        raise HTTPException(400, "The selected voice provider does not support this operation.")\n    if output_format not in engine.capabilities["formats"]:\n        raise HTTPException(400, "The selected voice provider does not support this output format.")\n    if mode == "text-to-speech" and not text.strip():\n        raise HTTPException(400, "Enter text to generate speech.")\n    personal_model = await _get_or_create_personal_voice_model(owner)\n    job_metadata = {"identity_preservation": True, "personal_model_version": personal_model.version}\n    selected_voice = voice\n    if selected_pack:\n        reference_media_id = selected_pack["sample_media_ids"][0]\n        selected_voice = "el-GR-NestorasNeural"\n        job_metadata.update({\n            "job_type": "personal-voice-synthesis",\n            "voice_pack_id": voice_pack_id,\n            "voice_pack_name": selected_pack.get("name"),\n            "reference_sample_media_id": reference_media_id,\n            "base_tts_provider": "edge-tts",\n            "base_tts_language": "el-GR",\n            "tone_converter": "openvoice-v2",\n            "tone_conversion_status": "pending",\n        })\n    job = VoiceJob(\n        owner_email=owner, provider=selected, mode=mode, text=text.strip(), voice=selected_voice,\n        voice_pack_id=voice_pack_id, style=style, preset_id=preset_id, personal_model_id=personal_model.id,\n        output_format=output_format, sample_rate=sample_rate, bit_depth=bit_depth, bitrate=bitrate,\n        loudness_lufs=loudness_lufs,\n        title=(title.strip() or text.strip()[:80] or f"{style.title()} voice production"),\n        tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:12], metadata=job_metadata,\n    )\n    await voice_jobs_coll.insert_one(job.model_dump())\n    background.add_task(_run_voice_job, job.id, owner)\n    return job\n\n@api.post("/voice/export")'''
+          text, count = generate_pattern.subn(generate_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'voice generate replacement count={count}')
+
+          text = replace_once(
+              text,
+              '(data, mime, metadata), runtime_job = await _runtime_execute(owner, "voice", "speech", job.provider, {"mode": job.mode, "title": job.title, "format": job.output_format}, voice_executor)',
+              'task_type = "personal-voice-synthesis" if (job.metadata or {}).get("job_type") == "personal-voice-synthesis" else "speech"\n        (data, mime, metadata), runtime_job = await _runtime_execute(owner, "voice", task_type, job.provider, {"mode": job.mode, "title": job.title, "format": job.output_format, "voice_pack_id": job.voice_pack_id}, voice_executor)',
+              'runtime personal voice task type',
+          )
+          text = replace_once(
+              text,
+              '"metadata": {**metadata, **audio_metadata, "runtime_job_id": runtime_job.id}',
+              '"metadata": {**(job.metadata or {}), **metadata, **audio_metadata, "runtime_job_id": runtime_job.id, "base_audio_media_id": media.id, "personal_voice_ready_for_conversion": bool(job.voice_pack_id)}',
+              'voice job metadata merge',
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # ---- frontend Voice Studio: clickable packs, upload progress, personal voice selection ----
+          path = Path('frontend/src/pages/VoiceStudio.jsx')
+          text = path.read_text(encoding='utf-8')
+          text = replace_once(
+              text,
+              "function Tab({tab,packs,jobs,reload}){if(tab==='Generate Speech')return <Generate/>;",
+              "function Tab({tab,packs,jobs,reload}){if(tab==='Generate Speech')return <Generate packs={packs}/>;",
+              'Generate packs prop',
+          )
+          generate_pattern = re.compile(r'function Generate\(\)\{.*?\nfunction Packs', re.S)
+          generate_replacement = '''function Generate({packs}){const [text,setText]=useState(''),[voiceChoice,setVoiceChoice]=useState('edge:el-GR-NestorasNeural'),[job,setJob]=useState(null),[audioUrl,setAudioUrl]=useState('');const audioUrlRef=useRef('');useEffect(()=>()=>{if(audioUrlRef.current)URL.revokeObjectURL(audioUrlRef.current)},[]);useEffect(()=>{if(!job?.id||!active(job.status))return undefined;let cancelled=false;let timer;const poll=async()=>{try{const rows=await apiGet('/voice/jobs');if(cancelled)return;const latest=rows.find(item=>item.id===job.id);if(!latest){timer=setTimeout(poll,700);return}setJob(latest);if(active(latest.status))timer=setTimeout(poll,700)}catch(e){if(!cancelled){toast.error(e.message||'Unable to refresh voice job.');timer=setTimeout(poll,700)}}};timer=setTimeout(poll,700);return()=>{cancelled=true;clearTimeout(timer)}},[job?.id,job?.status]);useEffect(()=>{if(job?.status!=='completed'||!job.output_media_id)return undefined;let cancelled=false;fetchMediaBlobUrl(job.output_media_id).then(url=>{if(cancelled){URL.revokeObjectURL(url);return}if(audioUrlRef.current)URL.revokeObjectURL(audioUrlRef.current);audioUrlRef.current=url;setAudioUrl(url)}).catch(e=>{if(!cancelled)toast.error(e.message||'Unable to load generated audio.')});return()=>{cancelled=true}},[job?.status,job?.output_media_id]);const submit=async e=>{e.preventDefault();const f=new FormData();f.append('text',text);f.append('mode','text-to-speech');f.append('output_format','wav');if(voiceChoice.startsWith('pack:')){f.append('voice_pack_id',voiceChoice.slice(5));f.append('voice','el-GR-NestorasNeural')}else{f.append('voice',voiceChoice.split(':')[1]||'el-GR-NestorasNeural')}try{if(audioUrlRef.current){URL.revokeObjectURL(audioUrlRef.current);audioUrlRef.current='';setAudioUrl('')}setJob(await uploadFormData('/voice/generate',f))}catch(e){toast.error(e.message)}};const readyPacks=(packs||[]).filter(p=>Number(p.sample_count||0)>0);return <div className="grid lg:grid-cols-2 gap-5"><Card><form onSubmit={submit} className="space-y-4"><label className="text-xs text-white/60">Voice<select aria-label="Voice" value={voiceChoice} onChange={e=>setVoiceChoice(e.target.value)} className="mt-2 block w-full rounded bg-black/40 p-3 text-white"><option value="edge:el-GR-NestorasNeural">Greek · Nestoras (Edge TTS)</option><option value="edge:en-US-AriaNeural">English · Aria (Edge TTS)</option>{readyPacks.map(p=><option key={p.id} value={`pack:${p.id}`}>{p.name} (Personal Voice)</option>)}</select></label><label className="text-xs text-white/60">Speech text<textarea required value={text} onChange={e=>setText(e.target.value)} className="mt-2 block w-full rounded bg-black/40 p-3 text-white" rows="7"/></label><button className="bg-gold text-black rounded px-4 py-2 text-sm">Generate speech</button>{voiceChoice.startsWith('pack:')&&<p className="text-amber-200 text-xs">Creates the Greek Edge TTS base and prepares this job for OpenVoice V2 tone conversion.</p>}</form></Card><Card>{audioUrl?<><audio controls src={audioUrl} className="w-full"/><p className="text-white/50 text-xs mt-2">Job completed · {job?.provider}{job?.voice_pack_id?' · Personal Voice base prepared':''}</p></>:<p className={`text-sm ${job?.status==='failed'?'text-red-200':'text-white/50'}`}>{job?job.status==='failed'?(job.error||'Voice generation failed.'):`Job ${job.status}`:'Generated audio preview appears here.'}</p>}</Card></div>}\nfunction Packs'''
+          text, count = generate_pattern.subn(generate_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Generate component replacement count={count}')
+
+          packs_pattern = re.compile(r'function Packs\(\{packs,reload\}\)\{.*?\nexport function Recorder', re.S)
+          packs_replacement = '''function Packs({packs,reload}){const [name,setName]=useState('');const [selected,setSelected]=useState(null);const [file,setFile]=useState(null);const [uploading,setUploading]=useState(false);const [progress,setProgress]=useState(0);const create=async()=>{try{await apiPost('/voice/packs',{name,consent_confirmed:true,ownership_declaration:'I own this voice and have consent.'});setName('');reload()}catch(e){toast.error(e.message)}};const upload=async()=>{if(!selected||!file)return;const lower=(file.name||'').toLowerCase();if(!['.wav','.mp3','.m4a'].some(ext=>lower.endsWith(ext))){toast.error('Upload a WAV, MP3, or M4A file.');return}setUploading(true);setProgress(0);const f=new FormData();f.append('file',file);try{const result=await uploadFormData(`/voice/packs/${selected.id}/samples`,f,{onUploadProgress:e=>{if(e.total)setProgress(Math.min(100,Math.round((e.loaded/e.total)*100)))}});setSelected(result.pack||{...selected,sample_count:Number(selected.sample_count||0)+1,readiness_status:'ready'});setFile(null);setProgress(100);toast.success('Voice sample uploaded.');await reload()}catch(e){toast.error(e.message||'Voice sample upload failed.')}finally{setUploading(false)}};return <Card><div className="flex gap-2"><input value={name} onChange={e=>setName(e.target.value)} placeholder="New Voice Pack" className="bg-black/40 rounded p-2"/><button onClick={create} className="bg-gold text-black rounded px-3">Create</button></div>{packs.length?<div className="mt-4 grid md:grid-cols-2 gap-3">{packs.map(p=><article key={p.id} role="button" tabIndex="0" onClick={()=>setSelected(p)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' ')setSelected(p)}} className="border border-white/10 rounded p-3 cursor-pointer hover:border-gold/50 focus:outline-none focus:ring-1 focus:ring-gold"><b>{p.name}</b><p className="text-xs text-white/50">{p.sample_count} {p.sample_count===1?'sample':'samples'} · {Number(p.sample_count||0)>0?'ready':p.readiness_status}</p><button onClick={e=>{e.stopPropagation();apiPatch(`/voice/packs/${p.id}`,{favorite:!p.favorite}).then(reload)}} className="text-xs text-gold">Favorite</button></article>)}</div>:<p className="text-white/45 mt-4">No Voice Packs yet.</p>}{selected&&<div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={()=>!uploading&&setSelected(null)}><div role="dialog" aria-modal="true" aria-label={`${selected.name} Voice Pack`} onClick={e=>e.stopPropagation()} className="w-full max-w-xl lumina-glass rounded-xl p-6 space-y-4"><div className="flex justify-between gap-4"><div><h2 className="text-xl text-white">{selected.name}</h2><p className="text-xs text-white/50">{selected.sample_count||0} samples · {Number(selected.sample_count||0)>0?'ready':selected.readiness_status}</p></div><button disabled={uploading} onClick={()=>setSelected(null)} className="text-white/60">Close</button></div><label className="block text-sm text-white/70">Upload Voice Sample<input aria-label="Upload Voice Sample" type="file" accept=".wav,.mp3,.m4a,audio/wav,audio/mpeg,audio/mp4,audio/x-m4a" onChange={e=>{setFile(e.target.files?.[0]||null);setProgress(0)}} className="mt-2 block w-full text-xs"/></label>{file&&<p className="text-xs text-white/50">{file.name}</p>}{uploading&&<div><div className="h-2 rounded bg-white/10 overflow-hidden"><div className="h-full bg-gold transition-all" style={{width:`${progress}%`}}/></div><p className="text-xs text-white/50 mt-1">Uploading… {progress}%</p></div>}<button disabled={!file||uploading} onClick={upload} className="bg-gold text-black rounded px-4 py-2 text-sm disabled:opacity-40">{uploading?'Uploading…':'Upload Voice Sample'}</button><p className="text-xs text-white/40">WAV, MP3 or M4A · up to 25 MB · stored as an owner-scoped voice reference.</p></div></div>}</Card>}\nexport function Recorder'''
+          text, count = packs_pattern.subn(packs_replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'Packs component replacement count={count}')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Python syntax validation
+        run: python -m py_compile backend/server.py backend/storage.py backend/models.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend install
+        working-directory: frontend
+        run: npm ci
+      - name: Frontend build
+        working-directory: frontend
+        run: npm run build
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/personal-voice-implementation.yml
+          git add backend/server.py backend/storage.py backend/models.py frontend/src/pages/VoiceStudio.jsx
+          git commit -m "feat(voice): add personal voice pack pipeline"
+          git push origin HEAD:work/platform-auth-five-fixes-20260911
