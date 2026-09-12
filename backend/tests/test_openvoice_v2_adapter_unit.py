@@ -1,3 +1,4 @@
+import asyncio
 import base64
 
 import pytest
@@ -15,16 +16,14 @@ def test_from_env_not_configured(monkeypatch):
     assert converter.required is False
 
 
-@pytest.mark.asyncio
-async def test_convert_rejects_missing_endpoint():
+def test_convert_rejects_missing_endpoint():
     converter = OpenVoiceV2ToneConverter()
     with pytest.raises(ToneConversionError) as exc:
-        await converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav")
+        asyncio.run(converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav"))
     assert exc.value.code == "not_configured"
 
 
-@pytest.mark.asyncio
-async def test_convert_accepts_raw_audio(monkeypatch):
+def test_convert_accepts_raw_audio(monkeypatch):
     class FakeResponse:
         status_code = 200
         headers = {"content-type": "audio/wav"}
@@ -51,14 +50,13 @@ async def test_convert_accepts_raw_audio(monkeypatch):
 
     monkeypatch.setattr(openvoice_v2.httpx, "AsyncClient", FakeClient)
     converter = OpenVoiceV2ToneConverter(endpoint="https://voice.example/convert")
-    result = await converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav")
+    result = asyncio.run(converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav"))
     assert result.audio == b"converted-audio"
     assert result.mime_type == "audio/wav"
     assert result.metadata["tone_converter"] == "openvoice-v2"
 
 
-@pytest.mark.asyncio
-async def test_convert_accepts_json_base64(monkeypatch):
+def test_convert_accepts_json_base64(monkeypatch):
     encoded = base64.b64encode(b"voice-clone").decode("ascii")
 
     class FakeResponse:
@@ -84,6 +82,6 @@ async def test_convert_accepts_json_base64(monkeypatch):
 
     monkeypatch.setattr(openvoice_v2.httpx, "AsyncClient", FakeClient)
     converter = OpenVoiceV2ToneConverter(endpoint="https://voice.example/convert")
-    result = await converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav")
+    result = asyncio.run(converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav"))
     assert result.audio == b"voice-clone"
     assert result.mime_type == "audio/mpeg"
