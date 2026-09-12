@@ -6,7 +6,9 @@ import io
 from PIL import Image
 
 from video_providers import available_video_providers, get_video_provider
-from video_providers.base import VideoGenerationInput
+from video_providers.base import GeneratedVideo, VideoGenerationInput
+from video_providers.huggingface_provider import HuggingFaceVideoProvider
+from video_providers.pollinations_provider import PollinationsVideoProvider
 
 
 def _source_png() -> bytes:
@@ -14,6 +16,10 @@ def _source_png() -> bytes:
     output = io.BytesIO()
     image.save(output, format="PNG")
     return output.getvalue()
+
+
+def test_default_video_provider_is_real_huggingface():
+    assert get_video_provider().name == "huggingface"
 
 
 def test_mock_video_provider_creates_animated_gif():
@@ -39,3 +45,35 @@ def test_mock_provider_supports_text_only_request_for_local_workflows():
         mode="text-to-video", prompt="golden abstract motion", duration_seconds=3, aspect_ratio="16:9",
     )))
     assert result.data.startswith((b"GIF87a", b"GIF89a"))
+
+
+def test_pollinations_is_optional_without_api_key(monkeypatch):
+    monkeypatch.delenv("POLLINATIONS_API_KEY", raising=False)
+    assert PollinationsVideoProvider.is_configured() is False
+
+
+def test_huggingface_timeout_uses_pollinations_when_configured(monkeypatch):
+    monkeypatch.setenv("POLLINATIONS_API_KEY", "sk_test")
+    provider = HuggingFaceVideoProvider()
+
+    async def timeout(_spec):
+        raise asyncio.TimeoutError()
+
+    async def fallback(_self, _spec):
+        return GeneratedVideo(
+            data=b"\x00\x00\x00\x18ftypmp42test",
+            mime_type="video/mp4",
+            metadata={"provider": "pollinations"},
+        )
+
+    monkeypatch.setattr(provider, "_generate_image_to_video_via_gradio", timeout)
+    monkeypatch.setattr(PollinationsVideoProvider, "generate", fallback)
+
+    result = asyncio.run(provider.generate(VideoGenerationInput(
+        mode="image-to-video", source_images=[_source_png()], source_mimes=["image/png"],
+        prompt="Slow cinematic movement", duration_seconds=3, aspect_ratio="9:16",
+    )))
+
+    assert result.mime_type == "video/mp4"
+    assert result.metadata["provider"] == "pollinations"
+    assert result.metadata["fallback_from"] == "huggingface"
