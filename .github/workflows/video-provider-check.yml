@@ -1,0 +1,21 @@
+name: video-provider-check
+on:
+  push:
+    branches:
+      - work/platform-auth-five-fixes-20260911
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r backend/requirements.txt
+      - name: Compile video providers
+        run: python -m py_compile backend/video_providers/base.py backend/video_providers/__init__.py backend/video_providers/huggingface_provider.py backend/video_providers/pollinations_provider.py
+      - name: Run video unit tests
+        working-directory: backend
+        run: python -m pytest tests/test_video_provider_unit.py tests/test_video_studio_professional_unit.py tests/test_luma_video_provider_unit.py -q
