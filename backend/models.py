@@ -438,6 +438,7 @@ class VoiceJob(BaseModel):
     style: str = "podcast"
     preset_id: Optional[str] = None
     personal_model_id: Optional[str] = None
+    voice_pack_id: Optional[str] = None
     output_format: str = "wav"
     sample_rate: int = 48000
     bit_depth: int = 24
@@ -586,6 +587,7 @@ class VoicePack(BaseModel):
     consent_at: Optional[str] = None
     ownership_declaration: str = ""
     sample_media_ids: List[str] = Field(default_factory=list)
+    samples: List[Dict[str, Any]] = Field(default_factory=list)
     sample_count: int = 0
     total_sample_duration_seconds: float = 0
     favorite: bool = False

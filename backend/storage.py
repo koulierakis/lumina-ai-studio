@@ -35,6 +35,7 @@ def _ext_from_mime(mime: str) -> str:
         "video/webm": ".webm",
         "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
         "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac",
+        "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",
         "application/pdf": ".pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
         "application/zip": ".zip",
@@ -80,6 +81,16 @@ def _backend():
 
 
 def _storage_key(filename: str, kind: str) -> str:
+    # Voice reference samples intentionally keep an owner-scoped canonical S3 key.
+    # Only this controlled prefix may contain path separators in MediaAsset.filename.
+    normalized = str(filename or "").replace("\\", "/").lstrip("/")
+    if normalized.startswith("voice_references/"):
+        parts = normalized.split("/")
+        if len(parts) != 3 or any(not part or part in {".", ".."} for part in parts):
+            raise ValueError("Invalid voice reference storage key")
+        if _safe_filename(parts[-1]) != parts[-1]:
+            raise ValueError("Invalid voice reference filename")
+        return normalized
     safe_name = _safe_filename(filename)
     # Preserve the existing media retrieval contract: reference assets live in
     # references/, while every generated/document/voice derivative lives in generated/.
@@ -99,6 +110,22 @@ def save_bytes(data: bytes, mime: str, kind: str = "reference") -> Tuple[str, st
     else:
         location = f"s3://{getattr(backend, 'bucket', 'bucket')}/{key}"
     return filename, location, len(data)
+
+
+def save_bytes_at_key(data: bytes, mime: str, key: str) -> Tuple[str, str, int]:
+    """Persist bytes at an explicit canonical key (used for owner-scoped voice references)."""
+    if not isinstance(data, (bytes, bytearray)):
+        raise TypeError("Storage payload must be bytes")
+    normalized = _storage_key(key, "reference")
+    if not normalized.startswith("voice_references/"):
+        raise ValueError("Explicit storage keys are restricted to voice_references/")
+    backend = _backend()
+    backend.save(normalized, bytes(data))
+    if isinstance(backend, LocalStorageBackend):
+        location = str((_root() / normalized).resolve())
+    else:
+        location = f"s3://{getattr(backend, 'bucket', 'bucket')}/{normalized}"
+    return normalized, location, len(data)
 
 
 def read_bytes(filename: str, kind: str = "reference") -> bytes:

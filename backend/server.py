@@ -122,7 +122,7 @@ from providers import (  # noqa: E402
     available_providers,
     manager as provider_manager,
 )
-from storage import delete_file, read_bytes, save_bytes, storage_health  # noqa: E402
+from storage import delete_file, read_bytes, save_bytes, save_bytes_at_key, storage_health  # noqa: E402
 from local_tools import resolve_executable  # noqa: E402
 from video_providers import VideoGenerationInput, VideoProviderError, available_video_providers, get_video_provider, video_provider_catalog  # noqa: E402
 from platform_services import emit_notification  # noqa: E402
@@ -239,7 +239,7 @@ _configure_local_first_collections()
 
 ALLOWED_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 ALLOWED_VIDEO_MIMES = {"video/mp4", "video/quicktime", "video/webm", "video/x-msvideo"}
-ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"}
+ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg", "audio/mp4", "audio/x-m4a", "audio/aac"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (images / mask; verified for 20 MB uploads)
 MAX_VIDEO_ASSET_BYTES = 500 * 1024 * 1024  # 500 MB (video / audio for editor)
 MAX_PHOTOS_PER_PACK = 15
@@ -2707,7 +2707,7 @@ def _probe_audio_bytes(data: bytes, mime_type: str) -> dict:
     ffprobe = resolve_executable("ffprobe")
     if not ffprobe:
         raise ValueError("FFprobe is unavailable for this audio format.")
-    suffix = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/webm": ".webm", "audio/ogg": ".ogg"}.get(mime, ".audio")
+    suffix = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/aac": ".aac"}.get(mime, ".audio")
     path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
@@ -2745,12 +2745,13 @@ async def _run_voice_job(job_id: str, owner: str) -> None:
             generated = await provider.generate(job.text or job.title, job.voice, job.output_format, style=job.style, mode=job.mode, preset_id=job.preset_id, sample_rate=job.sample_rate, bit_depth=job.bit_depth, bitrate=job.bitrate, loudness_lufs=job.loudness_lufs)
             await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Voice provider returned audio")
             return generated
-        (data, mime, metadata), runtime_job = await _runtime_execute(owner, "voice", "speech", job.provider, {"mode": job.mode, "title": job.title, "format": job.output_format}, voice_executor)
+        task_type = "personal-voice-synthesis" if (job.metadata or {}).get("job_type") == "personal-voice-synthesis" else "speech"
+        (data, mime, metadata), runtime_job = await _runtime_execute(owner, "voice", task_type, job.provider, {"mode": job.mode, "title": job.title, "format": job.output_format, "voice_pack_id": job.voice_pack_id}, voice_executor)
         audio_metadata = _probe_audio_bytes(data, mime)
         filename, _, size = save_bytes(data, mime, kind="generated")
         media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="generated", source_module="voice", size_bytes=size, edit_note=f"voice-studio:{job.provider}")
         await media_coll.insert_one(media.model_dump())
-        await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "completed", "progress": 100, "output_media_id": media.id, "metadata": {**metadata, **audio_metadata, "runtime_job_id": runtime_job.id}, "updated_at": now_iso()}})
+        await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "completed", "progress": 100, "output_media_id": media.id, "metadata": {**(job.metadata or {}), **metadata, **audio_metadata, "runtime_job_id": runtime_job.id, "base_audio_media_id": media.id, "personal_voice_ready_for_conversion": bool(job.voice_pack_id)}, "updated_at": now_iso()}})
     except Exception as exc:
         logger.exception("Voice job failed: %s", exc)
         await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "failed", "error": "Audio processing could not be completed.", "updated_at": now_iso()}})
@@ -2812,18 +2813,72 @@ async def list_voice_projects(owner: str = Depends(require_owner), search: str =
     return [VoiceProject(**doc) async for doc in voice_projects_coll.find(query, {"_id": 0}).sort("updated_at", -1).limit(100)]
 
 @api.post("/voice/generate", response_model=VoiceJob)
-async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mode: str = Form("text-to-speech"), voice: str = Form("personal-user"), style: str = Form("podcast"), preset_id: Optional[str] = Form(None), output_format: str = Form("wav"), sample_rate: int = Form(48000), bit_depth: int = Form(24), bitrate: str = Form("192k"), loudness_lufs: float = Form(-16), title: str = Form(""), tags: str = Form(""), provider: Optional[str] = Form(None), owner: str = Depends(require_owner)) -> VoiceJob:
-    if mode not in VOICE_MODES: raise HTTPException(400, "Unsupported voice operation.")
-    if style not in VOICE_STYLES: raise HTTPException(400, "Unsupported voice style.")
-    selected = (provider or os.environ.get("VOICE_PROVIDER", "edge-tts")).lower()
-    try: engine = get_voice_provider(selected)
-    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
-    if mode not in engine.capabilities["modes"]: raise HTTPException(400, "The selected voice provider does not support this operation.")
-    if output_format not in engine.capabilities["formats"]: raise HTTPException(400, "The selected voice provider does not support this output format.")
-    if mode == "text-to-speech" and not text.strip(): raise HTTPException(400, "Enter text to generate speech.")
+async def create_voice_job(
+    background: BackgroundTasks,
+    text: str = Form(""),
+    mode: str = Form("text-to-speech"),
+    voice: str = Form("personal-user"),
+    voice_pack_id: Optional[str] = Form(None),
+    style: str = Form("podcast"),
+    preset_id: Optional[str] = Form(None),
+    output_format: str = Form("wav"),
+    sample_rate: int = Form(48000),
+    bit_depth: int = Form(24),
+    bitrate: str = Form("192k"),
+    loudness_lufs: float = Form(-16),
+    title: str = Form(""),
+    tags: str = Form(""),
+    provider: Optional[str] = Form(None),
+    owner: str = Depends(require_owner),
+) -> VoiceJob:
+    if mode not in VOICE_MODES:
+        raise HTTPException(400, "Unsupported voice operation.")
+    if style not in VOICE_STYLES:
+        raise HTTPException(400, "Unsupported voice style.")
+    selected_pack = None
+    if voice_pack_id:
+        selected_pack = await voice_packs_coll.find_one({"id": voice_pack_id, "owner_email": owner}, {"_id": 0})
+        if not selected_pack:
+            raise HTTPException(404, "Voice Pack not found")
+        if not selected_pack.get("sample_media_ids"):
+            raise HTTPException(400, "Upload at least one reference sample before using this Personal Voice.")
+    selected = "edge-tts" if selected_pack else (provider or os.environ.get("VOICE_PROVIDER", "edge-tts")).lower()
+    try:
+        engine = get_voice_provider(selected)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if mode not in engine.capabilities["modes"]:
+        raise HTTPException(400, "The selected voice provider does not support this operation.")
+    if output_format not in engine.capabilities["formats"]:
+        raise HTTPException(400, "The selected voice provider does not support this output format.")
+    if mode == "text-to-speech" and not text.strip():
+        raise HTTPException(400, "Enter text to generate speech.")
     personal_model = await _get_or_create_personal_voice_model(owner)
-    job = VoiceJob(owner_email=owner, provider=selected, mode=mode, text=text.strip(), voice=voice, style=style, preset_id=preset_id, personal_model_id=personal_model.id, output_format=output_format, sample_rate=sample_rate, bit_depth=bit_depth, bitrate=bitrate, loudness_lufs=loudness_lufs, title=(title.strip() or text.strip()[:80] or f"{style.title()} voice production"), tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:12], metadata={"identity_preservation": True, "personal_model_version": personal_model.version})
-    await voice_jobs_coll.insert_one(job.model_dump()); background.add_task(_run_voice_job, job.id, owner)
+    job_metadata = {"identity_preservation": True, "personal_model_version": personal_model.version}
+    selected_voice = voice
+    if selected_pack:
+        reference_media_id = selected_pack["sample_media_ids"][0]
+        selected_voice = "el-GR-NestorasNeural"
+        job_metadata.update({
+            "job_type": "personal-voice-synthesis",
+            "voice_pack_id": voice_pack_id,
+            "voice_pack_name": selected_pack.get("name"),
+            "reference_sample_media_id": reference_media_id,
+            "base_tts_provider": "edge-tts",
+            "base_tts_language": "el-GR",
+            "tone_converter": "openvoice-v2",
+            "tone_conversion_status": "pending",
+        })
+    job = VoiceJob(
+        owner_email=owner, provider=selected, mode=mode, text=text.strip(), voice=selected_voice,
+        voice_pack_id=voice_pack_id, style=style, preset_id=preset_id, personal_model_id=personal_model.id,
+        output_format=output_format, sample_rate=sample_rate, bit_depth=bit_depth, bitrate=bitrate,
+        loudness_lufs=loudness_lufs,
+        title=(title.strip() or text.strip()[:80] or f"{style.title()} voice production"),
+        tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:12], metadata=job_metadata,
+    )
+    await voice_jobs_coll.insert_one(job.model_dump())
+    background.add_task(_run_voice_job, job.id, owner)
     return job
 
 @api.post("/voice/export")
@@ -3477,15 +3532,58 @@ async def delete_voice_pack(pack_id: str, owner: str = Depends(require_owner)) -
 @api.post("/voice/packs/{pack_id}/samples")
 async def upload_voice_sample(pack_id: str, file: UploadFile = File(...), owner: str = Depends(require_owner)) -> dict:
     pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
-    if not pack: raise HTTPException(404, "Voice Pack not found")
-    mime = (file.content_type or "").lower()
-    if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, or WebM audio samples only.")
+    if not pack:
+        raise HTTPException(404, "Voice Pack not found")
+    mime = (file.content_type or "").lower().split(";", 1)[0]
+    if mime not in ALLOWED_AUDIO_MIMES:
+        raise HTTPException(400, "Upload WAV, MP3, M4A, AAC, OGG, or WebM audio samples only.")
     data = await file.read()
-    if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Audio sample must be between 1 byte and 25 MB.")
+    if not data or len(data) > MAX_VOICE_SAMPLE_BYTES:
+        raise HTTPException(400, "Audio sample must be between 1 byte and 25 MB.")
     metadata = _inspect_voice_sample(data, mime)
-    filename, _, size = save_bytes(data, mime, "reference"); media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="voice-pack-sample")
-    await media_coll.insert_one(media.model_dump()); pack["sample_media_ids"].append(media.id); pack["sample_count"] = len(pack["sample_media_ids"]); pack["total_sample_duration_seconds"] = round(float(pack.get("total_sample_duration_seconds", 0)) + metadata["duration_seconds"], 3); pack["updated_at"] = now_iso(); await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)
-    return {"media_id": media.id, "mime_type": mime, "size_bytes": size, "metadata": metadata}
+    safe_owner = re.sub(r"[^A-Za-z0-9@._+-]", "_", owner)
+    extension = {
+        "audio/wav": ".wav", "audio/x-wav": ".wav",
+        "audio/mpeg": ".mp3", "audio/mp3": ".mp3",
+        "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",
+        "audio/aac": ".aac", "audio/ogg": ".ogg", "audio/webm": ".webm",
+    }.get(mime, ".audio")
+    s3_key = f"voice_references/{safe_owner}/{new_id()}{extension}"
+    filename, location, size = save_bytes_at_key(data, mime, s3_key)
+    sample = {
+        "media_id": None,
+        "s3_key": s3_key,
+        "duration_seconds": metadata["duration_seconds"],
+        "filename": Path(file.filename or f"voice-sample{extension}").name,
+        "storage_filename": filename,
+        "mime_type": mime,
+        "size_bytes": size,
+        "sample_rate": metadata.get("sample_rate"),
+        "channels": metadata.get("channels"),
+        "codec": metadata.get("codec"),
+        "created_at": now_iso(),
+    }
+    media = MediaAsset(
+        owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size,
+        edit_note="voice-pack-sample", source_module="voice", voice_pack_id=pack_id,
+        metadata={**metadata, "original_name": sample["filename"], "s3_key": s3_key, "storage_location": location},
+    )
+    await media_coll.insert_one(media.model_dump())
+    sample["media_id"] = media.id
+    pack.setdefault("sample_media_ids", []).append(media.id)
+    pack.setdefault("samples", []).append(sample)
+    pack["sample_count"] = len(pack["sample_media_ids"])
+    pack["total_sample_duration_seconds"] = round(sum(float(item.get("duration_seconds") or 0) for item in pack["samples"]), 3)
+    pack["readiness_status"] = "ready"
+    pack["provider"] = "openvoice-v2-pending"
+    pack["updated_at"] = now_iso()
+    await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)
+    return {
+        "media_id": media.id, "mime_type": mime, "size_bytes": size,
+        "filename": sample["filename"], "s3_key": s3_key,
+        "duration_seconds": metadata["duration_seconds"], "metadata": metadata,
+        "pack": VoicePack(**pack).model_dump(),
+    }
 
 def _inspect_voice_sample(data: bytes, mime: str) -> dict:
     """Reject empty/disguised content; extract reliable WAV details locally."""
@@ -3499,12 +3597,22 @@ def _inspect_voice_sample(data: bytes, mime: str) -> dict:
 @api.delete("/voice/packs/{pack_id}/samples/{media_id}")
 async def remove_voice_sample(pack_id: str, media_id: str, owner: str = Depends(require_owner)) -> dict:
     pack = await voice_packs_coll.find_one({"id": pack_id, "owner_email": owner}, {"_id": 0})
-    if not pack or media_id not in pack.get("sample_media_ids", []): raise HTTPException(404, "Voice sample not found")
+    if not pack or media_id not in pack.get("sample_media_ids", []):
+        raise HTTPException(404, "Voice sample not found")
     media = await media_coll.find_one_and_delete({"id": media_id, "owner_email": owner}, {"_id": 0})
     if media:
-        try: delete_file(media["filename"], "reference")
-        except OSError: pass
-    pack["sample_media_ids"].remove(media_id); pack["sample_count"] = len(pack["sample_media_ids"]); pack["updated_at"] = now_iso(); await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack); return {"ok": True}
+        try:
+            delete_file(media["filename"], "reference")
+        except (OSError, FileNotFoundError, ValueError):
+            pass
+    pack["sample_media_ids"] = [item for item in pack.get("sample_media_ids", []) if item != media_id]
+    pack["samples"] = [item for item in pack.get("samples", []) if item.get("media_id") != media_id]
+    pack["sample_count"] = len(pack["sample_media_ids"])
+    pack["total_sample_duration_seconds"] = round(sum(float(item.get("duration_seconds") or 0) for item in pack["samples"]), 3)
+    pack["readiness_status"] = "ready" if pack["sample_count"] else "draft"
+    pack["updated_at"] = now_iso()
+    await voice_packs_coll.replace_one({"id": pack_id, "owner_email": owner}, pack)
+    return {"ok": True, "pack": VoicePack(**pack).model_dump()}
 
 @api.get("/voice/transcription/providers")
 async def transcription_providers(_: str = Depends(require_owner)) -> dict:
