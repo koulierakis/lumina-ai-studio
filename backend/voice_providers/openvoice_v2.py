@@ -1,11 +1,16 @@
-"""OpenVoice V2 tone-color conversion adapter.
+"""Personal Voice tone conversion adapter.
 
-Supports two modes:
-1) Remote HTTP endpoint via OPENVOICE_V2_ENDPOINT.
-2) Local CPU runtime inside the Render service via OPENVOICE_V2_LOCAL=1.
+The historical OpenVoice V2 contract is preserved so existing LUMINA Voice
+Studio jobs do not need to change. The adapter can now use one of three
+backends, in priority order:
 
-Local mode downloads the official OpenVoice source archive and official V2
-converter checkpoints on first use, then performs tone conversion in-process.
+1) A Hugging Face Chatterbox Space via ``CHATTERBOX_SPACE_ID`` (recommended,
+   free-cloud path).
+2) A remote OpenVoice-compatible HTTP endpoint via ``OPENVOICE_V2_ENDPOINT``.
+3) The legacy local OpenVoice CPU runtime via ``OPENVOICE_V2_LOCAL=1``.
+
+This lets LUMINA move away from the memory-constrained Render OpenVoice worker
+without breaking the existing Personal Voice UI or stored voice packs.
 """
 from __future__ import annotations
 
@@ -23,7 +28,7 @@ import httpx
 
 
 class ToneConversionError(RuntimeError):
-    """Safe, classified failure from the OpenVoice conversion stage."""
+    """Safe, classified failure from the personal-voice conversion stage."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -41,11 +46,33 @@ def _truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _suffix_for_mime(mime: str, default: str = ".wav") -> str:
+    mime = (mime or "").lower().split(";", 1)[0]
+    return {
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/webm": ".webm",
+        "audio/ogg": ".ogg",
+        "audio/mp4": ".m4a",
+        "audio/x-m4a": ".m4a",
+        "audio/aac": ".aac",
+    }.get(mime, default)
+
+
 _LOCAL_MODEL = None
 _LOCAL_MODEL_LOCK = asyncio.Lock()
 
 
 class OpenVoiceV2ToneConverter:
+    """Compatibility adapter for LUMINA Personal Voice.
+
+    The class name is intentionally retained to avoid a broad migration of
+    persisted jobs and API contracts. When ``CHATTERBOX_SPACE_ID`` is set, the
+    actual engine is Resemble AI Chatterbox VC rather than OpenVoice V2.
+    """
+
     name = "openvoice-v2"
 
     def __init__(
@@ -55,31 +82,43 @@ class OpenVoiceV2ToneConverter:
         timeout_seconds: float = 90.0,
         required: bool = False,
         local_enabled: bool = False,
+        chatterbox_space_id: str = "",
+        chatterbox_hf_token: str = "",
+        chatterbox_api_name: str = "/convert",
     ) -> None:
         self.endpoint = endpoint.strip()
         self.api_key = api_key.strip()
         self.timeout_seconds = max(5.0, min(float(timeout_seconds), 300.0))
         self.required = bool(required)
         self.local_enabled = bool(local_enabled)
+        self.chatterbox_space_id = chatterbox_space_id.strip()
+        self.chatterbox_hf_token = chatterbox_hf_token.strip()
+        self.chatterbox_api_name = (chatterbox_api_name or "/convert").strip() or "/convert"
 
     @classmethod
     def from_env(cls) -> "OpenVoiceV2ToneConverter":
-        raw_timeout = os.environ.get("OPENVOICE_V2_TIMEOUT_SECONDS", "90")
+        raw_timeout = os.environ.get(
+            "CHATTERBOX_TIMEOUT_SECONDS",
+            os.environ.get("OPENVOICE_V2_TIMEOUT_SECONDS", "180"),
+        )
         try:
             timeout = float(raw_timeout)
         except (TypeError, ValueError):
-            timeout = 90.0
+            timeout = 180.0
         return cls(
             endpoint=os.environ.get("OPENVOICE_V2_ENDPOINT", ""),
             api_key=os.environ.get("OPENVOICE_V2_API_KEY", ""),
             timeout_seconds=timeout,
             required=_truthy(os.environ.get("OPENVOICE_V2_REQUIRED", "0")),
             local_enabled=_truthy(os.environ.get("OPENVOICE_V2_LOCAL", "0")),
+            chatterbox_space_id=os.environ.get("CHATTERBOX_SPACE_ID", ""),
+            chatterbox_hf_token=os.environ.get("HF_TOKEN", ""),
+            chatterbox_api_name=os.environ.get("CHATTERBOX_API_NAME", "/convert"),
         )
 
     @property
     def configured(self) -> bool:
-        return bool(self.endpoint) or self.local_enabled
+        return bool(self.chatterbox_space_id or self.endpoint) or self.local_enabled
 
     async def convert(
         self,
@@ -90,11 +129,32 @@ class OpenVoiceV2ToneConverter:
         output_format: str = "wav",
     ) -> ToneConversionResult:
         if not self.configured:
-            raise ToneConversionError("not_configured", "OpenVoice V2 is not configured.")
+            raise ToneConversionError(
+                "not_configured",
+                "Personal Voice conversion is not configured.",
+            )
         if not source_audio:
             raise ToneConversionError("empty_source", "Base speech audio is empty.")
         if not reference_audio:
             raise ToneConversionError("empty_reference", "Reference voice sample is empty.")
+
+        # Preferred zero-monthly-cost cloud path.
+        if self.chatterbox_space_id:
+            try:
+                return await asyncio.to_thread(
+                    self._convert_chatterbox_space_sync,
+                    source_audio,
+                    source_mime,
+                    reference_audio,
+                    reference_mime,
+                )
+            except ToneConversionError:
+                raise
+            except Exception as exc:
+                raise ToneConversionError(
+                    "chatterbox_unavailable",
+                    f"Chatterbox Space conversion failed: {exc}",
+                ) from exc
 
         if self.local_enabled and not self.endpoint:
             try:
@@ -108,7 +168,10 @@ class OpenVoiceV2ToneConverter:
             except ToneConversionError:
                 raise
             except Exception as exc:
-                raise ToneConversionError("local_runtime_error", f"Local OpenVoice V2 failed: {exc}") from exc
+                raise ToneConversionError(
+                    "local_runtime_error",
+                    f"Local OpenVoice V2 failed: {exc}",
+                ) from exc
 
         return await self._convert_remote(
             source_audio,
@@ -116,6 +179,85 @@ class OpenVoiceV2ToneConverter:
             reference_audio,
             reference_mime,
             output_format,
+        )
+
+    def _convert_chatterbox_space_sync(
+        self,
+        source_audio: bytes,
+        source_mime: str,
+        reference_audio: bytes,
+        reference_mime: str,
+    ) -> ToneConversionResult:
+        """Call a Gradio-backed Hugging Face Space running Chatterbox VC."""
+        try:
+            from gradio_client import Client, handle_file
+        except Exception as exc:
+            raise ToneConversionError(
+                "chatterbox_client_missing",
+                "gradio_client is required for the Chatterbox Space backend.",
+            ) from exc
+
+        source_suffix = _suffix_for_mime(source_mime, ".wav")
+        reference_suffix = _suffix_for_mime(reference_mime, ".wav")
+        with tempfile.TemporaryDirectory(prefix="lumina_chatterbox_") as work:
+            source_path = Path(work) / f"source{source_suffix}"
+            reference_path = Path(work) / f"reference{reference_suffix}"
+            source_path.write_bytes(source_audio)
+            reference_path.write_bytes(reference_audio)
+
+            kwargs = {}
+            if self.chatterbox_hf_token:
+                kwargs["token"] = self.chatterbox_hf_token
+            try:
+                client = Client(self.chatterbox_space_id, **kwargs)
+                result = client.predict(
+                    handle_file(str(source_path)),
+                    handle_file(str(reference_path)),
+                    api_name=self.chatterbox_api_name,
+                )
+            except Exception as exc:
+                raise ToneConversionError(
+                    "chatterbox_request_failed",
+                    "The free Chatterbox Space could not complete voice conversion.",
+                ) from exc
+
+            output_path = None
+            if isinstance(result, str):
+                output_path = result
+            elif isinstance(result, (list, tuple)) and result:
+                output_path = result[0]
+            elif isinstance(result, dict):
+                output_path = result.get("path") or result.get("name")
+            if not output_path:
+                raise ToneConversionError(
+                    "chatterbox_invalid_response",
+                    "Chatterbox Space did not return an audio file.",
+                )
+
+            try:
+                data = Path(str(output_path)).read_bytes()
+            except OSError as exc:
+                raise ToneConversionError(
+                    "chatterbox_output_missing",
+                    "Chatterbox output file could not be read.",
+                ) from exc
+
+        if not data:
+            raise ToneConversionError(
+                "chatterbox_empty_output",
+                "Chatterbox returned empty audio.",
+            )
+        return ToneConversionResult(
+            audio=data,
+            mime_type="audio/wav",
+            metadata={
+                "tone_converter": "chatterbox-vc",
+                "engine": "chatterbox-vc",
+                "transport": "gradio-client",
+                "runtime": "huggingface-space",
+                "space_id": self.chatterbox_space_id,
+                "zero_monthly_cost": True,
+            },
         )
 
     async def _convert_remote(
