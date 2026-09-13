@@ -6,6 +6,7 @@ import re
 import edge_tts
 
 from .base import BaseVoiceProvider
+from .voice_text_bridge import remember_source_text
 
 
 _GREEK_RE = re.compile(r"[\u0370-\u03ff\u1f00-\u1fff]")
@@ -78,6 +79,14 @@ class EdgeTTSVoiceProvider(BaseVoiceProvider):
         if not audio:
             raise ValueError("Microsoft Edge TTS returned empty audio.")
 
+        audio_bytes = bytes(audio)
+
+        # Preserve the original text for the Personal Voice stage. When a
+        # Voice Pack is selected, Chatterbox Multilingual can synthesize the
+        # text directly in the reference speaker's voice instead of converting
+        # this temporary Edge TTS voice.
+        remember_source_text(audio_bytes, clean_text)
+
         # edge-tts streams MP3 audio. LUMINA stores the provider MIME type,
         # so callers receive valid audio/mpeg even if an older UI preset asked
         # for another export format.
@@ -92,4 +101,4 @@ class EdgeTTSVoiceProvider(BaseVoiceProvider):
             "style": options.get("style") or "default",
             "requires_api_key": False,
         }
-        return bytes(audio), "audio/mpeg", metadata
+        return audio_bytes, "audio/mpeg", metadata
