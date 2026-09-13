@@ -1,0 +1,4 @@
+chatterbox-tts
+gradio>=5.0
+spaces
+torchaudio
