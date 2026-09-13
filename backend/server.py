@@ -57,8 +57,7 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import Response, StreamingResponse
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -3424,3 +3423,28 @@ async def _startup() -> None:
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     return None
+
+
+# Render builds the React application before starting this FastAPI process.
+# Serve that build from the same origin so browser routes work in production.
+FRONTEND_BUILD_DIR = ROOT_DIR.parent / "frontend" / "build"
+FRONTEND_INDEX = FRONTEND_BUILD_DIR / "index.html"
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_frontend(full_path: str) -> FileResponse:
+    if full_path == "api" or full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    requested_file = (FRONTEND_BUILD_DIR / full_path).resolve()
+    build_root = FRONTEND_BUILD_DIR.resolve()
+    if (
+        full_path
+        and requested_file.is_relative_to(build_root)
+        and requested_file.is_file()
+    ):
+        return FileResponse(requested_file)
+
+    if FRONTEND_INDEX.is_file():
+        return FileResponse(FRONTEND_INDEX)
+    raise HTTPException(status_code=503, detail="Frontend build is unavailable")
