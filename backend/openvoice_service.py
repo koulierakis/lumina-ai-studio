@@ -49,6 +49,34 @@ def _checkpoint_paths() -> tuple[str, str]:
     return str(config_path), str(checkpoint_path)
 
 
+def _create_converter(config_path: str, device: str):
+    """Create OpenVoice's converter without requiring wavmark.
+
+    Current upstream OpenVoice accepts ``enable_watermark`` in
+    ``ToneColorConverter.__init__`` but forwards the same keyword to
+    ``OpenVoiceBaseClass.__init__``, which does not accept it.  Prefer the
+    public constructor, then fall back to initializing the base class directly
+    when that known upstream incompatibility is encountered.
+    """
+    from openvoice.api import OpenVoiceBaseClass, ToneColorConverter
+
+    try:
+        return ToneColorConverter(
+            config_path,
+            device=device,
+            enable_watermark=False,
+        )
+    except TypeError as exc:
+        if "enable_watermark" not in str(exc):
+            raise
+
+        converter = ToneColorConverter.__new__(ToneColorConverter)
+        OpenVoiceBaseClass.__init__(converter, config_path, device=device)
+        converter.watermark_model = None
+        converter.version = getattr(converter.hps, "_version_", "v1")
+        return converter
+
+
 def _get_converter():
     global _model
     if _model is not None:
@@ -59,15 +87,10 @@ def _get_converter():
             return _model
 
         import torch
-        from openvoice.api import ToneColorConverter
 
         config_path, checkpoint_path = _checkpoint_paths()
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        converter = ToneColorConverter(
-            config_path,
-            device=device,
-            enable_watermark=False,
-        )
+        converter = _create_converter(config_path, device)
         converter.load_ckpt(checkpoint_path)
         _model = converter
         return _model
