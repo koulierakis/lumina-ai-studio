@@ -6,14 +6,14 @@ import { apiGet, fetchMediaBlobUrl, uploadFormData } from '../lib/api';
 export const LUMINA_VOICES = [
   {
     id: 'lumina-male',
-    name: 'LUMINA Male',
-    subtitle: 'Young Adult · Natural & Calm',
+    name: 'Ανδρέας',
+    subtitle: 'Ανδρική φωνή · Φυσική & Ήρεμη',
     language: 'el-GR',
   },
   {
     id: 'lumina-female',
-    name: 'LUMINA Female',
-    subtitle: 'Young Adult · Natural & Calm',
+    name: 'Αριάδνη',
+    subtitle: 'Γυναικεία φωνή · Φυσική & Ήρεμη',
     language: 'el-GR',
   },
 ];
