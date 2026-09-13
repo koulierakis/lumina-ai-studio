@@ -1,18 +1,283 @@
-import { useEffect, useRef, useState } from 'react';
-import { AudioLines, Loader2, Play, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AudioLines, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiDelete, apiGet, apiPatch, apiPost, uploadFormData } from '../lib/api';
+import { apiGet, fetchMediaBlobUrl, uploadFormData } from '../lib/api';
 
-export const VOICE_TABS=['Generate Speech','Voice Packs','Record Voice','Transcribe','Talking Video','Jobs','Audio Library','Settings'];
-const key=x=>x.toLowerCase().replaceAll(' ','-'); const active=x=>['queued','preparing','processing'].includes(x);
-export default function VoiceStudio(){const initial=new URLSearchParams(window.location.search).get('tab');const [tab,setTab]=useState(VOICE_TABS.find(x=>key(x)===initial)||VOICE_TABS[0]);const [packs,setPacks]=useState([]);const [jobs,setJobs]=useState([]);const [error,setError]=useState('');const [loading,setLoading]=useState(true);const go=x=>{setTab(x);window.history.pushState({},'',`?tab=${key(x)}`)};const load=async()=>{setLoading(true);setError('');try{const [p,j]=await Promise.all([apiGet('/voice/packs'),apiGet('/voice/jobs')]);setPacks(p);setJobs(j)}catch(e){setError(e.message||'Voice Studio data is unavailable.')}finally{setLoading(false)}};useEffect(()=>{load();const pop=()=>setTab(VOICE_TABS.find(x=>key(x)===new URLSearchParams(window.location.search).get('tab'))||VOICE_TABS[0]);addEventListener('popstate',pop);return()=>removeEventListener('popstate',pop)},[]);return <main className="h-full overflow-y-auto bg-ink-950"><div className="max-w-[1500px] mx-auto p-6 lg:p-10 space-y-6"><header><p className="text-gold text-xs tracking-[.25em] uppercase flex gap-2"><AudioLines className="w-4"/>LUMINA Sound</p><h1 className="font-display text-4xl text-white mt-2">Voice Studio</h1></header><nav aria-label="Voice Studio workspaces" className="flex gap-2 overflow-x-auto pb-2">{VOICE_TABS.map(x=><button key={x} aria-current={tab===x?'page':undefined} onClick={()=>go(x)} className={`whitespace-nowrap px-3 py-2 rounded text-xs ${tab===x?'bg-gold text-black':'bg-white/5 text-white/60'}`}>{x}</button>)}</nav>{error&&<p role="alert" className="text-red-200 text-sm">{error}</p>}{loading?<Loader2 data-testid="voice-loading" className="animate-spin mx-auto my-16"/>:<Tab tab={tab} packs={packs} jobs={jobs} reload={load}/>}</div></main>}
-function Tab({tab,packs,jobs,reload}){if(tab==='Generate Speech')return <Generate reload={reload}/>;if(tab==='Voice Packs')return <Packs packs={packs} reload={reload}/>;if(tab==='Record Voice')return <Recorder packs={packs} reload={reload}/>;if(tab==='Transcribe')return <Transcribe/>;if(tab==='Talking Video')return <Talking packs={packs}/>;if(tab==='Jobs')return <Jobs jobs={jobs}/>;if(tab==='Audio Library')return <Library jobs={jobs}/>;return <Settings/>}
-function Card({children}){return <section className="lumina-glass rounded-xl p-5">{children}</section>}
-function Generate({reload}){const [text,setText]=useState(''),[job,setJob]=useState(null);const submit=async e=>{e.preventDefault();const f=new FormData();f.append('text',text);f.append('mode','text-to-speech');f.append('output_format','wav');try{setJob(await uploadFormData('/voice/generate',f));reload()}catch(e){toast.error(e.message)}};return <div className="grid lg:grid-cols-2 gap-5"><Card><form onSubmit={submit}><label className="text-xs text-white/60">Speech text<textarea required value={text} onChange={e=>setText(e.target.value)} className="mt-2 block w-full rounded bg-black/40 p-3 text-white" rows="7"/></label><button className="mt-4 bg-gold text-black rounded px-4 py-2 text-sm">Generate speech</button></form></Card><Card><p className="text-white/50 text-sm">{job?`Job ${job.status}`:'Generated audio preview appears here.'}</p></Card></div>}
-function Packs({packs,reload}){const [name,setName]=useState('');const create=async()=>{try{await apiPost('/voice/packs',{name,consent_confirmed:true,ownership_declaration:'I own this voice and have consent.'});setName('');reload()}catch(e){toast.error(e.message)}};return <Card><div className="flex gap-2"><input value={name} onChange={e=>setName(e.target.value)} placeholder="New Voice Pack" className="bg-black/40 rounded p-2"/><button onClick={create} className="bg-gold text-black rounded px-3">Create</button></div>{packs.length?<div className="mt-4 grid md:grid-cols-2 gap-3">{packs.map(p=><article key={p.id} className="border border-white/10 rounded p-3"><b>{p.name}</b><p className="text-xs text-white/50">{p.sample_count} samples · {p.readiness_status}</p><button onClick={()=>apiPatch(`/voice/packs/${p.id}`,{favorite:!p.favorite}).then(reload)} className="text-xs text-gold">Favorite</button></article>)}</div>:<p className="text-white/45 mt-4">No Voice Packs yet.</p>}</Card>}
-function Recorder({packs,reload}){const [state,setState]=useState('idle'),[seconds,setSeconds]=useState(0),[blob,setBlob]=useState(null),[error,setError]=useState(''),[pack,setPack]=useState(''),[consent,setConsent]=useState(false),[uploading,setUploading]=useState(false),[attached,setAttached]=useState(null);const r=useRef(),chunks=useRef([]),timer=useRef();useEffect(()=>()=>clearInterval(timer.current),[]);const start=async()=>{if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){setError('Recording is not supported by this browser.');return}try{const s=await navigator.mediaDevices.getUserMedia({audio:true});const rec=new MediaRecorder(s);r.current=rec;chunks.current=[];rec.ondataavailable=e=>chunks.current.push(e.data);rec.onstop=()=>{s.getTracks().forEach(t=>t.stop());setBlob(new Blob(chunks.current,{type:rec.mimeType||'audio/webm'}));setState('stopped');clearInterval(timer.current)};rec.start();setState('recording');setSeconds(0);timer.current=setInterval(()=>setSeconds(x=>x+1),1000)}catch(e){setError(e.name==='NotAllowedError'?'Microphone permission was denied.':'Unable to start recording.')}};const upload=async()=>{if(!blob||!pack||!consent)return;setUploading(true);const f=new FormData();const ext=blob.type.includes('ogg')?'ogg':blob.type.includes('wav')?'wav':'webm';f.append('file',blob,`recording.${ext}`);try{const result=await uploadFormData(`/voice/packs/${pack}/samples`,f);setAttached(result);setBlob(null);toast.success('Recording attached to Voice Pack.');reload()}catch(e){setError(e.message)}finally{setUploading(false)}};return <Card><h2 className="text-white">Record Voice</h2><p className="text-sm text-white/50">{seconds}s · {state}</p>{error&&<p role="alert" className="text-red-200">{error}</p>}<div className="flex gap-2 mt-3"><button onClick={state==='recording'?()=>{r.current.pause();setState('paused')}:state==='paused'?()=>{r.current.resume();setState('recording')}:start} className="bg-gold text-black rounded px-3">{state==='recording'?'Pause':state==='paused'?'Resume':'Start'}</button>{['recording','paused'].includes(state)&&<button onClick={()=>r.current.stop()} className="bg-white/10 rounded px-3">Stop</button>}<button onClick={()=>{setBlob(null);setState('idle');setSeconds(0)}}>Discard</button></div>{blob&&<><audio controls src={URL.createObjectURL(blob)} className="w-full mt-3"/><p className="text-xs text-white/50">{seconds}s · {blob.type||'audio/webm'}</p><select aria-label="Voice Pack" value={pack} onChange={e=>setPack(e.target.value)} className="mt-3 bg-black/40 p-2"><option value="">Select Voice Pack</option>{packs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><label className="ml-2 text-xs"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I own this recording</label><button disabled={!pack||!consent||uploading} onClick={upload} className="ml-2 text-gold disabled:opacity-40">{uploading?'Uploading…':'Attach recording'}</button></>}{attached&&<p className="text-green-300 text-xs mt-3">Attached sample · {attached.mime_type}</p>}</Card>}
-function Transcribe(){const [file,setFile]=useState(null),[language,setLanguage]=useState('auto'),[job,setJob]=useState(null),[text,setText]=useState('');useEffect(()=>{if(!job||!active(job.status))return;const t=setTimeout(()=>apiGet(`/voice/transcriptions/${job.id}`).then(setJob).catch(e=>toast.error(e.message)),700);return()=>clearTimeout(t)},[job]);const submit=async e=>{e.preventDefault();if(!file)return;const f=new FormData();f.append('file',file);f.append('language',language);try{setJob(await uploadFormData('/voice/transcriptions',f))}catch(e){toast.error(e.message)}};const exportTxt=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text||job?.transcript||''],{type:'text/plain'}));a.download='lumina-transcript.txt';a.click()};return <Card><form onSubmit={submit} className="space-y-3"><input aria-label="Audio file" type="file" accept="audio/*" onChange={e=>setFile(e.target.files[0])}/><select value={language} onChange={e=>setLanguage(e.target.value)}><option value="auto">Auto</option><option value="en">English</option><option value="el">Greek</option></select><button className="bg-gold text-black rounded px-3 py-2">Transcribe</button></form><p className="text-amber-200 text-xs mt-3">Mock transcription — not speech recognition.</p>{job&&<div className="mt-3"><p>{job.status}</p><textarea value={text||job.transcript||''} onChange={e=>setText(e.target.value)} placeholder="Transcript appears after processing" className="w-full bg-black/40 p-2"/><button onClick={()=>navigator.clipboard?.writeText(text||job.transcript||'')} className="text-gold text-xs mr-3">Copy</button><button onClick={exportTxt} className="text-gold text-xs">Export TXT</button></div>}</Card>}
-function Talking({packs}){const [identity,setIdentity]=useState(''),[identities,setIdentities]=useState([]),[voice,setVoice]=useState(''),[script,setScript]=useState(''),[consent,setConsent]=useState(false),[job,setJob]=useState(null),[error,setError]=useState('');useEffect(()=>{apiGet('/identity-packs').then(setIdentities).catch(e=>setError(e.message||'Identity Packs are unavailable.'))},[]);useEffect(()=>{if(!job||!active(job.status))return;const t=setTimeout(()=>apiGet(`/voice/talking-video/${job.id}`).then(setJob).catch(e=>setError(e.message)),1000);return()=>clearTimeout(t)},[job]);const submit=async e=>{e.preventDefault();try{setJob(await apiPost('/voice/talking-video',{identity_pack_id:identity,voice_pack_id:voice||null,script,consent_confirmed:consent,ownership_declaration:consent?'I own or have permission to use this identity.':''}))}catch(e){setError(e.message)}};const selected=identities.find(x=>x.id===identity);return <Card><form onSubmit={submit} className="space-y-3"><select aria-label="Identity Pack" required value={identity} onChange={e=>setIdentity(e.target.value)}><option value="">Select Identity Pack</option>{identities.map(p=><option key={p.id} value={p.id}>{p.name}{p.photo_ids?.length?'':' (no portrait)'}</option>)}</select>{selected&&!selected.photo_ids?.length&&<p className="text-red-200 text-xs">This Identity Pack has no usable portrait.</p>}<select aria-label="Voice Pack" value={voice} onChange={e=>setVoice(e.target.value)}><option value="">No Voice Pack</option>{packs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select><textarea value={script} onChange={e=>setScript(e.target.value)} placeholder="Script" className="block w-full bg-black/40 p-2"/><label className="text-xs"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I confirm ownership and consent</label><button disabled={!identity||!consent||!selected?.photo_ids?.length} className="block bg-gold text-black rounded px-3 py-2 disabled:opacity-40">Generate simulated talking video</button></form>{error&&<p role="alert" className="text-red-200">{error}</p>}<p className="text-amber-200 text-xs mt-3">Simulation only — no real lip-sync video is generated.</p>{job&&<p className="text-white/60">Job {job.status} · {job.provider}{job.output_media_id?' · simulated output ready':''}</p>}</Card>}
-function Jobs({jobs}){return <Card>{jobs.length?jobs.map(j=><div key={j.id} className="border-b border-white/10 p-2 text-sm text-white/70">{j.title||j.id} · {j.status} · {j.provider} · {j.created_at}</div>):<p className="text-white/45">No Voice Studio jobs.</p>}</Card>}
-function Library({jobs}){const done=jobs.filter(j=>j.output_media_id);return <Card>{done.length?done.map(j=><div key={j.id} className="flex gap-3"><span>{j.title}</span><button onClick={()=>apiDelete(`/voice/jobs/${j.id}`)}><Trash2 className="w-4"/></button></div>):<p className="text-white/45">No saved audio yet.</p>}</Card>}
-function Settings(){const [data,setData]=useState(null);useEffect(()=>{Promise.all([apiGet('/voice/providers'),apiGet('/voice/talking-video/providers')]).then(setData).catch(()=>setData({}))},[]);return <Card><h2 className="text-white">Provider readiness</h2><p className="text-white/50 text-sm">Mock providers are available. ElevenLabs and external talking-face providers are unconfigured unless their backend credentials are set.</p>{data&&<pre className="text-xs text-white/40 mt-3">{JSON.stringify(data,null,2)}</pre>}</Card>}
+export const LUMINA_VOICES = [
+  {
+    id: 'lumina-male',
+    name: 'LUMINA Male',
+    subtitle: 'Young Adult · Natural & Calm',
+    language: 'el-GR',
+  },
+  {
+    id: 'lumina-female',
+    name: 'LUMINA Female',
+    subtitle: 'Young Adult · Natural & Calm',
+    language: 'el-GR',
+  },
+];
+
+export const LUMINA_STYLES = ['Natural', 'Calm', 'Warm', 'Confident', 'Energetic'];
+
+const STYLE_TO_BACKEND = {
+  Natural: 'podcast',
+  Calm: 'calm',
+  Warm: 'audiobook',
+  Confident: 'corporate',
+  Energetic: 'energetic',
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+export default function VoiceStudio() {
+  const [text, setText] = useState('');
+  const [voiceId, setVoiceId] = useState('lumina-female');
+  const [style, setStyle] = useState('Natural');
+  const [job, setJob] = useState(null);
+  const [audioUrl, setAudioUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [providerReady, setProviderReady] = useState(null);
+
+  const selectedVoice = useMemo(
+    () => LUMINA_VOICES.find((voice) => voice.id === voiceId) || LUMINA_VOICES[0],
+    [voiceId]
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    apiGet('/voice/providers')
+      .then((payload) => {
+        if (!mounted) return;
+        const edge = (payload?.providers || []).find((item) => item.name === 'edge');
+        setProviderReady(Boolean(edge?.available && edge?.configured));
+      })
+      .catch(() => {
+        if (mounted) setProviderReady(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+    };
+  }, [audioUrl]);
+
+  async function waitForJob(jobId) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const jobs = await apiGet('/voice/jobs');
+      const current = jobs.find((item) => item.id === jobId);
+      if (current) {
+        setJob(current);
+        if (current.status === 'completed') return current;
+        if (current.status === 'failed' || current.status === 'cancelled') {
+          throw new Error(current.error || 'Voice generation failed.');
+        }
+      }
+      await sleep(1000);
+    }
+    throw new Error('Voice generation timed out.');
+  }
+
+  async function generate(event) {
+    event?.preventDefault?.();
+    const clean = text.trim();
+    if (!clean) {
+      toast.error('Γράψε πρώτα το κείμενο που θέλεις να μετατρέψεις σε φωνή.');
+      return;
+    }
+
+    setBusy(true);
+    setJob(null);
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl('');
+    }
+
+    try {
+      const form = new FormData();
+      form.append('text', clean);
+      form.append('mode', 'text-to-speech');
+      form.append('voice', voiceId);
+      form.append('style', STYLE_TO_BACKEND[style]);
+      form.append('output_format', 'mp3');
+      form.append('provider', 'edge');
+      form.append('title', `${selectedVoice.name} · ${style}`);
+
+      const created = await uploadFormData('/voice/generate', form);
+      setJob(created);
+      const completed = await waitForJob(created.id);
+
+      if (!completed.output_media_id) {
+        throw new Error('Η δημιουργία ολοκληρώθηκε χωρίς αρχείο ήχου.');
+      }
+
+      const url = await fetchMediaBlobUrl(completed.output_media_id);
+      setAudioUrl(url);
+      toast.success('Η φωνή δημιουργήθηκε.');
+    } catch (error) {
+      toast.error(error?.message || 'Η δημιουργία φωνής απέτυχε.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function downloadAudio() {
+    if (!audioUrl) return;
+    const anchor = document.createElement('a');
+    anchor.href = audioUrl;
+    anchor.download = `${voiceId}-${style.toLowerCase()}.mp3`;
+    anchor.click();
+  }
+
+  return (
+    <main className="h-full overflow-y-auto bg-ink-950 text-white">
+      <div className="mx-auto max-w-6xl space-y-6 p-5 md:p-8 lg:p-10">
+        <header>
+          <p className="flex items-center gap-2 text-xs uppercase tracking-[.25em] text-gold">
+            <AudioLines className="h-4 w-4" /> LUMINA Sound
+          </p>
+          <h1 className="mt-2 font-display text-4xl">Voice Studio</h1>
+          <p className="mt-2 max-w-2xl text-sm text-white/55">
+            Δημιούργησε φυσική ελληνική ομιλία με τις έτοιμες φωνές του LUMINA.
+          </p>
+        </header>
+
+        {providerReady === false && (
+          <div className="rounded-xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
+            Ο δωρεάν πάροχος φωνής δεν είναι ακόμη διαθέσιμος στο backend. Θα ενεργοποιηθεί με το νέο deploy.
+          </div>
+        )}
+
+        <section className="grid gap-6 lg:grid-cols-[1.05fr_.95fr]">
+          <div className="lumina-glass rounded-2xl p-5 md:p-6">
+            <label className="text-sm text-white/70" htmlFor="voice-text">
+              Κείμενο
+            </label>
+            <textarea
+              id="voice-text"
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              placeholder="Γράψε το κείμενο που θέλεις να μετατρέψεις σε φωνή..."
+              rows={10}
+              maxLength={5000}
+              className="mt-2 block w-full resize-y rounded-xl border border-white/10 bg-black/35 p-4 text-base text-white outline-none transition focus:border-gold/60"
+            />
+            <div className="mt-2 flex justify-between text-xs text-white/35">
+              <span>Greek · el-GR</span>
+              <span>{text.length}/5000</span>
+            </div>
+
+            <div className="mt-6">
+              <p className="mb-3 text-sm text-white/70">Φωνή</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {LUMINA_VOICES.map((voice) => {
+                  const selected = voice.id === voiceId;
+                  return (
+                    <button
+                      key={voice.id}
+                      type="button"
+                      onClick={() => setVoiceId(voice.id)}
+                      className={`rounded-xl border p-4 text-left transition ${
+                        selected
+                          ? 'border-gold bg-gold/10'
+                          : 'border-white/10 bg-white/[.03] hover:border-white/20'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-white">{voice.name}</p>
+                          <p className="mt-1 text-xs text-white/45">{voice.subtitle}</p>
+                        </div>
+                        <div className={`h-3 w-3 rounded-full ${selected ? 'bg-gold' : 'bg-white/15'}`} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-6">
+              <p className="mb-3 text-sm text-white/70">Ύφος</p>
+              <div className="flex flex-wrap gap-2">
+                {LUMINA_STYLES.map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setStyle(item)}
+                    className={`rounded-full px-4 py-2 text-xs transition ${
+                      style === item ? 'bg-gold text-black' : 'bg-white/5 text-white/65 hover:bg-white/10'
+                    }`}
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={generate}
+              disabled={busy || !text.trim()}
+              className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 font-medium text-black transition disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {busy ? 'Δημιουργία φωνής...' : 'Generate Voice'}
+            </button>
+          </div>
+
+          <div className="lumina-glass rounded-2xl p-5 md:p-6">
+            <p className="text-sm text-white/70">Αποτέλεσμα</p>
+            <div className="mt-4 min-h-[280px] rounded-xl border border-white/10 bg-black/25 p-5">
+              {!job && !audioUrl && (
+                <div className="flex min-h-[230px] flex-col items-center justify-center text-center text-white/35">
+                  <AudioLines className="mb-3 h-9 w-9" />
+                  <p>Η παραγόμενη φωνή θα εμφανιστεί εδώ.</p>
+                </div>
+              )}
+
+              {job && !audioUrl && (
+                <div className="flex min-h-[230px] flex-col items-center justify-center text-center">
+                  {busy && <Loader2 className="mb-3 h-8 w-8 animate-spin text-gold" />}
+                  <p className="text-sm text-white/70">{job.status}</p>
+                  <p className="mt-1 text-xs text-white/35">Progress: {job.progress || 0}%</p>
+                  {job.error && <p className="mt-3 text-sm text-red-200">{job.error}</p>}
+                </div>
+              )}
+
+              {audioUrl && (
+                <div className="space-y-5">
+                  <div>
+                    <p className="font-medium">{selectedVoice.name}</p>
+                    <p className="text-xs text-white/45">Greek · {style}</p>
+                  </div>
+                  <audio controls src={audioUrl} className="w-full" />
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={downloadAudio}
+                      className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
+                    >
+                      <Download className="h-4 w-4" /> Download MP3
+                    </button>
+                    <button
+                      type="button"
+                      onClick={generate}
+                      disabled={busy}
+                      className="flex items-center gap-2 rounded-lg bg-white/5 px-4 py-2 text-sm text-white/70 hover:bg-white/10 disabled:opacity-40"
+                    >
+                      <RefreshCw className="h-4 w-4" /> Regenerate
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
