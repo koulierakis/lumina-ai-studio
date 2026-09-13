@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 from typing import Any
 
+from .style_engine import VoiceStyleEngine
+
 
 class EdgeVoiceProvider:
     name = "edge"
@@ -11,18 +13,6 @@ class EdgeVoiceProvider:
     VOICE_MAP = {
         "lumina-female": "el-GR-AthinaNeural",
         "lumina-male": "el-GR-NestorasNeural",
-    }
-
-    STYLE_MAP = {
-        "natural": {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"},
-        "calm": {"rate": "-10%", "pitch": "-2Hz", "volume": "-2%"},
-        "warm": {"rate": "-4%", "pitch": "-4Hz", "volume": "+0%"},
-        "confident": {"rate": "+2%", "pitch": "+1Hz", "volume": "+4%"},
-        "energetic": {"rate": "+10%", "pitch": "+3Hz", "volume": "+5%"},
-        # Compatibility with the existing Voice Studio style vocabulary.
-        "podcast": {"rate": "+0%", "pitch": "+0Hz", "volume": "+0%"},
-        "audiobook": {"rate": "-4%", "pitch": "-4Hz", "volume": "+0%"},
-        "corporate": {"rate": "+2%", "pitch": "+1Hz", "volume": "+4%"},
     }
 
     capabilities = {
@@ -37,7 +27,7 @@ class EdgeVoiceProvider:
             {"id": "lumina-male", "display_name": "LUMINA Male", "provider_voice_id": "el-GR-NestorasNeural", "language": "el-GR", "gender_presentation": "male"},
             {"id": "lumina-female", "display_name": "LUMINA Female", "provider_voice_id": "el-GR-AthinaNeural", "language": "el-GR", "gender_presentation": "female"},
         ],
-        "styles": ["natural", "calm", "warm", "confident", "energetic"],
+        "styles": VoiceStyleEngine.catalog(),
     }
 
     @classmethod
@@ -73,19 +63,17 @@ class EdgeVoiceProvider:
         if not provider_voice:
             raise ValueError("Unknown LUMINA voice.")
 
-        style = str(options.get("style") or "natural").lower()
-        prosody = self.STYLE_MAP.get(style)
-        if prosody is None:
-            raise ValueError("Unsupported LUMINA voice style.")
+        profile = VoiceStyleEngine.resolve(options.get("style"))
+        styled_text = profile.prepare_text(clean_text)
 
         import edge_tts
 
         communicator = edge_tts.Communicate(
-            clean_text,
+            styled_text,
             provider_voice,
-            rate=prosody["rate"],
-            volume=prosody["volume"],
-            pitch=prosody["pitch"],
+            rate=profile.rate,
+            volume=profile.volume,
+            pitch=profile.pitch,
         )
 
         audio = io.BytesIO()
@@ -102,9 +90,11 @@ class EdgeVoiceProvider:
             "provider_voice_id": provider_voice,
             "voice": voice,
             "language": "el-GR",
-            "style": style,
-            "rate": prosody["rate"],
-            "pitch": prosody["pitch"],
-            "volume": prosody["volume"],
+            "style": profile.id,
+            "style_engine": "v2",
+            "personality": profile.personality,
+            "rate": profile.rate,
+            "pitch": profile.pitch,
+            "volume": profile.volume,
             "mock": False,
         }

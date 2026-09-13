@@ -18,14 +18,15 @@ export const LUMINA_VOICES = [
   },
 ];
 
-export const LUMINA_STYLES = ['Natural', 'Calm', 'Warm', 'Confident', 'Energetic'];
+export const LUMINA_STYLES = ['Natural', 'Calm', 'Warm', 'Professional', 'Energetic', 'Storytelling'];
 
 const STYLE_TO_BACKEND = {
-  Natural: 'podcast',
+  Natural: 'natural',
   Calm: 'calm',
-  Warm: 'audiobook',
-  Confident: 'corporate',
+  Warm: 'warm',
+  Professional: 'professional',
   Energetic: 'energetic',
+  Storytelling: 'storytelling',
 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

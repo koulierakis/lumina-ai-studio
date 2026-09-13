@@ -1,5 +1,7 @@
 import asyncio
 import io
+import sys
+import types
 import wave
 
 from voice_providers import get_voice_provider, voice_provider_catalog
@@ -45,9 +47,64 @@ def test_edge_provider_exposes_two_greek_lumina_voices_and_styles():
         "natural",
         "calm",
         "warm",
-        "confident",
+        "professional",
         "energetic",
+        "storytelling",
     ]
+
+
+def test_style_engine_v2_has_six_distinct_delivery_signatures():
+    from voice_providers.style_engine import VoiceStyleEngine
+
+    profiles = [VoiceStyleEngine.resolve(style) for style in VoiceStyleEngine.catalog()]
+    signatures = {(item.rate, item.pitch, item.volume, item.sentence_pause) for item in profiles}
+    assert len(profiles) == len(signatures) == 6
+    assert VoiceStyleEngine.resolve("podcast").id == "natural"
+    assert VoiceStyleEngine.resolve("corporate").id == "professional"
+    assert VoiceStyleEngine.resolve("audiobook").id == "storytelling"
+
+
+def test_style_engine_v2_shapes_timing_without_changing_words():
+    from voice_providers.style_engine import VoiceStyleEngine
+
+    source = "Μία πρώτη πρόταση. Και μία δεύτερη!"
+    natural = VoiceStyleEngine.resolve("natural").prepare_text(source)
+    storytelling = VoiceStyleEngine.resolve("storytelling").prepare_text(source)
+    assert natural == source
+    assert storytelling == "Μία πρώτη πρόταση. … Και μία δεύτερη! …"
+
+
+def test_edge_provider_applies_style_engine_v2_to_generation(monkeypatch):
+    captured = {}
+
+    class FakeCommunicate:
+        def __init__(self, text, voice, **prosody):
+            captured.update(text=text, voice=voice, **prosody)
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"a" * 512}
+
+    monkeypatch.setitem(sys.modules, "edge_tts", types.SimpleNamespace(Communicate=FakeCommunicate))
+    data, mime, metadata = asyncio.run(
+        get_voice_provider("edge").generate(
+            "Μία ιστορία. Με συνέχεια.",
+            "lumina-female",
+            "mp3",
+            style="storytelling",
+        )
+    )
+
+    assert len(data) == 512
+    assert mime == "audio/mpeg"
+    assert captured == {
+        "text": "Μία ιστορία. … Με συνέχεια. …",
+        "voice": "el-GR-AthinaNeural",
+        "rate": "-14%",
+        "pitch": "-11Hz",
+        "volume": "+2%",
+    }
+    assert metadata["style_engine"] == "v2"
+    assert metadata["style"] == "storytelling"
 
 
 def test_voice_provider_catalog_keeps_future_adapters_unavailable():

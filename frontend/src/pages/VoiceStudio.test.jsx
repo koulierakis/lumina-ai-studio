@@ -9,6 +9,6 @@ test('Voice Studio exposes the two built-in Greek LUMINA voices', () => {
   );
 });
 
-test('Voice Studio exposes the five required styles', () => {
-  expect(LUMINA_STYLES).toEqual(['Natural', 'Calm', 'Warm', 'Confident', 'Energetic']);
+test('Voice Studio exposes the six Style Engine v2 personalities', () => {
+  expect(LUMINA_STYLES).toEqual(['Natural', 'Calm', 'Warm', 'Professional', 'Energetic', 'Storytelling']);
 });
