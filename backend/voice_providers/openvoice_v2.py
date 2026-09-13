@@ -1,16 +1,14 @@
-"""Personal Voice tone conversion adapter.
+"""Personal Voice adapter for LUMINA Voice Studio.
 
-The historical OpenVoice V2 contract is preserved so existing LUMINA Voice
-Studio jobs do not need to change. The adapter can now use one of three
-backends, in priority order:
+The historical OpenVoice V2 class name is retained for compatibility with
+existing persisted jobs and API contracts. When CHATTERBOX_SPACE_ID is set,
+Personal Voice now prefers direct Chatterbox Multilingual synthesis:
 
-1) A Hugging Face Chatterbox Space via ``CHATTERBOX_SPACE_ID`` (recommended,
-   free-cloud path).
-2) A remote OpenVoice-compatible HTTP endpoint via ``OPENVOICE_V2_ENDPOINT``.
-3) The legacy local OpenVoice CPU runtime via ``OPENVOICE_V2_LOCAL=1``.
+    original text + reference voice -> generated personal voice
 
-This lets LUMINA move away from the memory-constrained Render OpenVoice worker
-without breaking the existing Personal Voice UI or stored voice packs.
+This matches the Hugging Face flow that produces the best speaker identity.
+If the original text bridge is unavailable, the older Chatterbox VC path is
+kept as a compatibility fallback.
 """
 from __future__ import annotations
 
@@ -26,9 +24,11 @@ from pathlib import Path
 
 import httpx
 
+from .voice_text_bridge import take_source_text
+
 
 class ToneConversionError(RuntimeError):
-    """Safe, classified failure from the personal-voice conversion stage."""
+    """Safe, classified failure from the personal-voice stage."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -66,12 +66,7 @@ _LOCAL_MODEL_LOCK = asyncio.Lock()
 
 
 class OpenVoiceV2ToneConverter:
-    """Compatibility adapter for LUMINA Personal Voice.
-
-    The class name is intentionally retained to avoid a broad migration of
-    persisted jobs and API contracts. When ``CHATTERBOX_SPACE_ID`` is set, the
-    actual engine is Resemble AI Chatterbox VC rather than OpenVoice V2.
-    """
+    """Compatibility adapter for LUMINA Personal Voice."""
 
     name = "openvoice-v2"
 
@@ -85,6 +80,7 @@ class OpenVoiceV2ToneConverter:
         chatterbox_space_id: str = "",
         chatterbox_hf_token: str = "",
         chatterbox_api_name: str = "/convert",
+        chatterbox_direct_api_name: str = "/generate_greek_voice",
     ) -> None:
         self.endpoint = endpoint.strip()
         self.api_key = api_key.strip()
@@ -94,6 +90,9 @@ class OpenVoiceV2ToneConverter:
         self.chatterbox_space_id = chatterbox_space_id.strip()
         self.chatterbox_hf_token = chatterbox_hf_token.strip()
         self.chatterbox_api_name = (chatterbox_api_name or "/convert").strip() or "/convert"
+        self.chatterbox_direct_api_name = (
+            chatterbox_direct_api_name or "/generate_greek_voice"
+        ).strip() or "/generate_greek_voice"
 
     @classmethod
     def from_env(cls) -> "OpenVoiceV2ToneConverter":
@@ -114,6 +113,9 @@ class OpenVoiceV2ToneConverter:
             chatterbox_space_id=os.environ.get("CHATTERBOX_SPACE_ID", ""),
             chatterbox_hf_token=os.environ.get("HF_TOKEN", ""),
             chatterbox_api_name=os.environ.get("CHATTERBOX_API_NAME", "/convert"),
+            chatterbox_direct_api_name=os.environ.get(
+                "CHATTERBOX_DIRECT_API_NAME", "/generate_greek_voice"
+            ),
         )
 
     @property
@@ -138,9 +140,19 @@ class OpenVoiceV2ToneConverter:
         if not reference_audio:
             raise ToneConversionError("empty_reference", "Reference voice sample is empty.")
 
-        # Preferred zero-monthly-cost cloud path.
+        # Preferred zero-monthly-cost cloud path. Recover the exact text that
+        # produced the temporary Edge audio and send that text directly to
+        # Chatterbox Multilingual together with the reference voice.
         if self.chatterbox_space_id:
+            source_text = take_source_text(source_audio)
             try:
+                if source_text:
+                    return await asyncio.to_thread(
+                        self._synthesize_chatterbox_space_sync,
+                        source_text,
+                        reference_audio,
+                        reference_mime,
+                    )
                 return await asyncio.to_thread(
                     self._convert_chatterbox_space_sync,
                     source_audio,
@@ -153,7 +165,7 @@ class OpenVoiceV2ToneConverter:
             except Exception as exc:
                 raise ToneConversionError(
                     "chatterbox_unavailable",
-                    f"Chatterbox Space conversion failed: {exc}",
+                    f"Chatterbox Space personal voice failed: {exc}",
                 ) from exc
 
         if self.local_enabled and not self.endpoint:
@@ -181,6 +193,104 @@ class OpenVoiceV2ToneConverter:
             output_format,
         )
 
+    def _client(self):
+        try:
+            from gradio_client import Client
+        except Exception as exc:
+            raise ToneConversionError(
+                "chatterbox_client_missing",
+                "gradio_client is required for the Chatterbox Space backend.",
+            ) from exc
+        kwargs = {}
+        if self.chatterbox_hf_token:
+            kwargs["token"] = self.chatterbox_hf_token
+        return Client(self.chatterbox_space_id, **kwargs)
+
+    @staticmethod
+    def _result_path(result) -> str | None:
+        if isinstance(result, str):
+            return result
+        if isinstance(result, (list, tuple)) and result:
+            first = result[0]
+            if isinstance(first, str):
+                return first
+            if isinstance(first, dict):
+                return first.get("path") or first.get("name")
+        if isinstance(result, dict):
+            return result.get("path") or result.get("name")
+        return None
+
+    @staticmethod
+    def _read_result_audio(result) -> bytes:
+        output_path = OpenVoiceV2ToneConverter._result_path(result)
+        if not output_path:
+            raise ToneConversionError(
+                "chatterbox_invalid_response",
+                "Chatterbox Space did not return an audio file.",
+            )
+        try:
+            data = Path(str(output_path)).read_bytes()
+        except OSError as exc:
+            raise ToneConversionError(
+                "chatterbox_output_missing",
+                "Chatterbox output file could not be read.",
+            ) from exc
+        if not data:
+            raise ToneConversionError(
+                "chatterbox_empty_output",
+                "Chatterbox returned empty audio.",
+            )
+        return data
+
+    def _synthesize_chatterbox_space_sync(
+        self,
+        text: str,
+        reference_audio: bytes,
+        reference_mime: str,
+    ) -> ToneConversionResult:
+        """Direct multilingual TTS: text + reference speaker -> WAV."""
+        try:
+            from gradio_client import handle_file
+        except Exception as exc:
+            raise ToneConversionError(
+                "chatterbox_client_missing",
+                "gradio_client is required for the Chatterbox Space backend.",
+            ) from exc
+
+        reference_suffix = _suffix_for_mime(reference_mime, ".wav")
+        with tempfile.TemporaryDirectory(prefix="lumina_chatterbox_direct_") as work:
+            reference_path = Path(work) / f"reference{reference_suffix}"
+            reference_path.write_bytes(reference_audio)
+            try:
+                client = self._client()
+                result = client.predict(
+                    text,
+                    handle_file(str(reference_path)),
+                    api_name=self.chatterbox_direct_api_name,
+                )
+            except Exception as exc:
+                raise ToneConversionError(
+                    "chatterbox_request_failed",
+                    "The free Chatterbox Space could not complete direct Personal Voice synthesis.",
+                ) from exc
+            data = self._read_result_audio(result)
+
+        return ToneConversionResult(
+            audio=data,
+            mime_type="audio/wav",
+            metadata={
+                "tone_converter": "chatterbox-multilingual",
+                "engine": "chatterbox-multilingual",
+                "personal_voice_mode": "direct-text-reference",
+                "language": "el",
+                "transport": "gradio-client",
+                "runtime": "huggingface-space",
+                "space_id": self.chatterbox_space_id,
+                "api_name": self.chatterbox_direct_api_name,
+                "zero_monthly_cost": True,
+            },
+        )
+
     def _convert_chatterbox_space_sync(
         self,
         source_audio: bytes,
@@ -188,9 +298,9 @@ class OpenVoiceV2ToneConverter:
         reference_audio: bytes,
         reference_mime: str,
     ) -> ToneConversionResult:
-        """Call a Gradio-backed Hugging Face Space running Chatterbox VC."""
+        """Compatibility fallback using Chatterbox voice conversion."""
         try:
-            from gradio_client import Client, handle_file
+            from gradio_client import handle_file
         except Exception as exc:
             raise ToneConversionError(
                 "chatterbox_client_missing",
@@ -204,12 +314,8 @@ class OpenVoiceV2ToneConverter:
             reference_path = Path(work) / f"reference{reference_suffix}"
             source_path.write_bytes(source_audio)
             reference_path.write_bytes(reference_audio)
-
-            kwargs = {}
-            if self.chatterbox_hf_token:
-                kwargs["token"] = self.chatterbox_hf_token
             try:
-                client = Client(self.chatterbox_space_id, **kwargs)
+                client = self._client()
                 result = client.predict(
                     handle_file(str(source_path)),
                     handle_file(str(reference_path)),
@@ -220,39 +326,15 @@ class OpenVoiceV2ToneConverter:
                     "chatterbox_request_failed",
                     "The free Chatterbox Space could not complete voice conversion.",
                 ) from exc
+            data = self._read_result_audio(result)
 
-            output_path = None
-            if isinstance(result, str):
-                output_path = result
-            elif isinstance(result, (list, tuple)) and result:
-                output_path = result[0]
-            elif isinstance(result, dict):
-                output_path = result.get("path") or result.get("name")
-            if not output_path:
-                raise ToneConversionError(
-                    "chatterbox_invalid_response",
-                    "Chatterbox Space did not return an audio file.",
-                )
-
-            try:
-                data = Path(str(output_path)).read_bytes()
-            except OSError as exc:
-                raise ToneConversionError(
-                    "chatterbox_output_missing",
-                    "Chatterbox output file could not be read.",
-                ) from exc
-
-        if not data:
-            raise ToneConversionError(
-                "chatterbox_empty_output",
-                "Chatterbox returned empty audio.",
-            )
         return ToneConversionResult(
             audio=data,
             mime_type="audio/wav",
             metadata={
                 "tone_converter": "chatterbox-vc",
                 "engine": "chatterbox-vc",
+                "personal_voice_mode": "voice-conversion-fallback",
                 "transport": "gradio-client",
                 "runtime": "huggingface-space",
                 "space_id": self.chatterbox_space_id,
