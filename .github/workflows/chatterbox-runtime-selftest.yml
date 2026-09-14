@@ -1,0 +1,56 @@
+name: Chatterbox Runtime Self-Test
+
+on:
+  push:
+    branches:
+      - work/lumina-voice-lab-v1
+    paths:
+      - '.github/workflows/chatterbox-runtime-selftest.yml'
+
+jobs:
+  chatterbox-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Install Gradio client
+        run: pip install 'gradio_client>=1.8,<2'
+      - name: Call official ResembleAI Chatterbox Space
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import urllib.request
+          from gradio_client import Client, handle_file
+
+          ref = '/tmp/greek-reference.flac'
+          urllib.request.urlretrieve('https://storage.googleapis.com/chatterbox-demo-samples/mtl_prompts/el_m.flac', ref)
+          client = Client('ResembleAI/Chatterbox-Multilingual-TTS')
+          result = client.predict(
+              'Καλημέρα. Αυτή είναι μια δοκιμή της προσωπικής φωνής στο Lumina.',
+              'el',
+              handle_file(ref),
+              0.5,
+              0.8,
+              0,
+              0.5,
+              api_name='/generate_tts_audio',
+          )
+          print('result_type=', type(result).__name__)
+          print('result=', result)
+          path = None
+          if isinstance(result, str):
+              path = result
+          elif isinstance(result, (list, tuple)) and result:
+              first = result[0]
+              if isinstance(first, str): path = first
+              elif isinstance(first, dict): path = first.get('path') or first.get('name')
+          elif isinstance(result, dict):
+              path = result.get('path') or result.get('name')
+          if path:
+              p = Path(path)
+              print('output_bytes=', p.stat().st_size)
+              assert p.stat().st_size > 1000
+          else:
+              # Gradio audio outputs can also arrive as a FileData dict wrapped by the client.
+              assert result is not None
+          print('CHATTERBOX_SELFTEST_PASS')
+          PY
