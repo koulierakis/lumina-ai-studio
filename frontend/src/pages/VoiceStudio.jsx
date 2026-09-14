@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AudioLines, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AudioLines, Download, Loader2, Mic, RefreshCw, Sparkles, Square, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, fetchMediaBlobUrl, uploadFormData } from '../lib/api';
 
@@ -15,6 +15,13 @@ export const LUMINA_VOICES = [
     name: 'Αριάδνη',
     subtitle: 'Γυναικεία φωνή · Φυσική & Ήρεμη',
     language: 'el-GR',
+  },
+  {
+    id: 'personal-user',
+    name: 'Η φωνή μου',
+    subtitle: 'Κλωνοποίηση από δείγμα 3–10 δευτερολέπτων',
+    language: 'el-GR',
+    personal: true,
   },
 ];
 
@@ -39,6 +46,13 @@ export default function VoiceStudio() {
   const [audioUrl, setAudioUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [providerReady, setProviderReady] = useState(null);
+  const [personalReady, setPersonalReady] = useState(null);
+  const [voiceSample, setVoiceSample] = useState(null);
+  const [sampleUrl, setSampleUrl] = useState('');
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const recorderRef = useRef(null);
+  const streamRef = useRef(null);
 
   const selectedVoice = useMemo(
     () => LUMINA_VOICES.find((voice) => voice.id === voiceId) || LUMINA_VOICES[0],
@@ -51,15 +65,76 @@ export default function VoiceStudio() {
       .then((payload) => {
         if (!mounted) return;
         const edge = (payload?.providers || []).find((item) => item.name === 'edge');
+        const omni = (payload?.providers || []).find((item) => item.name === 'omnivoice');
         setProviderReady(Boolean(edge?.available && edge?.configured));
+        setPersonalReady(Boolean(omni?.available && omni?.configured));
       })
       .catch(() => {
-        if (mounted) setProviderReady(false);
+        if (mounted) {
+          setProviderReady(false);
+          setPersonalReady(false);
+        }
       });
     return () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!recording) return undefined;
+    const timer = window.setInterval(() => setRecordingSeconds((value) => value + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks?.().forEach((track) => track.stop());
+    if (sampleUrl) URL.revokeObjectURL(sampleUrl);
+  }, [sampleUrl]);
+
+  function setSample(file) {
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error('Το δείγμα πρέπει να είναι μικρότερο από 25 MB.');
+      return;
+    }
+    if (sampleUrl) URL.revokeObjectURL(sampleUrl);
+    setVoiceSample(file);
+    setSampleUrl(URL.createObjectURL(file));
+  }
+
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const preferred = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find(
+        (type) => window.MediaRecorder?.isTypeSupported?.(type)
+      );
+      const recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined);
+      const chunks = [];
+      recorder.ondataavailable = (event) => event.data.size && chunks.push(event.data);
+      recorder.onstop = () => {
+        const type = recorder.mimeType || 'audio/webm';
+        const extension = type.includes('mp4') ? 'm4a' : 'webm';
+        setSample(new File(chunks, `lumina-voice.${extension}`, { type }));
+        stream.getTracks().forEach((track) => track.stop());
+      };
+      recorderRef.current = recorder;
+      streamRef.current = stream;
+      setRecordingSeconds(0);
+      setRecording(true);
+      recorder.start();
+      window.setTimeout(() => {
+        if (recorder.state === 'recording') recorder.stop();
+        setRecording(false);
+      }, 10000);
+    } catch {
+      toast.error('Δεν δόθηκε πρόσβαση στο μικρόφωνο. Μπορείς να ανεβάσεις αρχείο.');
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop();
+    setRecording(false);
+  }
 
   useEffect(() => {
     return () => {
@@ -90,6 +165,10 @@ export default function VoiceStudio() {
       toast.error('Γράψε πρώτα το κείμενο που θέλεις να μετατρέψεις σε φωνή.');
       return;
     }
+    if (selectedVoice.personal && !voiceSample) {
+      toast.error('Ηχογράφησε ή ανέβασε πρώτα ένα δείγμα φωνής 3–10 δευτερολέπτων.');
+      return;
+    }
 
     setBusy(true);
     setJob(null);
@@ -101,11 +180,12 @@ export default function VoiceStudio() {
     try {
       const form = new FormData();
       form.append('text', clean);
-      form.append('mode', 'text-to-speech');
+      form.append('mode', selectedVoice.personal ? 'voice-clone' : 'text-to-speech');
       form.append('voice', voiceId);
       form.append('style', STYLE_TO_BACKEND[style]);
-      form.append('output_format', 'mp3');
-      form.append('provider', 'edge');
+      form.append('output_format', selectedVoice.personal ? 'wav' : 'mp3');
+      form.append('provider', selectedVoice.personal ? 'omnivoice' : 'edge');
+      if (selectedVoice.personal) form.append('reference_audio', voiceSample);
       form.append('title', `${selectedVoice.name} · ${style}`);
 
       const created = await uploadFormData('/voice/generate', form);
@@ -130,7 +210,7 @@ export default function VoiceStudio() {
     if (!audioUrl) return;
     const anchor = document.createElement('a');
     anchor.href = audioUrl;
-    anchor.download = `${voiceId}-${style.toLowerCase()}.mp3`;
+    anchor.download = `${voiceId}-${style.toLowerCase()}.${selectedVoice.personal ? 'wav' : 'mp3'}`;
     anchor.click();
   }
 
@@ -201,7 +281,36 @@ export default function VoiceStudio() {
               </div>
             </div>
 
-            <div className="mt-6">
+            {selectedVoice.personal && (
+              <div className="mt-5 rounded-xl border border-gold/25 bg-gold/5 p-4">
+                <p className="text-sm font-medium">Δείγμα της φωνής σου</p>
+                <p className="mt-1 text-xs text-white/50">Μίλησε καθαρά για 3–10 δευτερόλεπτα, χωρίς μουσική.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={recording ? stopRecording : startRecording}
+                    className="flex items-center gap-2 rounded-lg bg-gold px-3 py-2 text-sm text-black"
+                  >
+                    {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                    {recording ? `Σταμάτημα (${recordingSeconds}s)` : 'Ηχογράφηση'}
+                  </button>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm">
+                    <Upload className="h-4 w-4" /> Ανέβασμα αρχείου
+                    <input
+                      type="file"
+                      accept="audio/wav,audio/mpeg,audio/ogg,audio/webm,audio/mp4"
+                      className="hidden"
+                      onChange={(event) => setSample(event.target.files?.[0])}
+                    />
+                  </label>
+                </div>
+                {sampleUrl && <audio controls src={sampleUrl} className="mt-3 w-full" />}
+                {personalReady === false && <p className="mt-2 text-xs text-amber-200">Η εξωτερική μηχανή φωνής δεν είναι διαθέσιμη αυτή τη στιγμή.</p>}
+                <p className="mt-2 text-[11px] text-white/35">Το δείγμα αποστέλλεται στην εξωτερική δωρεάν μηχανή OmniVoice μόνο όταν πατήσεις Generate Voice.</p>
+              </div>
+            )}
+
+            {!selectedVoice.personal && <div className="mt-6">
               <p className="mb-3 text-sm text-white/70">Ύφος</p>
               <div className="flex flex-wrap gap-2">
                 {LUMINA_STYLES.map((item) => (
@@ -217,12 +326,12 @@ export default function VoiceStudio() {
                   </button>
                 ))}
               </div>
-            </div>
+            </div>}
 
             <button
               type="button"
               onClick={generate}
-              disabled={busy || !text.trim()}
+              disabled={busy || !text.trim() || (selectedVoice.personal && !voiceSample)}
               className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 font-medium text-black transition disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -262,7 +371,7 @@ export default function VoiceStudio() {
                       onClick={downloadAudio}
                       className="flex items-center gap-2 rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
                     >
-                      <Download className="h-4 w-4" /> Download MP3
+                      <Download className="h-4 w-4" /> Download {selectedVoice.personal ? 'WAV' : 'MP3'}
                     </button>
                     <button
                       type="button"

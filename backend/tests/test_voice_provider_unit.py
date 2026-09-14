@@ -4,6 +4,8 @@ import sys
 import types
 import wave
 
+import httpx
+
 from voice_providers import get_voice_provider, voice_provider_catalog
 
 
@@ -34,6 +36,74 @@ def test_voice_provider_catalog_includes_free_edge_provider():
     assert catalog["elevenlabs"]["available"] is False
     assert "text-to-speech" in catalog["edge"]["capabilities"]["modes"]
     assert catalog["edge"]["capabilities"]["formats"] == ["mp3"]
+    assert catalog["omnivoice"]["available"] is True
+    assert catalog["omnivoice"]["capabilities"]["modes"] == ["voice-clone"]
+
+
+def test_omnivoice_provider_runs_upload_queue_and_download_protocol():
+    calls = []
+
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        if request.url.path == "/gradio_api/upload":
+            return httpx.Response(200, json=["/tmp/gradio/sample/reference.wav"])
+        if request.url.path == "/gradio_api/call/_clone_fn" and request.method == "POST":
+            return httpx.Response(200, json={"event_id": "voice-123"})
+        if request.url.path == "/gradio_api/call/_clone_fn/voice-123":
+            body = 'event: complete\ndata: [{"url":"https://voice.test/gradio_api/file=/tmp/output.wav"},"Done."]\n\n'
+            return httpx.Response(200, text=body)
+        if request.url.path == "/gradio_api/file=/tmp/output.wav":
+            return httpx.Response(200, content=b"R" * 512)
+        return httpx.Response(404)
+
+    provider = get_voice_provider("omnivoice")
+    provider.base_url = "https://voice.test"
+    provider._origin = ("https", "voice.test")
+    provider._transport = httpx.MockTransport(handler)
+    data, mime, metadata = asyncio.run(
+        provider.generate(
+            "Καλώς ήρθατε στο LUMINA.",
+            "personal-user",
+            "wav",
+            reference_audio=b"sample-audio",
+            reference_filename="reference.wav",
+            reference_mime="audio/wav",
+        )
+    )
+    assert data == b"R" * 512
+    assert mime == "audio/wav"
+    assert metadata["voice_cloning"] is True
+    assert calls == [
+        ("POST", "/gradio_api/upload"),
+        ("POST", "/gradio_api/call/_clone_fn"),
+        ("GET", "/gradio_api/call/_clone_fn/voice-123"),
+        ("GET", "/gradio_api/file=/tmp/output.wav"),
+    ]
+
+
+def test_omnivoice_provider_requires_a_sample_and_blocks_foreign_output():
+    provider = get_voice_provider("omnivoice")
+    try:
+        asyncio.run(provider.generate("Test", "personal-user", "wav"))
+        assert False, "missing sample should fail"
+    except ValueError as exc:
+        assert "sample" in str(exc).lower()
+
+    def handler(request):
+        if request.url.path == "/gradio_api/upload":
+            return httpx.Response(200, json=["/tmp/reference.wav"])
+        if request.url.path == "/gradio_api/call/_clone_fn" and request.method == "POST":
+            return httpx.Response(200, json={"event_id": "unsafe"})
+        return httpx.Response(200, text='event: complete\ndata: [{"url":"https://attacker.test/audio.wav"}]\n\n')
+
+    provider.base_url = "https://voice.test"
+    provider._origin = ("https", "voice.test")
+    provider._transport = httpx.MockTransport(handler)
+    try:
+        asyncio.run(provider.generate("Test", "personal-user", "wav", reference_audio=b"audio"))
+        assert False, "foreign output URL should fail"
+    except RuntimeError as exc:
+        assert "unsafe" in str(exc).lower()
 
 
 def test_edge_provider_exposes_two_greek_lumina_voices_and_styles():

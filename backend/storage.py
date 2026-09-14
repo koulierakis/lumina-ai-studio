@@ -27,7 +27,7 @@ def _ext_from_mime(mime: str) -> str:
         "video/mp4": ".mp4",
         "video/webm": ".webm",
         "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav",
-        "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac",
+        "audio/flac": ".flac", "audio/ogg": ".ogg", "audio/aac": ".aac", "audio/mp4": ".m4a",
         "application/pdf": ".pdf",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
         "text/plain": ".txt", "text/html": ".html", "text/markdown": ".md",

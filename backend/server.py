@@ -212,7 +212,7 @@ _configure_local_first_collections()
 
 ALLOWED_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/webp"}
 ALLOWED_VIDEO_MIMES = {"video/mp4", "video/quicktime", "video/webm", "video/x-msvideo"}
-ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg"}
+ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "audio/webm", "audio/ogg", "audio/mp4"}
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (images / mask; verified for 20 MB uploads)
 MAX_VIDEO_ASSET_BYTES = 500 * 1024 * 1024  # 500 MB (video / audio for editor)
 MAX_PHOTOS_PER_PACK = 5
@@ -2406,9 +2406,20 @@ async def _run_voice_job(job_id: str, owner: str) -> None:
         job = VoiceJob(**doc)
         await voice_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "processing", "progress": 55, "updated_at": now_iso()}})
         provider = get_voice_provider(job.provider)
+        reference_options = {}
+        if job.source_media_id:
+            source = await media_coll.find_one({"id": job.source_media_id, "owner_email": owner}, {"_id": 0})
+            if not source:
+                raise RuntimeError("The personal voice sample is no longer available.")
+            reference_options = {
+                "reference_audio": read_bytes(source["filename"], "reference"),
+                "reference_filename": source["filename"],
+                "reference_mime": source["mime_type"],
+                "reference_text": job.metadata.get("reference_text"),
+            }
         async def voice_executor(runtime_job, progress):
             await progress(runtime_job, RuntimeJobStatus.RUNNING, 50, "Voice provider execution started")
-            generated = await provider.generate(job.text or job.title, job.voice, job.output_format, style=job.style, mode=job.mode, preset_id=job.preset_id, sample_rate=job.sample_rate, bit_depth=job.bit_depth, bitrate=job.bitrate, loudness_lufs=job.loudness_lufs)
+            generated = await provider.generate(job.text or job.title, job.voice, job.output_format, style=job.style, mode=job.mode, preset_id=job.preset_id, sample_rate=job.sample_rate, bit_depth=job.bit_depth, bitrate=job.bitrate, loudness_lufs=job.loudness_lufs, **reference_options)
             await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Voice provider returned audio")
             return generated
         (data, mime, metadata), runtime_job = await _runtime_execute(owner, "voice", "speech", job.provider, {"mode": job.mode, "title": job.title, "format": job.output_format}, voice_executor)
@@ -2477,7 +2488,7 @@ async def list_voice_projects(owner: str = Depends(require_owner), search: str =
     return [VoiceProject(**doc) async for doc in voice_projects_coll.find(query, {"_id": 0}).sort("updated_at", -1).limit(100)]
 
 @api.post("/voice/generate", response_model=VoiceJob)
-async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mode: str = Form("text-to-speech"), voice: str = Form("personal-user"), style: str = Form("podcast"), preset_id: Optional[str] = Form(None), output_format: str = Form("wav"), sample_rate: int = Form(48000), bit_depth: int = Form(24), bitrate: str = Form("192k"), loudness_lufs: float = Form(-16), title: str = Form(""), tags: str = Form(""), provider: Optional[str] = Form(None), owner: str = Depends(require_owner)) -> VoiceJob:
+async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mode: str = Form("text-to-speech"), voice: str = Form("personal-user"), style: str = Form("podcast"), preset_id: Optional[str] = Form(None), output_format: str = Form("wav"), sample_rate: int = Form(48000), bit_depth: int = Form(24), bitrate: str = Form("192k"), loudness_lufs: float = Form(-16), title: str = Form(""), tags: str = Form(""), provider: Optional[str] = Form(None), reference_text: str = Form(""), reference_audio: Optional[UploadFile] = File(None), owner: str = Depends(require_owner)) -> VoiceJob:
     if mode not in VOICE_MODES: raise HTTPException(400, "Unsupported voice operation.")
     if style not in VOICE_STYLES: raise HTTPException(400, "Unsupported voice style.")
     selected = (provider or os.environ.get("VOICE_PROVIDER", "mock")).lower()
@@ -2485,9 +2496,21 @@ async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mo
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
     if mode not in engine.capabilities["modes"]: raise HTTPException(400, "The selected voice provider does not support this operation.")
     if output_format not in engine.capabilities["formats"]: raise HTTPException(400, "The selected voice provider does not support this output format.")
-    if mode == "text-to-speech" and not text.strip(): raise HTTPException(400, "Enter text to generate speech.")
+    if mode in {"text-to-speech", "voice-clone"} and not text.strip(): raise HTTPException(400, "Enter text to generate speech.")
+    source_media_id = None
+    if selected == "omnivoice":
+        if voice != "personal-user": raise HTTPException(400, "Select the personal voice option for OmniVoice.")
+        if reference_audio is None: raise HTTPException(400, "Record or upload a 3–10 second voice sample.")
+        mime = (reference_audio.content_type or "").lower()
+        if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, WebM, or M4A audio only.")
+        data = await reference_audio.read(MAX_VOICE_SAMPLE_BYTES + 1)
+        if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Voice sample must be no larger than 25 MB.")
+        filename, _, size = save_bytes(data, mime, kind="reference")
+        source = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="personal-voice-reference", source_module="voice", provider="omnivoice")
+        await media_coll.insert_one(source.model_dump())
+        source_media_id = source.id
     personal_model = await _get_or_create_personal_voice_model(owner)
-    job = VoiceJob(owner_email=owner, provider=selected, mode=mode, text=text.strip(), voice=voice, style=style, preset_id=preset_id, personal_model_id=personal_model.id, output_format=output_format, sample_rate=sample_rate, bit_depth=bit_depth, bitrate=bitrate, loudness_lufs=loudness_lufs, title=(title.strip() or text.strip()[:80] or f"{style.title()} voice production"), tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:12], metadata={"identity_preservation": True, "personal_model_version": personal_model.version})
+    job = VoiceJob(owner_email=owner, provider=selected, mode=mode, text=text.strip(), voice=voice, style=style, preset_id=preset_id, personal_model_id=personal_model.id, source_media_id=source_media_id, output_format=output_format, sample_rate=sample_rate, bit_depth=bit_depth, bitrate=bitrate, loudness_lufs=loudness_lufs, title=(title.strip() or text.strip()[:80] or f"{style.title()} voice production"), tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:12], metadata={"identity_preservation": True, "personal_model_version": personal_model.version, "reference_text": reference_text.strip()[:2000]})
     await voice_jobs_coll.insert_one(job.model_dump()); background.add_task(_run_voice_job, job.id, owner)
     return job
 

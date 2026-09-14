@@ -1,10 +1,12 @@
 """Provider-neutral Voice Studio registry."""
 from .edge_provider import EdgeVoiceProvider
 from .mock_provider import MockVoiceProvider
+from .omnivoice_provider import OmniVoiceExternalProvider
 
 _REGISTRY = {
     "mock": MockVoiceProvider,
     "edge": EdgeVoiceProvider,
+    "omnivoice": OmniVoiceExternalProvider,
 }
 
 
@@ -17,7 +19,7 @@ def get_voice_provider(name=None):
 
 def voice_provider_catalog():
     configured = set(_REGISTRY)
-    known = ("mock", "edge", "elevenlabs", "openai", "google", "azure", "cartesia")
+    known = ("mock", "edge", "omnivoice", "elevenlabs", "openai", "google", "azure", "cartesia")
     result = []
     for name in known:
         provider = _REGISTRY.get(name)
