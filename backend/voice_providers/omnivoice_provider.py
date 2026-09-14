@@ -1,15 +1,22 @@
 """Personal Voice provider backed by ResembleAI Chatterbox Multilingual.
 
 The historical ``omnivoice`` provider key is retained so existing LUMINA jobs
-and UI contracts do not need a migration.  Synthesis is performed by the
+and UI contracts do not need a migration. Synthesis is performed by the
 official ResembleAI Chatterbox Multilingual ZeroGPU Space: text + the user's
 saved reference sample -> cloned Greek speech.
+
+The public Chatterbox demo accepts at most 300 characters per request. LUMINA
+therefore splits longer text into sentence-aware chunks, synthesizes each
+chunk, and joins the WAV files into one continuous output.
 """
 from __future__ import annotations
 
 import asyncio
+import io
 import os
+import re
 import tempfile
+import wave
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -19,6 +26,8 @@ import httpx
 class OmniVoiceExternalProvider:
     name = "omnivoice"
     MAX_OUTPUT_BYTES = 50 * 1024 * 1024
+    MAX_CHUNK_CHARACTERS = 290
+    MAX_TEXT_CHARACTERS = 5000
     DEFAULT_SPACE_ID = "ResembleAI/Chatterbox-Multilingual-TTS"
     DEFAULT_SPACE_URL = "https://resembleai-chatterbox-multilingual-tts.hf.space"
     DEFAULT_API_NAME = "/generate_tts_audio"
@@ -32,6 +41,8 @@ class OmniVoiceExternalProvider:
         "singing_voice_conversion": False,
         "languages": ["el-GR"],
         "shared_runtime": True,
+        "max_text_characters": MAX_TEXT_CHARACTERS,
+        "chunked_generation": True,
     }
 
     def __init__(self):
@@ -72,6 +83,56 @@ class OmniVoiceExternalProvider:
             "audio/x-m4a": ".m4a",
             "audio/aac": ".aac",
         }.get(value, ".wav")
+
+    @classmethod
+    def _split_text(cls, text: str) -> list[str]:
+        """Split text into natural chunks that stay under the provider limit."""
+        clean = " ".join((text or "").split()).strip()
+        if not clean:
+            return []
+        if len(clean) <= cls.MAX_CHUNK_CHARACTERS:
+            return [clean]
+
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?;·…])\s+", clean) if part.strip()]
+        chunks: list[str] = []
+        current = ""
+
+        def push_current() -> None:
+            nonlocal current
+            if current:
+                chunks.append(current)
+                current = ""
+
+        for sentence in sentences:
+            if len(sentence) <= cls.MAX_CHUNK_CHARACTERS:
+                candidate = f"{current} {sentence}".strip()
+                if len(candidate) <= cls.MAX_CHUNK_CHARACTERS:
+                    current = candidate
+                else:
+                    push_current()
+                    current = sentence
+                continue
+
+            push_current()
+            words = sentence.split()
+            piece = ""
+            for word in words:
+                candidate = f"{piece} {word}".strip()
+                if len(candidate) <= cls.MAX_CHUNK_CHARACTERS:
+                    piece = candidate
+                else:
+                    if piece:
+                        chunks.append(piece)
+                    # Hard-split a single pathological token if necessary.
+                    while len(word) > cls.MAX_CHUNK_CHARACTERS:
+                        chunks.append(word[: cls.MAX_CHUNK_CHARACTERS])
+                        word = word[cls.MAX_CHUNK_CHARACTERS :]
+                    piece = word
+            if piece:
+                current = piece
+
+        push_current()
+        return chunks
 
     def _generate_sync(self, text: str, reference_audio: bytes, reference_mime: str) -> bytes:
         try:
@@ -120,14 +181,54 @@ class OmniVoiceExternalProvider:
 
         return payload
 
+    @staticmethod
+    def _join_wav_chunks(chunks: list[bytes], pause_ms: int = 140) -> bytes:
+        if not chunks:
+            raise RuntimeError("No audio chunks were generated.")
+        if len(chunks) == 1:
+            return chunks[0]
+
+        decoded: list[tuple[wave._wave_params, bytes]] = []
+        for index, payload in enumerate(chunks, start=1):
+            try:
+                with wave.open(io.BytesIO(payload), "rb") as reader:
+                    params = reader.getparams()
+                    frames = reader.readframes(reader.getnframes())
+            except (wave.Error, EOFError) as exc:
+                raise RuntimeError(f"Generated audio chunk {index} is not a valid WAV file.") from exc
+            decoded.append((params, frames))
+
+        base = decoded[0][0]
+        for params, _frames in decoded[1:]:
+            if (
+                params.nchannels != base.nchannels
+                or params.sampwidth != base.sampwidth
+                or params.framerate != base.framerate
+                or params.comptype != base.comptype
+            ):
+                raise RuntimeError("Generated WAV chunks use incompatible audio formats.")
+
+        silence_frames = max(0, int(base.framerate * pause_ms / 1000))
+        silence = b"\x00" * silence_frames * base.nchannels * base.sampwidth
+        output = io.BytesIO()
+        with wave.open(output, "wb") as writer:
+            writer.setnchannels(base.nchannels)
+            writer.setsampwidth(base.sampwidth)
+            writer.setframerate(base.framerate)
+            writer.setcomptype(base.comptype, base.compname)
+            for index, (_params, frames) in enumerate(decoded):
+                if index:
+                    writer.writeframesraw(silence)
+                writer.writeframesraw(frames)
+        return output.getvalue()
+
     async def generate(self, text: str, voice: str, output_format: str, **options) -> tuple[bytes, str, dict]:
         clean_text = " ".join((text or "").split()).strip()
         reference_audio = options.get("reference_audio")
         if not clean_text:
             raise ValueError("Enter text to generate speech.")
-        # The official public demo currently accepts 300 characters per call.
-        if len(clean_text) > 300:
-            raise ValueError("Personal Voice currently supports up to 300 characters per generation.")
+        if len(clean_text) > self.MAX_TEXT_CHARACTERS:
+            raise ValueError(f"Personal Voice supports up to {self.MAX_TEXT_CHARACTERS} characters per generation.")
         if voice != "personal-user":
             raise ValueError("Personal Voice requires the personal-user voice.")
         if output_format != "wav":
@@ -136,13 +237,20 @@ class OmniVoiceExternalProvider:
             raise ValueError("Record or upload a clean voice sample.")
 
         reference_mime = str(options.get("reference_mime") or "audio/wav")
+        text_chunks = self._split_text(clean_text)
+        generated_chunks: list[bytes] = []
         try:
-            payload = await asyncio.to_thread(
-                self._generate_sync,
-                clean_text,
-                reference_audio,
-                reference_mime,
-            )
+            for text_chunk in text_chunks:
+                payload = await asyncio.to_thread(
+                    self._generate_sync,
+                    text_chunk,
+                    reference_audio,
+                    reference_mime,
+                )
+                if len(payload) < 1000 or payload[:4] != b"RIFF":
+                    raise RuntimeError("Chatterbox returned an invalid audio chunk.")
+                generated_chunks.append(payload)
+            payload = self._join_wav_chunks(generated_chunks)
         except Exception as exc:
             raise RuntimeError(f"Chatterbox Personal Voice could not complete the request: {exc}") from exc
 
@@ -161,5 +269,8 @@ class OmniVoiceExternalProvider:
             "voice_cloning": True,
             "identity_preservation": True,
             "shared_runtime": True,
+            "chunked_generation": len(text_chunks) > 1,
+            "chunk_count": len(text_chunks),
+            "max_text_characters": self.MAX_TEXT_CHARACTERS,
             "mock": False,
         }
