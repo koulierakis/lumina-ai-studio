@@ -24,6 +24,7 @@ jobs:
             -F 'output_format=wav' \
             -F 'engine=openvoice-v2' \
             https://lumina-openvoice-v2.onrender.com/convert)
+          echo "worker_http=$code"
           test "$code" = "200"
           test -s /tmp/converted.wav
           python - <<'PY'
