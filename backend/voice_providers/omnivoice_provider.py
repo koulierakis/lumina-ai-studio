@@ -30,14 +30,6 @@ class OmniVoiceExternalProvider:
     DEFAULT_SPACE_URL = "https://resembleai-chatterbox-multilingual-tts.hf.space"
     DEFAULT_API_NAME = "/generate_tts_audio"
 
-    # Tuned for a natural, controlled Greek male delivery with stronger
-    # reference-speaker similarity. Lower CFG follows the reference voice and
-    # pacing more closely; slightly lower temperature reduces synthetic/random
-    # inflections; restrained exaggeration keeps delivery serious and natural.
-    NATURAL_EXAGGERATION = 0.40
-    NATURAL_TEMPERATURE = 0.65
-    NATURAL_CFG_WEIGHT = 0.30
-
     capabilities = {
         "modes": ["voice-clone"],
         "formats": ["wav"],
@@ -52,6 +44,9 @@ class OmniVoiceExternalProvider:
     }
 
     def __init__(self):
+        # Pin production to the exact official Space/API contract we runtime-test.
+        # This intentionally ignores stale Render overrides that previously routed
+        # Personal Voice to a different Space with an incompatible Gradio API.
         self.space_id = self.DEFAULT_SPACE_ID
         self.space_url = self.DEFAULT_SPACE_URL
         self.api_name = self.DEFAULT_API_NAME
@@ -88,6 +83,7 @@ class OmniVoiceExternalProvider:
 
     @classmethod
     def _split_text(cls, text: str) -> list[str]:
+        """Split text into natural chunks that stay under the provider limit."""
         clean = " ".join((text or "").split()).strip()
         if not clean:
             return []
@@ -150,10 +146,10 @@ class OmniVoiceExternalProvider:
                 text,
                 "el",
                 handle_file(str(reference_path)),
-                self.NATURAL_EXAGGERATION,
-                self.NATURAL_TEMPERATURE,
+                0.5,
+                0.8,
                 0,
-                self.NATURAL_CFG_WEIGHT,
+                0.5,
                 api_name=self.api_name,
             )
 
@@ -179,7 +175,7 @@ class OmniVoiceExternalProvider:
         return payload
 
     @staticmethod
-    def _join_wav_chunks(chunks: list[bytes], pause_ms: int = 170) -> bytes:
+    def _join_wav_chunks(chunks: list[bytes], pause_ms: int = 140) -> bytes:
         if not chunks:
             raise RuntimeError("No audio chunks were generated.")
         if len(chunks) == 1:
@@ -266,10 +262,6 @@ class OmniVoiceExternalProvider:
             "voice_cloning": True,
             "identity_preservation": True,
             "shared_runtime": True,
-            "voice_profile": "natural-serious-v2",
-            "exaggeration": self.NATURAL_EXAGGERATION,
-            "temperature": self.NATURAL_TEMPERATURE,
-            "cfg_weight": self.NATURAL_CFG_WEIGHT,
             "chunked_generation": len(text_chunks) > 1,
             "chunk_count": len(text_chunks),
             "max_text_characters": self.MAX_TEXT_CHARACTERS,
