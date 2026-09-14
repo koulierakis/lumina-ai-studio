@@ -216,6 +216,11 @@ ALLOWED_AUDIO_MIMES = {"audio/mpeg", "audio/mp3", "audio/wav", "audio/x-wav", "a
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB (images / mask; verified for 20 MB uploads)
 MAX_VIDEO_ASSET_BYTES = 500 * 1024 * 1024  # 500 MB (video / audio for editor)
 MAX_PHOTOS_PER_PACK = 5
+
+
+def _base_mime(content_type: str | None) -> str:
+    """Normalize browser MIME values such as audio/webm;codecs=opus."""
+    return (content_type or "").split(";", 1)[0].strip().lower()
 VIDEO_STUDIO_DURATIONS = {3, 5, 8}
 VIDEO_STUDIO_ASPECT_RATIOS = {"16:9", "9:16"}
 IMAGE_STUDIO_IDENTITY_LOCKS = {"low", "medium", "high", "maximum"}
@@ -2448,7 +2453,7 @@ async def get_personal_voice_model(owner: str = Depends(require_owner)) -> Perso
 
 @api.post("/voice/personal-model/sample", response_model=PersonalVoiceModel)
 async def save_personal_voice_sample(name: str = Form("Η φωνή μου"), audio: UploadFile = File(...), owner: str = Depends(require_owner)) -> PersonalVoiceModel:
-    mime = (audio.content_type or "").lower()
+    mime = _base_mime(audio.content_type)
     if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, WebM, or M4A audio only.")
     data = await audio.read(MAX_VOICE_SAMPLE_BYTES + 1)
     if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Voice sample must be no larger than 25 MB.")
@@ -2520,7 +2525,7 @@ async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mo
     if selected == "omnivoice":
         if voice != "personal-user": raise HTTPException(400, "Select the personal voice option for OmniVoice.")
         if reference_audio is not None:
-            mime = (reference_audio.content_type or "").lower()
+            mime = _base_mime(reference_audio.content_type)
             if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, WebM, or M4A audio only.")
             data = await reference_audio.read(MAX_VOICE_SAMPLE_BYTES + 1)
             if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Voice sample must be no larger than 25 MB.")

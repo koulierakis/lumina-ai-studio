@@ -20,7 +20,7 @@ def test_personal_voice_sample_is_saved_and_reused_by_the_model():
         f"{BASE_URL}/voice/personal-model/sample",
         headers=headers,
         data={"name": "Voice Giannis"},
-        files={"audio": ("voice.wav", b"RIFF" + b"voice" * 128, "audio/wav")},
+        files={"audio": ("voice.webm", b"voice" * 128, "audio/webm;codecs=opus")},
         timeout=10,
     )
     assert saved.status_code == 200, saved.text
