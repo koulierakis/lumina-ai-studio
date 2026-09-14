@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 
@@ -50,17 +50,34 @@ class OmniVoiceExternalProvider:
         for line in sse.splitlines():
             if line.startswith("event:"):
                 event = line.split(":", 1)[1].strip()
-            elif line.startswith("data:") and event == "complete":
-                return json.loads(line.split(":", 1)[1].strip())
-            elif line.startswith("data:") and event == "error":
+                continue
+            if not line.startswith("data:"):
+                continue
+            raw = line.split(":", 1)[1].strip()
+            if event == "complete":
+                return json.loads(raw)
+            if event == "error":
+                detail = ""
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, str):
+                        detail = parsed
+                    elif isinstance(parsed, dict):
+                        detail = str(parsed.get("message") or parsed.get("error") or "")
+                except Exception:
+                    detail = raw
+                detail = " ".join(detail.split())[:500]
+                if detail and detail.lower() not in {"null", "none"}:
+                    raise RuntimeError(f"External OmniVoice error: {detail}")
                 raise RuntimeError("The external voice engine could not complete the request.")
         raise RuntimeError("The external voice engine returned an incomplete response.")
 
     def _safe_output_url(self, value: str) -> str:
-        parsed = urlparse(value)
+        absolute = urljoin(f"{self.base_url}/", value)
+        parsed = urlparse(absolute)
         if (parsed.scheme, parsed.netloc) != self._origin:
             raise RuntimeError("The external voice engine returned an unsafe output address.")
-        return value
+        return absolute
 
     async def generate(self, text: str, voice: str, output_format: str, **options) -> tuple[bytes, str, dict]:
         clean_text = " ".join((text or "").split()).strip()
@@ -86,17 +103,14 @@ class OmniVoiceExternalProvider:
                 raise RuntimeError("The external voice engine rejected the sample.")
 
             reference = {"path": paths[0], "meta": {"_type": "gradio.FileData"}}
-            # OmniVoice _gen_core contract (v0.1.4):
-            # text, language, ref_audio, instruct, num_step, guidance_scale,
-            # denoise, speed, duration, preprocess_prompt, postprocess_output,
-            # mode, ref_text.  Keep these positions exact: the public Space
-            # changed this contract and the previous adapter sent a shifted
-            # 12-value payload, causing every clone request to fail.
+            # Public _clone_fn contract has 12 inputs. The wrapper supplies
+            # mode='clone' internally; ref_text is the fourth public input.
             request = {
                 "data": [
                     clean_text,
                     "Greek",
                     reference,
+                    options.get("reference_text") or None,
                     None,
                     32,
                     2.0,
@@ -105,8 +119,6 @@ class OmniVoiceExternalProvider:
                     None,
                     True,
                     True,
-                    "clone",
-                    options.get("reference_text") or None,
                 ]
             }
             queued = await client.post("/gradio_api/call/_clone_fn", json=request)
@@ -120,10 +132,12 @@ class OmniVoiceExternalProvider:
             payload = self._complete_payload(completed.text)
             output = payload[0] if isinstance(payload, list) and payload else None
             output_url = output.get("url") if isinstance(output, dict) else None
+            if not output_url and isinstance(output, dict):
+                output_url = output.get("path")
             if not output_url:
                 raise RuntimeError("The external voice engine returned no audio.")
 
-            audio = await client.get(self._safe_output_url(output_url))
+            audio = await client.get(self._safe_output_url(str(output_url)))
             audio.raise_for_status()
             data = audio.content
             if len(data) < 256 or len(data) > self.MAX_OUTPUT_BYTES:
