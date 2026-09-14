@@ -29,3 +29,4 @@ jq>=1.6.0
 typer>=0.9.0
 reportlab>=4.0.0,<6.0.0
 edge-tts==7.2.8
+gradio_client>=1.8,<2
