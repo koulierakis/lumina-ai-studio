@@ -1,16 +1,14 @@
-"""External OmniVoice adapter using its public Gradio HTTP API."""
+"""VoiceStudio self-hosted adapter for LUMINA Personal Voice."""
 from __future__ import annotations
 
-import json
 import os
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse, urljoin
 
 import httpx
 
 
 class OmniVoiceExternalProvider:
     name = "omnivoice"
-    DEFAULT_BASE_URL = "https://k2-fsa-omnivoice.hf.space"
     MAX_OUTPUT_BYTES = 50 * 1024 * 1024
 
     capabilities = {
@@ -21,62 +19,34 @@ class OmniVoiceExternalProvider:
         "identity_preservation": True,
         "singing_voice_conversion": False,
         "languages": ["el-GR"],
-        "shared_runtime": True,
+        "shared_runtime": False,
     }
 
-    def __init__(self, base_url: str | None = None, transport=None):
-        self.base_url = (base_url or os.environ.get("OMNIVOICE_BASE_URL") or self.DEFAULT_BASE_URL).rstrip("/")
+    def __init__(self):
+        self.base_url = (os.environ.get("VOICESTUDIO_BASE_URL") or "https://lumina-voicestudio.onrender.com").rstrip("/")
         parsed = urlparse(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("OMNIVOICE_BASE_URL must be a valid HTTP address.")
+            raise ValueError("VOICESTUDIO_BASE_URL must be a valid HTTP address.")
         self._origin = (parsed.scheme, parsed.netloc)
-        self._transport = transport
+        self.api_key = (os.environ.get("VOICESTUDIO_API_KEY") or "").strip()
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
     async def health(self) -> dict:
         try:
-            async with self._client(30) as client:
-                response = await client.get("/gradio_api/info")
+            async with httpx.AsyncClient(timeout=30, trust_env=False) as client:
+                response = await client.get(f"{self.base_url}/health", headers=self._headers())
                 response.raise_for_status()
-            return {"ok": True, "provider": self.name, "shared_runtime": True}
+            return {"ok": True, "provider": self.name, "engine": "VoiceStudio"}
         except Exception as exc:
             return {"ok": False, "provider": self.name, "error": str(exc)}
 
-    def _client(self, timeout: float) -> httpx.AsyncClient:
-        return httpx.AsyncClient(base_url=self.base_url, timeout=httpx.Timeout(timeout), follow_redirects=False, trust_env=False, transport=self._transport)
-
-    @staticmethod
-    def _complete_payload(sse: str):
-        event = None
-        for line in sse.splitlines():
-            if line.startswith("event:"):
-                event = line.split(":", 1)[1].strip()
-                continue
-            if not line.startswith("data:"):
-                continue
-            raw = line.split(":", 1)[1].strip()
-            if event == "complete":
-                return json.loads(raw)
-            if event == "error":
-                detail = ""
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, str):
-                        detail = parsed
-                    elif isinstance(parsed, dict):
-                        detail = str(parsed.get("message") or parsed.get("error") or "")
-                except Exception:
-                    detail = raw
-                detail = " ".join(detail.split())[:500]
-                if detail and detail.lower() not in {"null", "none"}:
-                    raise RuntimeError(f"External OmniVoice error: {detail}")
-                raise RuntimeError("The external voice engine could not complete the request.")
-        raise RuntimeError("The external voice engine returned an incomplete response.")
-
-    def _safe_output_url(self, value: str) -> str:
+    def _safe_url(self, value: str) -> str:
         absolute = urljoin(f"{self.base_url}/", value)
         parsed = urlparse(absolute)
         if (parsed.scheme, parsed.netloc) != self._origin:
-            raise RuntimeError("The external voice engine returned an unsafe output address.")
+            raise RuntimeError("VoiceStudio returned an unsafe audio address.")
         return absolute
 
     async def generate(self, text: str, voice: str, output_format: str, **options) -> tuple[bytes, str, dict]:
@@ -87,68 +57,53 @@ class OmniVoiceExternalProvider:
         if len(clean_text) > 2000:
             raise ValueError("Personal Voice text is limited to 2000 characters per generation.")
         if voice != "personal-user":
-            raise ValueError("OmniVoice requires the personal voice option.")
+            raise ValueError("Personal Voice requires the personal-user voice.")
         if output_format != "wav":
-            raise ValueError("OmniVoice currently generates WAV audio.")
+            raise ValueError("Personal Voice currently generates WAV audio.")
         if not isinstance(reference_audio, bytes) or not reference_audio:
-            raise ValueError("Record or upload a 3–10 second voice sample.")
+            raise ValueError("Record or upload a clean voice sample.")
 
         filename = str(options.get("reference_filename") or "reference.wav")
         mime = str(options.get("reference_mime") or "audio/wav")
-        async with self._client(300) as client:
-            upload = await client.post("/gradio_api/upload", files={"files": (filename, reference_audio, mime)})
-            upload.raise_for_status()
-            paths = upload.json()
-            if not isinstance(paths, list) or not paths or not isinstance(paths[0], str):
-                raise RuntimeError("The external voice engine rejected the sample.")
+        form = {
+            "text": clean_text,
+            "language": "Greek",
+            "ref_text": str(options.get("reference_text") or ""),
+            "num_step": "32",
+            "guidance_scale": "2.0",
+            "speed": "1.0",
+            "denoise": "true",
+            "postprocess_output": "true",
+        }
+        files = {"ref_audio": (filename, reference_audio, mime)}
 
-            reference = {"path": paths[0], "meta": {"_type": "gradio.FileData"}}
-            # Public _clone_fn contract has 12 inputs. The wrapper supplies
-            # mode='clone' internally; ref_text is the fourth public input.
-            request = {
-                "data": [
-                    clean_text,
-                    "Greek",
-                    reference,
-                    options.get("reference_text") or None,
-                    None,
-                    32,
-                    2.0,
-                    True,
-                    1.0,
-                    None,
-                    True,
-                    True,
-                ]
-            }
-            queued = await client.post("/gradio_api/call/_clone_fn", json=request)
-            queued.raise_for_status()
-            event_id = queued.json().get("event_id")
-            if not event_id:
-                raise RuntimeError("The external voice engine did not start the request.")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(900), follow_redirects=True, trust_env=False) as client:
+            response = await client.post(f"{self.base_url}/generate", headers=self._headers(), data=form, files=files)
+            response.raise_for_status()
+            content_type = (response.headers.get("content-type") or "").lower()
+            if content_type.startswith("audio/"):
+                payload = response.content
+            else:
+                body = response.json()
+                candidate = body.get("audio_url") or body.get("url") or body.get("output_url") or body.get("audio")
+                if isinstance(candidate, dict):
+                    candidate = candidate.get("url") or candidate.get("path")
+                if not candidate:
+                    raise RuntimeError(f"VoiceStudio returned no audio: {body}")
+                audio = await client.get(self._safe_url(str(candidate)), headers=self._headers())
+                audio.raise_for_status()
+                payload = audio.content
 
-            completed = await client.get(f"/gradio_api/call/_clone_fn/{event_id}")
-            completed.raise_for_status()
-            payload = self._complete_payload(completed.text)
-            output = payload[0] if isinstance(payload, list) and payload else None
-            output_url = output.get("url") if isinstance(output, dict) else None
-            if not output_url and isinstance(output, dict):
-                output_url = output.get("path")
-            if not output_url:
-                raise RuntimeError("The external voice engine returned no audio.")
+        if len(payload) < 256 or len(payload) > self.MAX_OUTPUT_BYTES:
+            raise RuntimeError("VoiceStudio returned an invalid audio file.")
 
-            audio = await client.get(self._safe_output_url(str(output_url)))
-            audio.raise_for_status()
-            data = audio.content
-            if len(data) < 256 or len(data) > self.MAX_OUTPUT_BYTES:
-                raise RuntimeError("The external voice engine returned an invalid audio file.")
-
-        return data, "audio/wav", {
+        return payload, "audio/wav", {
             "provider": self.name,
+            "engine": "VoiceStudio",
             "voice": voice,
             "language": "el-GR",
             "voice_cloning": True,
             "identity_preservation": True,
-            "shared_runtime": True,
+            "shared_runtime": False,
             "mock": False,
         }
