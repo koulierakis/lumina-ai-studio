@@ -42,13 +42,7 @@ class OmniVoiceExternalProvider:
             return {"ok": False, "provider": self.name, "error": str(exc)}
 
     def _client(self, timeout: float) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=httpx.Timeout(timeout),
-            follow_redirects=False,
-            trust_env=False,
-            transport=self._transport,
-        )
+        return httpx.AsyncClient(base_url=self.base_url, timeout=httpx.Timeout(timeout), follow_redirects=False, trust_env=False, transport=self._transport)
 
     @staticmethod
     def _complete_payload(sse: str):
@@ -92,12 +86,17 @@ class OmniVoiceExternalProvider:
                 raise RuntimeError("The external voice engine rejected the sample.")
 
             reference = {"path": paths[0], "meta": {"_type": "gradio.FileData"}}
+            # OmniVoice _gen_core contract (v0.1.4):
+            # text, language, ref_audio, instruct, num_step, guidance_scale,
+            # denoise, speed, duration, preprocess_prompt, postprocess_output,
+            # mode, ref_text.  Keep these positions exact: the public Space
+            # changed this contract and the previous adapter sent a shifted
+            # 12-value payload, causing every clone request to fail.
             request = {
                 "data": [
                     clean_text,
                     "Greek",
                     reference,
-                    options.get("reference_text") or None,
                     None,
                     32,
                     2.0,
@@ -106,6 +105,8 @@ class OmniVoiceExternalProvider:
                     None,
                     True,
                     True,
+                    "clone",
+                    options.get("reference_text") or None,
                 ]
             }
             queued = await client.post("/gradio_api/call/_clone_fn", json=request)
