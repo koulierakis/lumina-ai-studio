@@ -49,7 +49,6 @@ class OmniVoiceExternalProvider:
         self.space_id = (os.environ.get("CHATTERBOX_SPACE_ID") or self.DEFAULT_SPACE_ID).strip()
         self.space_url = (os.environ.get("CHATTERBOX_SPACE_URL") or self.DEFAULT_SPACE_URL).rstrip("/")
         self.api_name = (os.environ.get("CHATTERBOX_API_NAME") or self.DEFAULT_API_NAME).strip()
-        self.hf_token = (os.environ.get("HF_TOKEN") or "").strip()
         parsed = urlparse(self.space_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("CHATTERBOX_SPACE_URL must be a valid HTTP address.")
@@ -123,7 +122,6 @@ class OmniVoiceExternalProvider:
                 else:
                     if piece:
                         chunks.append(piece)
-                    # Hard-split a single pathological token if necessary.
                     while len(word) > cls.MAX_CHUNK_CHARACTERS:
                         chunks.append(word[: cls.MAX_CHUNK_CHARACTERS])
                         word = word[cls.MAX_CHUNK_CHARACTERS :]
@@ -145,10 +143,7 @@ class OmniVoiceExternalProvider:
             reference_path = Path(workdir) / f"reference{suffix}"
             reference_path.write_bytes(reference_audio)
 
-            kwargs = {}
-            if self.hf_token:
-                kwargs["token"] = self.hf_token
-            client = Client(self.space_id, **kwargs)
+            client = Client(self.space_id)
             result = client.predict(
                 text,
                 "el",
