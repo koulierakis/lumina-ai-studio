@@ -425,6 +425,7 @@ class PersonalVoiceModel(BaseModel):
     owner_email: str
     name: str = "Personal Voice Model"
     status: str = "active"
+    reference_media_id: Optional[str] = None
     profile: VoiceProfile = Field(default_factory=VoiceProfile)
     approved_recording_ids: List[str] = Field(default_factory=list)
     improvement_events: List[dict] = Field(default_factory=list)

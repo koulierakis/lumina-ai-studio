@@ -2446,6 +2446,24 @@ async def voice_studio_bootstrap(owner: str = Depends(require_owner)) -> dict:
 async def get_personal_voice_model(owner: str = Depends(require_owner)) -> PersonalVoiceModel:
     return await _get_or_create_personal_voice_model(owner)
 
+@api.post("/voice/personal-model/sample", response_model=PersonalVoiceModel)
+async def save_personal_voice_sample(name: str = Form("Η φωνή μου"), audio: UploadFile = File(...), owner: str = Depends(require_owner)) -> PersonalVoiceModel:
+    mime = (audio.content_type or "").lower()
+    if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, WebM, or M4A audio only.")
+    data = await audio.read(MAX_VOICE_SAMPLE_BYTES + 1)
+    if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Voice sample must be no larger than 25 MB.")
+    filename, _, size = save_bytes(data, mime, kind="reference")
+    media = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="saved-personal-voice", source_module="voice", provider="omnivoice")
+    await media_coll.insert_one(media.model_dump())
+    model = await _get_or_create_personal_voice_model(owner)
+    clean_name = " ".join(name.split()).strip()[:80] or "Η φωνή μου"
+    updated_at = now_iso()
+    await voice_personal_models_coll.update_one(
+        {"id": model.id, "owner_email": owner},
+        {"$set": {"name": clean_name, "reference_media_id": media.id, "version": model.version + 1, "updated_at": updated_at}},
+    )
+    return PersonalVoiceModel(**{**model.model_dump(), "name": clean_name, "reference_media_id": media.id, "version": model.version + 1, "updated_at": updated_at})
+
 @api.post("/voice/personal-model/improve", response_model=PersonalVoiceModel)
 async def improve_personal_voice_model(body: dict, owner: str = Depends(require_owner)) -> PersonalVoiceModel:
     model = await _get_or_create_personal_voice_model(owner)
@@ -2497,19 +2515,22 @@ async def create_voice_job(background: BackgroundTasks, text: str = Form(""), mo
     if mode not in engine.capabilities["modes"]: raise HTTPException(400, "The selected voice provider does not support this operation.")
     if output_format not in engine.capabilities["formats"]: raise HTTPException(400, "The selected voice provider does not support this output format.")
     if mode in {"text-to-speech", "voice-clone"} and not text.strip(): raise HTTPException(400, "Enter text to generate speech.")
+    personal_model = await _get_or_create_personal_voice_model(owner)
     source_media_id = None
     if selected == "omnivoice":
         if voice != "personal-user": raise HTTPException(400, "Select the personal voice option for OmniVoice.")
-        if reference_audio is None: raise HTTPException(400, "Record or upload a 3–10 second voice sample.")
-        mime = (reference_audio.content_type or "").lower()
-        if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, WebM, or M4A audio only.")
-        data = await reference_audio.read(MAX_VOICE_SAMPLE_BYTES + 1)
-        if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Voice sample must be no larger than 25 MB.")
-        filename, _, size = save_bytes(data, mime, kind="reference")
-        source = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="personal-voice-reference", source_module="voice", provider="omnivoice")
-        await media_coll.insert_one(source.model_dump())
-        source_media_id = source.id
-    personal_model = await _get_or_create_personal_voice_model(owner)
+        if reference_audio is not None:
+            mime = (reference_audio.content_type or "").lower()
+            if mime not in ALLOWED_AUDIO_MIMES: raise HTTPException(400, "Upload WAV, MP3, OGG, WebM, or M4A audio only.")
+            data = await reference_audio.read(MAX_VOICE_SAMPLE_BYTES + 1)
+            if not data or len(data) > MAX_VOICE_SAMPLE_BYTES: raise HTTPException(400, "Voice sample must be no larger than 25 MB.")
+            filename, _, size = save_bytes(data, mime, kind="reference")
+            source = MediaAsset(owner_email=owner, filename=filename, mime_type=mime, kind="reference", size_bytes=size, edit_note="personal-voice-reference", source_module="voice", provider="omnivoice")
+            await media_coll.insert_one(source.model_dump())
+            source_media_id = source.id
+        else:
+            source_media_id = personal_model.reference_media_id
+        if not source_media_id: raise HTTPException(400, "Record, upload, or save a personal voice sample first.")
     job = VoiceJob(owner_email=owner, provider=selected, mode=mode, text=text.strip(), voice=voice, style=style, preset_id=preset_id, personal_model_id=personal_model.id, source_media_id=source_media_id, output_format=output_format, sample_rate=sample_rate, bit_depth=bit_depth, bitrate=bitrate, loudness_lufs=loudness_lufs, title=(title.strip() or text.strip()[:80] or f"{style.title()} voice production"), tags=[tag.strip() for tag in tags.split(",") if tag.strip()][:12], metadata={"identity_preservation": True, "personal_model_version": personal_model.version, "reference_text": reference_text.strip()[:2000]})
     await voice_jobs_coll.insert_one(job.model_dump()); background.add_task(_run_voice_job, job.id, owner)
     return job

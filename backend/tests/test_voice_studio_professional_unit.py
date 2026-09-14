@@ -2,8 +2,10 @@ from models import PersonalVoiceModel, VoiceExportRequest, VoiceJob, VoiceProjec
 
 
 def test_personal_voice_model_contains_required_profiles():
-    model = PersonalVoiceModel(owner_email="owner@example.com")
+    model = PersonalVoiceModel(owner_email="owner@example.com", name="Voice Giannis", reference_media_id="media-1")
     payload = model.model_dump()
+    assert payload["name"] == "Voice Giannis"
+    assert payload["reference_media_id"] == "media-1"
     assert payload["profile"]["voice_identity"] == {}
     for key in ("speaking_profile", "singing_profile", "accent_profile", "pronunciation_profile", "breathing_profile", "vocal_range"):
         assert key in payload["profile"]

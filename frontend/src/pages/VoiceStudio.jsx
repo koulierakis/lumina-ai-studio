@@ -51,6 +51,9 @@ export default function VoiceStudio() {
   const [sampleUrl, setSampleUrl] = useState('');
   const [recording, setRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [savedVoice, setSavedVoice] = useState(null);
+  const [voiceName, setVoiceName] = useState('Φωνή Γιάννη');
+  const [savingVoice, setSavingVoice] = useState(false);
   const recorderRef = useRef(null);
   const streamRef = useRef(null);
 
@@ -78,6 +81,18 @@ export default function VoiceStudio() {
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    apiGet('/voice/personal-model')
+      .then((model) => {
+        if (!mounted || !model?.reference_media_id) return;
+        setSavedVoice(model);
+        setVoiceName(model.name || 'Φωνή Γιάννη');
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
@@ -136,6 +151,30 @@ export default function VoiceStudio() {
     setRecording(false);
   }
 
+  async function savePersonalVoice() {
+    if (!voiceSample) {
+      toast.error('Ηχογράφησε ή ανέβασε πρώτα ένα δείγμα φωνής.');
+      return;
+    }
+    setSavingVoice(true);
+    try {
+      const form = new FormData();
+      form.append('name', voiceName.trim() || 'Η φωνή μου');
+      form.append('audio', voiceSample);
+      const model = await uploadFormData('/voice/personal-model/sample', form);
+      setSavedVoice(model);
+      setVoiceName(model.name);
+      if (sampleUrl) URL.revokeObjectURL(sampleUrl);
+      setSampleUrl('');
+      setVoiceSample(null);
+      toast.success('Η προσωπική φωνή αποθηκεύτηκε.');
+    } catch (error) {
+      toast.error(error?.message || 'Η αποθήκευση της φωνής απέτυχε.');
+    } finally {
+      setSavingVoice(false);
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (audioUrl) URL.revokeObjectURL(audioUrl);
@@ -165,7 +204,7 @@ export default function VoiceStudio() {
       toast.error('Γράψε πρώτα το κείμενο που θέλεις να μετατρέψεις σε φωνή.');
       return;
     }
-    if (selectedVoice.personal && !voiceSample) {
+    if (selectedVoice.personal && !voiceSample && !savedVoice) {
       toast.error('Ηχογράφησε ή ανέβασε πρώτα ένα δείγμα φωνής 3–10 δευτερολέπτων.');
       return;
     }
@@ -285,6 +324,11 @@ export default function VoiceStudio() {
               <div className="mt-5 rounded-xl border border-gold/25 bg-gold/5 p-4">
                 <p className="text-sm font-medium">Δείγμα της φωνής σου</p>
                 <p className="mt-1 text-xs text-white/50">Μίλησε καθαρά για 3–10 δευτερόλεπτα, χωρίς μουσική.</p>
+                {savedVoice && !voiceSample && (
+                  <div className="mt-3 rounded-lg border border-emerald-400/25 bg-emerald-400/10 p-3 text-sm text-emerald-100">
+                    Αποθηκευμένη φωνή: <strong>{savedVoice.name}</strong>. Μπορείς να γράψεις κείμενο και να πατήσεις Generate Voice.
+                  </div>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -305,6 +349,27 @@ export default function VoiceStudio() {
                   </label>
                 </div>
                 {sampleUrl && <audio controls src={sampleUrl} className="mt-3 w-full" />}
+                {voiceSample && (
+                  <div className="mt-3 space-y-2">
+                    <input
+                      value={voiceName}
+                      onChange={(event) => setVoiceName(event.target.value)}
+                      maxLength={80}
+                      aria-label="Όνομα προσωπικής φωνής"
+                      className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm outline-none focus:border-gold/60"
+                      placeholder="π.χ. Φωνή Γιάννη"
+                    />
+                    <button
+                      type="button"
+                      onClick={savePersonalVoice}
+                      disabled={savingVoice}
+                      className="flex w-full items-center justify-center gap-2 rounded-lg border border-gold/40 px-3 py-2 text-sm text-gold disabled:opacity-40"
+                    >
+                      {savingVoice && <Loader2 className="h-4 w-4 animate-spin" />}
+                      {savedVoice ? 'Αντικατάσταση αποθηκευμένης φωνής' : 'Αποθήκευση προσωπικής φωνής'}
+                    </button>
+                  </div>
+                )}
                 {personalReady === false && <p className="mt-2 text-xs text-amber-200">Η εξωτερική μηχανή φωνής δεν είναι διαθέσιμη αυτή τη στιγμή.</p>}
                 <p className="mt-2 text-[11px] text-white/35">Το δείγμα αποστέλλεται στην εξωτερική δωρεάν μηχανή OmniVoice μόνο όταν πατήσεις Generate Voice.</p>
               </div>
@@ -331,7 +396,7 @@ export default function VoiceStudio() {
             <button
               type="button"
               onClick={generate}
-              disabled={busy || !text.trim() || (selectedVoice.personal && !voiceSample)}
+              disabled={busy || !text.trim() || (selectedVoice.personal && !voiceSample && !savedVoice)}
               className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 font-medium text-black transition disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
