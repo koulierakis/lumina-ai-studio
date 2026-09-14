@@ -2,8 +2,8 @@
 
 The historical ``omnivoice`` provider key is retained so existing LUMINA jobs
 and UI contracts do not need a migration. Synthesis is performed by the
-official ResembleAI Chatterbox Multilingual ZeroGPU Space: text + the user's
-saved reference sample -> cloned Greek speech.
+validated official ResembleAI Chatterbox Multilingual ZeroGPU Space: text +
+the user's saved reference sample -> cloned Greek speech.
 
 The public Chatterbox demo accepts at most 300 characters per request. LUMINA
 therefore splits longer text into sentence-aware chunks, synthesizes each
@@ -13,12 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import io
-import os
 import re
 import tempfile
 import wave
 from pathlib import Path
-from urllib.parse import urlparse
 
 import httpx
 
@@ -46,12 +44,12 @@ class OmniVoiceExternalProvider:
     }
 
     def __init__(self):
-        self.space_id = (os.environ.get("CHATTERBOX_SPACE_ID") or self.DEFAULT_SPACE_ID).strip()
-        self.space_url = (os.environ.get("CHATTERBOX_SPACE_URL") or self.DEFAULT_SPACE_URL).rstrip("/")
-        self.api_name = (os.environ.get("CHATTERBOX_API_NAME") or self.DEFAULT_API_NAME).strip()
-        parsed = urlparse(self.space_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("CHATTERBOX_SPACE_URL must be a valid HTTP address.")
+        # Pin production to the exact official Space/API contract we runtime-test.
+        # This intentionally ignores stale Render overrides that previously routed
+        # Personal Voice to a different Space with an incompatible Gradio API.
+        self.space_id = self.DEFAULT_SPACE_ID
+        self.space_url = self.DEFAULT_SPACE_URL
+        self.api_name = self.DEFAULT_API_NAME
 
     async def health(self) -> dict:
         try:
