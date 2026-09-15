@@ -31,6 +31,7 @@ import {
 import { apiDelete, apiGet, apiPost, apiPut } from '../lib/api';
 import { documentApi } from '../documents/model';
 import { detectStudioIntent } from '../platform/studioHandoff';
+import { buildAuthoritativeTranscript } from '../platform/speechTranscript';
 
 const ROLE_OPTIONS = [
   ['auto', 'Auto', Sparkles],
@@ -333,17 +334,11 @@ export default function ExecutiveAdvisor() {
       if (event.error !== 'aborted') setError(`Η φωνητική πληκτρολόγηση σταμάτησε: ${event.error || 'άγνωστο σφάλμα'}.`);
     };
     recognition.onresult = (event) => {
-      let finalText = '';
-      let interimText = '';
-      // Web Speech can re-emit earlier results while a phrase evolves. Rebuild
-      // from the authoritative result list instead of appending deltas.
-      for (let index = 0; index < event.results.length; index += 1) {
-        const transcript = (event.results[index][0]?.transcript || '').trim();
-        if (!transcript) continue;
-        if (event.results[index].isFinal) finalText = `${finalText} ${transcript}`.trim();
-        else interimText = `${interimText} ${transcript}`.trim();
-      }
-      setMessage([dictationBase, finalText, interimText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim());
+      // Only finalized Web Speech segments are authoritative. Interim hypotheses
+      // are intentionally excluded because Chrome/Edge can re-emit and revise
+      // them, which previously produced repeated words in LUMINA Mind.
+      const authoritativeTranscript = buildAuthoritativeTranscript(event.results);
+      setMessage([dictationBase, authoritativeTranscript].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim());
     };
     recognitionRef.current = recognition;
     recognition.start();
