@@ -17,9 +17,9 @@ describe('Document Studio simplified workspace regression', () => {
     expect(css).toContain('.doc-workspace');
   });
 
-  test('provides a prominent Import Word button', () => {
-    expect(page).toContain('Import Word');
-    expect(page).toContain('accept=".docx"');
+  test('provides a prominent multi-format Import button', () => {
+    expect(page).toContain('>Import</button>');
+    expect(page).toContain('.pdf,.docx,.txt,.md,.html,image/png,image/jpeg,image/webp');
     expect(page).toContain('importWord');
     expect(page).toContain('doc-btn-import');
   });

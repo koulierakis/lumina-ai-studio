@@ -34,6 +34,8 @@ def test_role_routing_and_persistent_memory(tmp_path: Path) -> None:
     service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=fake)
     assert service.route_role("Review our cash flow, margin and bank liquidity", "auto") == "cfo"
     assert service.route_role("Build a marketing campaign and positioning plan", "auto") == "cmo"
+    assert service.route_role("Έλεγξε τη ρευστότητα, τα έσοδα και το κόστος", "auto") == "cfo"
+    assert service.route_role("Ποιος είναι ο νομικός κίνδυνος και η συμμόρφωση;", "auto") == "risk"
     memory = service.remember("owner@example.com", "Prefer controlled downside risk.", "preference")
     service.update_profile("owner@example.com", {"company": "JSA", "currency": "EUR"})
 
@@ -77,6 +79,7 @@ def test_board_mode_uses_one_persistent_session_and_deep_reasoning(tmp_path: Pat
     system_prompt = fake.calls[0]["messages"][0]["content"]
     assert "CEO, CFO, CMO" in system_prompt
     assert "one unified recommendation" in system_prompt
+    assert "When the owner writes in Greek" in system_prompt
 
 
 def test_auto_role_is_recorded_with_response(tmp_path: Path) -> None:

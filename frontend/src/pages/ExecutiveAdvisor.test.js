@@ -7,17 +7,22 @@ describe('Executive Advisor workspace', () => {
     const app = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8');
     const registry = fs.readFileSync(path.join(__dirname, '..', 'platform', 'moduleRegistry.js'), 'utf8');
 
+    expect(app).toContain('path="mind" element={<ExecutiveAdvisor />}');
     expect(app).toContain('path="advisor" element={<ExecutiveAdvisor />}');
-    expect(registry).toContain("name: 'Executive Advisor'");
+    expect(registry).toContain("name: 'LUMINA Mind'");
+    expect(registry).toContain("route: '/studio/mind'");
     expect(page).toContain("['board', 'Board'");
-    expect(page).toContain('Deep reasoning');
-    expect(page).toContain('Remember this');
-    expect(page).toContain('Cloud reasoning');
-    expect(page).toContain('Web research');
+    expect(page).toContain('Βαθιά ανάλυση');
+    expect(page).toContain('Να το θυμάσαι');
+    expect(page).toContain('Cloud ανάλυση');
+    expect(page).toContain('Έρευνα διαδικτύου');
+    expect(page).toContain('SpeechRecognition');
+    expect(page).toContain('SpeechSynthesisUtterance');
+    expect(page).toContain('exportConversation');
     expect(page).toContain('openai_configured');
     expect(page).toContain("import { documentApi } from '../documents/model'");
     expect(page).toContain('documentApi.importFile');
-    expect(page).toContain('Attach from library');
+    expect(page).toContain('Επιλογή από τα Documents');
     expect(page).toContain('MAX_ATTACHED_DOCUMENTS = 3');
     expect(page).toContain('context: documentContext.length ? { documents: documentContext } : {}');
     expect(page).toContain('/runtime/advisor/ask');

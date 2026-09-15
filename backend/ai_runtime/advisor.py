@@ -29,13 +29,13 @@ ADVISOR_ROLES = {
 }
 
 ROLE_KEYWORDS = {
-    "cfo": ("cash", "revenue", "profit", "cost", "budget", "tax", "finance", "financial", "bank", "liquidity", "margin", "€", "$"),
-    "cmo": ("marketing", "brand", "campaign", "sales funnel", "social", "advertising", "positioning", "customer acquisition"),
-    "strategy": ("strategy", "competitor", "market entry", "expansion", "business model", "partnership", "deal"),
-    "investment": ("invest", "investment", "portfolio", "return", "roi", "valuation", "asset", "property", "stock"),
-    "operations": ("operations", "workflow", "process", "team", "staff", "supplier", "logistics", "execution"),
-    "risk": ("risk", "compliance", "kyc", "aml", "legal", "regulation", "audit", "exposure"),
-    "mentor": ("mentor", "personal", "decision", "stress", "habit", "motivation", "career", "life"),
+    "cfo": ("cash", "revenue", "profit", "cost", "budget", "tax", "finance", "financial", "bank", "liquidity", "margin", "έσοδα", "κέρδος", "κόστος", "προϋπολογ", "φόρο", "οικονομ", "τράπεζ", "ρευστότητα", "περιθώριο", "€", "$"),
+    "cmo": ("marketing", "brand", "campaign", "sales funnel", "social", "advertising", "positioning", "customer acquisition", "μάρκετινγκ", "καμπάνια", "διαφήμιση", "πωλήσ", "πελάτ", "επωνυμία"),
+    "strategy": ("strategy", "competitor", "market entry", "expansion", "business model", "partnership", "deal", "στρατηγ", "ανταγωνισ", "επέκταση", "συνεργασία", "συμφωνία", "αγορά"),
+    "investment": ("invest", "investment", "portfolio", "return", "roi", "valuation", "asset", "property", "stock", "επένδυ", "απόδοση", "αποτίμηση", "ακίνητ", "μετοχ"),
+    "operations": ("operations", "workflow", "process", "team", "staff", "supplier", "logistics", "execution", "λειτουργ", "διαδικασία", "ομάδα", "προσωπικό", "προμηθευ", "μεταφορ", "εκτέλεση"),
+    "risk": ("risk", "compliance", "kyc", "aml", "legal", "regulation", "audit", "exposure", "ρίσκο", "κίνδυν", "συμμόρφωση", "νομικ", "κανονισ", "έλεγχος", "έκθεση"),
+    "mentor": ("mentor", "personal", "decision", "stress", "habit", "motivation", "career", "life", "προσωπ", "απόφαση", "άγχος", "συνήθεια", "κίνητρο", "καριέρα", "ζωή"),
 }
 
 
@@ -207,6 +207,7 @@ class ExecutiveAdvisorService:
         depth = "Use deliberate multi-step analysis before answering." if deep_reasoning else "Prefer a concise operational answer."
         return f"""You are LUMINA Executive Intelligence, acting as {role_name}.
 You are an exacting advisor, not a passive assistant. Challenge weak assumptions, distinguish evidence from inference, and state material risks.
+Always answer in the language used by the owner in the latest message. When the owner writes in Greek, use clear natural Greek and keep unavoidable technical terms simple.
 Never invent facts, financial figures, legal status, source documents, or completed actions. Ask for missing facts only when they are essential; otherwise make bounded assumptions and label them.
 For financial, legal, medical, tax, compliance, or investment matters, explicitly flag uncertainty and the need for professional verification when material.
 {depth}

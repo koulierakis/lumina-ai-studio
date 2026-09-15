@@ -208,7 +208,7 @@ describe('DocumentAIAssistantPanel', () => {
     expect(app).toContain('import DocumentStudio from \'./pages/DocumentStudio\'');
     expect(app).toContain('<Route path="documents" element={<DocumentStudio />} />');
     expect(page).toContain('<DocumentRichEditor');
-    expect(page).toContain('Import Word');
+    expect(page).toContain('>Import</button>');
     expect(page).toContain('Export PDF');
     expect(page).toContain('Export Word');
     expect(page).toContain('doc-preset-btn');

@@ -7,10 +7,13 @@ import {
   CircleAlert,
   CircleDollarSign,
   Cloud,
+  Download,
   FileText,
   Globe2,
   HardDrive,
   Loader2,
+  Mic,
+  MicOff,
   MessageSquareText,
   Save,
   Send,
@@ -21,6 +24,7 @@ import {
   Upload,
   UserRound,
   UsersRound,
+  Volume2,
   X,
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, apiPut } from '../lib/api';
@@ -57,18 +61,23 @@ function storedAttachmentIds(sessionId) {
   }
 }
 
-function Message({ item }) {
+function Message({ item, onSpeak }) {
   const assistant = item.role === 'assistant';
   const sources = Array.isArray(item.sources) ? item.sources : [];
   return (
     <div className={`flex ${assistant ? 'justify-start' : 'justify-end'}`}>
       <div className={`max-w-[88%] rounded-2xl border px-4 py-3 ${assistant ? 'border-white/[0.08] bg-white/[0.025]' : 'border-gold/20 bg-gold/[0.08]'}`}>
         <div className="mb-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-white/35">
-          {assistant ? 'Executive Advisor' : 'You'}
+          {assistant ? 'LUMINA Mind' : 'Εσύ'}
           {item.role_mode && <span className="rounded-full border border-white/10 px-2 py-0.5">{item.role_mode}</span>}
           {item.provider && <span className="rounded-full border border-white/10 px-2 py-0.5">{item.provider}</span>}
         </div>
         <div className="whitespace-pre-wrap text-sm leading-7 text-white/80">{item.content}</div>
+        {assistant && onSpeak && (
+          <button type="button" onClick={() => onSpeak(item.content)} className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-white/35 hover:text-gold" title="Ανάγνωση απάντησης">
+            <Volume2 className="h-3.5 w-3.5" /> Ακρόαση
+          </button>
+        )}
         {sources.length > 0 && (
           <div className="mt-4 border-t border-white/[0.07] pt-3">
             <p className="text-[10px] uppercase tracking-[0.16em] text-white/30">Sources</p>
@@ -102,7 +111,10 @@ export default function ExecutiveAdvisor() {
   const [documentLibrary, setDocumentLibrary] = useState([]);
   const [attachedDocuments, setAttachedDocuments] = useState([]);
   const [importingDocument, setImportingDocument] = useState(false);
+  const [listening, setListening] = useState(false);
   const documentInputRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
   const loadSidebar = useCallback(async () => {
     try {
@@ -126,6 +138,15 @@ export default function ExecutiveAdvisor() {
   }, []);
 
   useEffect(() => { loadSidebar(); }, [loadSidebar]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [session?.messages?.length, busy]);
+
+  useEffect(() => () => {
+    recognitionRef.current?.stop?.();
+    window.speechSynthesis?.cancel?.();
+  }, []);
 
   const restoreAttachments = useCallback((sessionId, documents = documentLibrary) => {
     const ids = new Set(storedAttachmentIds(sessionId));
@@ -280,20 +301,81 @@ export default function ExecutiveAdvisor() {
     }
   };
 
+  const toggleDictation = () => {
+    if (listening) {
+      recognitionRef.current?.stop?.();
+      return;
+    }
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setError('Η φωνητική πληκτρολόγηση δεν υποστηρίζεται από αυτόν τον browser. Χρησιμοποίησε Chrome ή Edge.');
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = 'el-GR';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    let committed = message.trim();
+    recognition.onstart = () => { setListening(true); setError(''); };
+    recognition.onend = () => setListening(false);
+    recognition.onerror = (event) => {
+      setListening(false);
+      if (event.error !== 'aborted') setError(`Η φωνητική πληκτρολόγηση σταμάτησε: ${event.error || 'άγνωστο σφάλμα'}.`);
+    };
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0]?.transcript || '';
+        if (event.results[index].isFinal) committed = `${committed} ${transcript}`.trim();
+        else interim += transcript;
+      }
+      setMessage(`${committed}${interim ? ` ${interim}` : ''}`.trim());
+    };
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
+  const speak = (text) => {
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      setError('Η ανάγνωση απάντησης δεν υποστηρίζεται από αυτή τη συσκευή.');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new window.SpeechSynthesisUtterance(String(text || ''));
+    utterance.lang = 'el-GR';
+    utterance.rate = 0.96;
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const exportConversation = () => {
+    if (!session?.messages?.length) return;
+    const transcript = session.messages.map((item) => {
+      const speaker = item.role === 'assistant' ? 'LUMINA Mind' : 'Εσύ';
+      return `## ${speaker}\n\n${item.content}`;
+    }).join('\n\n---\n\n');
+    const blob = new Blob([`# ${session.title || 'Συνομιλία LUMINA Mind'}\n\n${transcript}\n`], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${(session.title || 'lumina-mind').replace(/[^\p{L}\p{N}._-]+/gu, '-')}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const messages = session?.messages || [];
   const selectedRole = useMemo(() => ROLE_OPTIONS.find(([id]) => id === role), [role]);
 
   return (
-    <main className="min-h-screen w-full overflow-y-auto" data-testid="executive-advisor-page">
+    <main className="min-h-screen w-full overflow-y-auto" data-testid="lumina-mind-page">
       <div className="mx-auto max-w-[1700px] p-5 sm:p-8">
         <header className="flex flex-col gap-4 border-b border-white/[0.07] pb-6 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-gold">LUMINA Executive Intelligence</p>
-            <h1 className="mt-2 font-display text-4xl text-white sm:text-5xl">Executive Advisor</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/45">Persistent finance, marketing, strategy, investment, operations, risk and personal decision intelligence — local-first, cloud-capable.</p>
+            <p className="text-[11px] uppercase tracking-[0.28em] text-gold">LUMINA Intelligence</p>
+            <h1 className="mt-2 font-display text-4xl text-white sm:text-5xl">LUMINA Mind</h1>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-white/45">Το προσωπικό σου κέντρο σκέψης: συνομιλεί, θυμάται, αναλύει έγγραφα και σε βοηθά να πάρεις αποφάσεις.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-white/45">
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.local_available ? 'bg-emerald-400' : 'bg-amber-300'}`} />Local</span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.local_available ? 'bg-emerald-400' : 'bg-amber-300'}`} />Τοπικό</span>
             <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.openai_configured ? 'bg-emerald-400' : 'bg-white/20'}`} />Cloud</span>
           </div>
         </header>
@@ -302,18 +384,18 @@ export default function ExecutiveAdvisor() {
 
         <div className="mt-6 grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
           <aside className="space-y-4">
-            <button onClick={newSession} className="w-full rounded-lg bg-gold px-4 py-3 text-sm font-medium text-black">New advisory session</button>
+            <button onClick={newSession} className="w-full rounded-lg bg-gold px-4 py-3 text-sm font-medium text-black">Νέα συνομιλία</button>
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-3">
-              <h2 className="px-2 pb-2 text-[11px] uppercase tracking-[0.18em] text-white/35">Sessions</h2>
+              <h2 className="px-2 pb-2 text-[11px] uppercase tracking-[0.18em] text-white/35">Συνομιλίες</h2>
               <div className="space-y-1">
-                {sessions.length === 0 && <p className="px-2 py-4 text-xs text-white/30">No sessions yet.</p>}
+                {sessions.length === 0 && <p className="px-2 py-4 text-xs text-white/30">Δεν υπάρχουν ακόμη συνομιλίες.</p>}
                 {sessions.map((item) => (
                   <div key={item.id} className={`group flex items-start gap-2 rounded-lg p-2 ${session?.id === item.id ? 'bg-white/[0.07]' : 'hover:bg-white/[0.035]'}`}>
                     <button onClick={() => openSession(item.id)} className="min-w-0 flex-1 text-left">
                       <div className="truncate text-xs text-white/75">{item.title}</div>
                       <div className="mt-1 truncate text-[10px] text-white/30">{item.last_message || `${item.message_count} messages`}</div>
                     </button>
-                    <button onClick={() => deleteSession(item.id)} className="p-1 text-white/20 opacity-0 group-hover:opacity-100" title="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+                    <button onClick={() => deleteSession(item.id)} className="p-1 text-white/20 opacity-0 group-hover:opacity-100" title="Διαγραφή"><Trash2 className="h-3.5 w-3.5" /></button>
                   </div>
                 ))}
               </div>
@@ -331,9 +413,10 @@ export default function ExecutiveAdvisor() {
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button onClick={() => { setProvider('groq'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'groq' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Groq</button>
-                <button onClick={() => { setProvider('local'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'local' && !webResearch ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200' : 'border-white/10 text-white/35'}`}><HardDrive className="h-3.5 w-3.5" />Local</button>
-                <button onClick={() => { setProvider('openai'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'openai' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Cloud reasoning</button>
-                <button onClick={() => { setProvider('openai'); setWebResearch(true); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Globe2 className="h-3.5 w-3.5" />Web research</button>
+                <button onClick={() => { setProvider('local'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'local' && !webResearch ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200' : 'border-white/10 text-white/35'}`}><HardDrive className="h-3.5 w-3.5" />Τοπικό</button>
+                <button onClick={() => { setProvider('openai'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'openai' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Cloud ανάλυση</button>
+                <button onClick={() => { setProvider('openai'); setWebResearch(true); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Globe2 className="h-3.5 w-3.5" />Έρευνα διαδικτύου</button>
+                <button type="button" onClick={exportConversation} disabled={!messages.length} className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[11px] text-white/35 disabled:opacity-30"><Download className="h-3.5 w-3.5" />Εξαγωγή</button>
               </div>
             </div>
 
@@ -341,11 +424,12 @@ export default function ExecutiveAdvisor() {
               {messages.length === 0 ? (
                 <div className="mx-auto mt-20 max-w-2xl text-center">
                   <MessageSquareText className="mx-auto h-10 w-10 text-gold/70" />
-                  <h2 className="mt-5 font-display text-3xl text-white">What decision are we making?</h2>
-                  <p className="mt-3 text-sm leading-7 text-white/40">Use Auto for routing, Board for a unified multi-discipline recommendation, Local for privacy, Web Research for current evidence, or attach Document Studio files for grounded analysis.</p>
+                  <h2 className="mt-5 font-display text-3xl text-white">Τι θέλεις να σκεφτούμε;</h2>
+                  <p className="mt-3 text-sm leading-7 text-white/40">Γράψε ή μίλησε φυσικά στα ελληνικά. Το Mind μπορεί να θυμάται όσα επιλέγεις και να χρησιμοποιεί αρχεία από τα Documents.</p>
                 </div>
-              ) : messages.map((item) => <Message key={item.id} item={item} />)}
-              {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{webResearch ? 'Researching and analyzing…' : deep ? 'Deep analysis in progress…' : 'Preparing response…'}</div>}
+              ) : messages.map((item) => <Message key={item.id} item={item} onSpeak={speak} />)}
+              {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{webResearch ? 'Ερευνώ και αναλύω…' : deep ? 'Κάνω βαθιά ανάλυση…' : 'Ετοιμάζω απάντηση…'}</div>}
+              <div ref={messagesEndRef} />
             </div>
 
             <div className="border-t border-white/[0.07] p-4">
@@ -360,21 +444,24 @@ export default function ExecutiveAdvisor() {
                   ))}
                 </div>
               )}
-              <textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} rows={4} placeholder={`Ask ${selectedRole?.[1] || 'Executive Advisor'}…`} className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/25 focus:border-gold/35" />
+              <textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); } }} rows={4} placeholder={`Μίλησε στο ${selectedRole?.[1] || 'LUMINA Mind'}…`} className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm leading-6 text-white outline-none placeholder:text-white/25 focus:border-gold/35" />
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-4 text-xs text-white/40">
-                  <label className="flex items-center gap-2"><input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} />Deep reasoning</label>
-                  <label className="flex items-center gap-2"><input type="checkbox" checked={rememberMessage} onChange={(e) => setRememberMessage(e.target.checked)} />Remember this</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={deep} onChange={(e) => setDeep(e.target.checked)} />Βαθιά ανάλυση</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={rememberMessage} onChange={(e) => setRememberMessage(e.target.checked)} />Να το θυμάσαι</label>
                 </div>
-                <button onClick={send} disabled={!message.trim() || busy} className="inline-flex items-center gap-2 rounded-lg bg-gold px-4 py-2.5 text-xs font-medium text-black disabled:opacity-40"><Send className="h-4 w-4" />Send</button>
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={toggleDictation} disabled={busy} aria-pressed={listening} className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2.5 text-xs ${listening ? 'border-red-400/40 bg-red-400/10 text-red-200' : 'border-white/10 text-white/55'}`}>{listening ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}{listening ? 'Σταμάτησε' : 'Μίλησε'}</button>
+                  <button onClick={send} disabled={!message.trim() || busy} className="inline-flex items-center gap-2 rounded-lg bg-gold px-4 py-2.5 text-xs font-medium text-black disabled:opacity-40"><Send className="h-4 w-4" />Αποστολή</button>
+                </div>
               </div>
             </div>
           </section>
 
           <aside className="space-y-5">
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4" data-testid="advisor-documents-panel">
-              <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Documents</h2></div>
-              <p className="mt-2 text-[11px] leading-5 text-white/35">Ground answers in up to three Document Studio files. Uploads use the existing Document Studio importer.</p>
+              <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Έγγραφα</h2></div>
+              <p className="mt-2 text-[11px] leading-5 text-white/35">Σύνδεσε έως τρία αρχεία από τα Documents ώστε οι απαντήσεις να βασίζονται στο πραγματικό περιεχόμενό τους.</p>
               <select
                 value=""
                 onChange={(event) => {
@@ -383,7 +470,7 @@ export default function ExecutiveAdvisor() {
                 }}
                 className="mt-3 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/60 outline-none"
               >
-                <option value="">Attach from library…</option>
+                <option value="">Επιλογή από τα Documents…</option>
                 {documentLibrary.map((document) => <option key={document.id} value={document.id}>{document.title}</option>)}
               </select>
               <input
@@ -395,23 +482,23 @@ export default function ExecutiveAdvisor() {
               />
               <button onClick={() => documentInputRef.current?.click()} disabled={importingDocument} className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/55 disabled:opacity-40">
                 {importingDocument ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                Import reference file
+                Εισαγωγή αρχείου αναφοράς
               </button>
             </section>
 
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
-              <div className="flex items-center gap-2"><BrainCircuit className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Memory</h2></div>
-              <div className="mt-3 flex gap-2"><input value={memoryText} onChange={(e) => setMemoryText(e.target.value)} placeholder="Remember a fact, goal or preference…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none" /><button onClick={saveMemory} className="rounded-lg border border-gold/20 p-2 text-gold"><Save className="h-4 w-4" /></button></div>
+              <div className="flex items-center gap-2"><BrainCircuit className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Μνήμη</h2></div>
+              <div className="mt-3 flex gap-2"><input value={memoryText} onChange={(e) => setMemoryText(e.target.value)} placeholder="Στοιχείο, στόχος ή προτίμηση…" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white outline-none" /><button onClick={saveMemory} className="rounded-lg border border-gold/20 p-2 text-gold" title="Αποθήκευση στη μνήμη"><Save className="h-4 w-4" /></button></div>
               <div className="mt-3 max-h-56 space-y-2 overflow-y-auto">
                 {memories.map((item) => <div key={item.id} className="group flex gap-2 rounded-lg border border-white/[0.06] p-2"><p className="flex-1 text-[11px] leading-5 text-white/50">{item.text}</p><button onClick={() => forgetMemory(item.id)} className="text-white/20 opacity-0 group-hover:opacity-100"><Trash2 className="h-3.5 w-3.5" /></button></div>)}
               </div>
             </section>
 
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4">
-              <div className="flex items-center gap-2"><UserRound className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Advisor profile</h2></div>
-              <p className="mt-2 text-[11px] leading-5 text-white/35">Structured persistent context. Keep sensitive information only if you want it stored locally.</p>
+              <div className="flex items-center gap-2"><UserRound className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Προσωπικό πλαίσιο</h2></div>
+              <p className="mt-2 text-[11px] leading-5 text-white/35">Μόνιμο πλαίσιο για πιο προσωπικές απαντήσεις. Αποθήκευσε ευαίσθητα στοιχεία μόνο αν το επιθυμείς.</p>
               <textarea value={profileText} onChange={(e) => setProfileText(e.target.value)} rows={12} className="mt-3 w-full resize-y rounded-lg border border-white/10 bg-black/20 p-3 font-mono text-[11px] leading-5 text-white/55 outline-none" />
-              <button onClick={saveProfile} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60"><Save className="h-3.5 w-3.5" />Save profile</button>
+              <button onClick={saveProfile} className="mt-3 inline-flex items-center gap-2 rounded-lg border border-white/10 px-3 py-2 text-xs text-white/60"><Save className="h-3.5 w-3.5" />Αποθήκευση</button>
             </section>
           </aside>
         </div>
