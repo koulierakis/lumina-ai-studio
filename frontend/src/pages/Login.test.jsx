@@ -19,6 +19,8 @@ jest.mock('sonner', () => ({
 }));
 
 jest.mock('lucide-react', () => ({
+  Eye: () => <span aria-hidden="true" />,
+  EyeOff: () => <span aria-hidden="true" />,
   Sparkles: () => <span aria-hidden="true" />,
 }));
 
