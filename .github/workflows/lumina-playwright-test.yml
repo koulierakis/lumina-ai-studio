@@ -2,6 +2,11 @@ name: LUMINA Playwright Test
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - work/documents-mind-completion
+    paths:
+      - '.github/workflows/lumina-playwright-test.yml'
 
 jobs:
   test-lumina:
