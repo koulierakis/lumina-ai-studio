@@ -5,8 +5,8 @@ import os
 import sys
 from pathlib import Path
 
-from PIL import Image
 from fastapi.testclient import TestClient
+from PIL import Image
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
@@ -139,6 +139,7 @@ def test_complete_editor_temporary_pack_upload_and_media_open_flow():
 
 def test_expired_token_returns_structured_401_json():
     import time
+
     import jwt
 
     token = jwt.encode({"sub": "owner@lumina.local", "iat": int(time.time()) - 100, "exp": int(time.time()) - 1}, os.environ["JWT_SECRET"], algorithm="HS256")

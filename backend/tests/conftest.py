@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 _SERVER_PROCESS: subprocess.Popen | None = None
 
 os.environ.setdefault("PYTHONPATH", str(Path(__file__).resolve().parents[1]))

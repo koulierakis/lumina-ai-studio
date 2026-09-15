@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 import requests
-
 from video_providers import video_provider_catalog
 from video_providers.base import VideoGenerationInput, VideoProviderError
 from video_providers.luma_provider import LumaVideoProvider

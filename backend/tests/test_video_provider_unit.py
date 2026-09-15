@@ -4,7 +4,6 @@ import asyncio
 import io
 
 from PIL import Image
-
 from video_providers import available_video_providers, get_video_provider
 from video_providers.base import VideoGenerationInput
 
