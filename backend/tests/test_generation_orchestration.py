@@ -484,7 +484,7 @@ def test_placeholder_invention_or_omission_is_rejected():
 
 
 def test_orchestrator_has_no_route_or_persistence_imports():
-    source = Path("backend/document_studio/generation_orchestrator.py").read_text(encoding="utf-8")
+    source = (Path(__file__).resolve().parents[1] / "document_studio" / "generation_orchestrator.py").read_text(encoding="utf-8")
     imports = {
         node.module
         for node in ast.walk(ast.parse(source))
