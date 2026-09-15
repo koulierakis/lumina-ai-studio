@@ -1,0 +1,20 @@
+{
+  "name": "LUMINA AI Studio",
+  "short_name": "LUMINA",
+  "description": "LUMINA AI Studio — your AI workspace for documents, images, video, code and voice.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050B14",
+  "theme_color": "#0C1F3A",
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    {
+      "src": "/lumina-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
