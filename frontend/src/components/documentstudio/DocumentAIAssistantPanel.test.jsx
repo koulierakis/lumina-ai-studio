@@ -5,6 +5,10 @@ import { createRoot } from 'react-dom/client';
 import DocumentAIAssistantPanel from './DocumentAIAssistantPanel';
 import { documentApi } from '../../documents/model';
 
+jest.mock('../../lib/api', () => ({
+  apiGet: jest.fn(() => Promise.resolve({ providers: {}, any_ready: false })),
+}));
+
 jest.mock('../../documents/model', () => ({
   DOCUMENT_AI_PROVIDERS: ['ollama', 'groq'],
   documentApi: {
@@ -90,6 +94,25 @@ describe('DocumentAIAssistantPanel', () => {
     await act(async () => clickByText(host, 'Save as New Document'));
     expect(documentApi.create).toHaveBeenCalledWith(expect.objectContaining({ title: 'NDA', document_type: 'nda', company_profile_id: 'profile-1' }));
     expect(onDocumentSaved).toHaveBeenCalledWith(created);
+  });
+
+  test('Mind handoff creates, applies and saves a document exactly once', async () => {
+    const preview = { document: { title: 'Mind Agreement', document_type: 'agreement', content_text: 'Prepared content' }, generation: { metadata: { provider_used: 'ollama' } } };
+    const created = { id: 'doc-mind', title: 'Mind Agreement' };
+    const onHandoffConsumed = jest.fn();
+    documentApi.naturalCreatePreview.mockResolvedValue(preview);
+    documentApi.create.mockResolvedValue(created);
+
+    await act(async () => {
+      root.render(<DocumentAIAssistantPanel profileId="profile-1" initialRequest="Φτιάξε ένα συμφωνητικό" autoCreate handoffId="mind-1" onHandoffConsumed={onHandoffConsumed} onApplyPreview={onApplyPreview} onDocumentSaved={onDocumentSaved} onClose={() => {}} />);
+    });
+
+    expect(documentApi.naturalCreatePreview).toHaveBeenCalledTimes(1);
+    expect(documentApi.naturalCreatePreview).toHaveBeenCalledWith(expect.objectContaining({ request: 'Φτιάξε ένα συμφωνητικό', company_profile_id: 'profile-1' }));
+    expect(documentApi.create).toHaveBeenCalledTimes(1);
+    expect(onApplyPreview).toHaveBeenCalledWith(preview);
+    expect(onDocumentSaved).toHaveBeenCalledWith(created);
+    expect(onHandoffConsumed).toHaveBeenCalledTimes(1);
   });
 
   test('pack advisor exposes missing-data warnings and selection controls', async () => {

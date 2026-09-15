@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   BrainCircuit,
   BriefcaseBusiness,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react';
 import { apiDelete, apiGet, apiPost, apiPut } from '../lib/api';
 import { documentApi } from '../documents/model';
+import { detectStudioIntent } from '../platform/studioHandoff';
 
 const ROLE_OPTIONS = [
   ['auto', 'Auto', Sparkles],
@@ -94,6 +96,7 @@ function Message({ item, onSpeak }) {
 }
 
 export default function ExecutiveAdvisor() {
+  const navigate = useNavigate();
   const [status, setStatus] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [session, setSession] = useState(null);
@@ -227,6 +230,13 @@ export default function ExecutiveAdvisor() {
   const send = async () => {
     const value = message.trim();
     if (!value || busy) return;
+    const studioHandoff = detectStudioIntent(value);
+    if (studioHandoff) {
+      recognitionRef.current?.stop?.();
+      setMessage('');
+      navigate(studioHandoff.route, { state: { studioHandoff } });
+      return;
+    }
     if (provider === 'groq' && !status?.groq_configured) {
       setError('Groq requires GROQ_API_KEY in the backend environment.');
       return;

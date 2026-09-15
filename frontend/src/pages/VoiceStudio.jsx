@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { AudioLines, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiGet, fetchMediaBlobUrl, uploadFormData } from '../lib/api';
+import { handoffForTarget } from '../platform/studioHandoff';
 
 export const LUMINA_VOICES = [
   {
@@ -33,6 +35,9 @@ const STYLE_TO_BACKEND = {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export default function VoiceStudio() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const handoffHandledRef = useRef('');
   const [text, setText] = useState('');
   const [voiceId, setVoiceId] = useState('ariadni');
   const [style, setStyle] = useState('Natural');
@@ -82,9 +87,10 @@ export default function VoiceStudio() {
     throw new Error('Voice generation timed out.');
   }
 
-  async function generate(event) {
+  async function generate(event, textOverride = '', options = {}) {
     event?.preventDefault?.();
-    const clean = text.trim();
+    const clean = String(textOverride || text).trim();
+    const effectiveVoice = LUMINA_VOICES.find((voice) => voice.id === options.voiceId) || selectedVoice;
     if (!clean) {
       toast.error('Γράψε πρώτα το κείμενο που θέλεις να μετατρέψεις σε φωνή.');
       return;
@@ -101,11 +107,11 @@ export default function VoiceStudio() {
       const form = new FormData();
       form.append('text', clean);
       form.append('mode', 'text-to-speech');
-      form.append('voice', selectedVoice.providerVoice);
+      form.append('voice', effectiveVoice.providerVoice);
       form.append('style', STYLE_TO_BACKEND[style]);
       form.append('output_format', 'mp3');
       form.append('provider', 'edge-tts');
-      form.append('title', `${selectedVoice.name} · ${style}`);
+      form.append('title', `${effectiveVoice.name} · ${style}`);
 
       const created = await uploadFormData('/voice/generate', form);
       setJob(created);
@@ -124,6 +130,18 @@ export default function VoiceStudio() {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    const handoff = handoffForTarget(location.state, 'voice');
+    if (!handoff || handoffHandledRef.current === handoff.id) return;
+    handoffHandledRef.current = handoff.id;
+    setText(handoff.prompt);
+    if (handoff.options?.voiceId) setVoiceId(handoff.options.voiceId);
+    generate(null, handoff.prompt, handoff.options);
+    navigate(location.pathname, { replace: true, state: null });
+    // The handoff id prevents StrictMode or status refreshes from creating duplicates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, navigate, location.pathname]);
 
   function downloadAudio() {
     if (!audioUrl) return;

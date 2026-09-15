@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { apiGet, apiPost } from '../lib/api';
 import AuthImage from '../components/AuthImage';
 import { toast } from 'sonner';
 import { Sparkles, Loader2, Download, ImageIcon } from 'lucide-react';
+import { handoffForTarget } from '../platform/studioHandoff';
 
 const PROMPT_ONLY_PACK = { id: 'none', name: 'None / Prompt Only (Γενικό)' };
 
@@ -56,6 +58,9 @@ function normalizeProvider(item) {
 }
 
 export default function Generate() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const handoffHandledRef = useRef('');
   const [packs, setPacks] = useState([]);
   const [packId, setPackId] = useState('none');
   const [prompt, setPrompt] = useState('');
@@ -122,8 +127,9 @@ export default function Generate() {
     return () => clearInterval(t);
   }, [job]);
 
-  const run = async () => {
-    if (!prompt.trim()) {
+  const run = async (promptOverride = '', options = {}) => {
+    const effectivePrompt = String(promptOverride || prompt).trim();
+    if (!effectivePrompt) {
       toast.error('Prompt required');
       return;
     }
@@ -134,9 +140,9 @@ export default function Generate() {
 
     try {
       const payload = {
-        prompt: prompt.trim(),
+        prompt: effectivePrompt,
         negative_prompt: negative,
-        aspect_ratio: aspect,
+        aspect_ratio: options.aspect || aspect,
         count,
         provider: provider || undefined,
       };
@@ -157,6 +163,18 @@ export default function Generate() {
       toast.error(err?.message || 'Failed to start');
     }
   };
+
+  useEffect(() => {
+    const handoff = handoffForTarget(location.state, 'image');
+    if (!handoff || handoffHandledRef.current === handoff.id) return;
+    handoffHandledRef.current = handoff.id;
+    setPrompt(handoff.prompt);
+    if (handoff.options?.aspect) setAspect(handoff.options.aspect);
+    run(handoff.prompt, handoff.options);
+    navigate(location.pathname, { replace: true, state: null });
+    // The handoff id is the single-use guard; generation must not restart when provider state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, navigate, location.pathname]);
 
   const gridCols = outputMediaIds.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
   const activePack = promptOnly ? PROMPT_ONLY_PACK : packs.find((p) => p.id === packId);

@@ -28,5 +28,17 @@ describe('Executive Advisor workspace', () => {
     expect(page).toContain('/runtime/advisor/ask');
     expect(page).toContain('/runtime/advisor/memory');
     expect(page).toContain('/runtime/advisor/profile');
+    expect(page).toContain('detectStudioIntent(value)');
+    expect(page).toContain('navigate(studioHandoff.route, { state: { studioHandoff } })');
+  });
+
+  test('all creation studios consume and clear the Mind handoff', () => {
+    const files = ['Generate.jsx', 'VoiceStudio.jsx', 'VideoStudio.jsx', 'DocumentStudio.jsx']
+      .map((name) => fs.readFileSync(path.join(__dirname, name), 'utf8'));
+    expect(files[0]).toContain("handoffForTarget(location.state, 'image')");
+    expect(files[1]).toContain("handoffForTarget(location.state, 'voice')");
+    expect(files[2]).toContain("handoffForTarget(location.state, 'video')");
+    expect(files[3]).toContain("handoffForTarget(location.state, 'document')");
+    files.forEach((source) => expect(source).toContain("replace: true, state: null"));
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronUp, FileText, Save, Sparkles, XCircle } from 'lucide-react';
 import {
   DOCUMENT_AI_PROVIDERS,
@@ -118,7 +118,7 @@ function previewToDocumentPayload(preview, profileId, fallbackTitle = 'AI Docume
   };
 }
 
-export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, onDocumentSaved, onClose }) {
+export default function DocumentAIAssistantPanel({ profileId, initialRequest = '', initialOptions = {}, autoCreate = false, handoffId = '', onHandoffConsumed, onApplyPreview, onDocumentSaved, onClose }) {
   const [objective, setObjective] = useState('');
   const [naturalRequest, setNaturalRequest] = useState('');
   const [advisor, setAdvisor] = useState(null);
@@ -140,6 +140,7 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
   const [error, setError] = useState('');
   const [providerStatus, setProviderStatus] = useState(null);
   const [providerStatusLoading, setProviderStatusLoading] = useState(false);
+  const handoffHandledRef = useRef('');
 
   const recommendations = useMemo(() => advisor?.recommendations || [], [advisor?.recommendations]);
   const documentTypes = useMemo(() => [...new Set([
@@ -251,6 +252,24 @@ export default function DocumentAIAssistantPanel({ profileId, onApplyPreview, on
     });
     if (saved?.length) onDocumentSaved?.(saved[saved.length - 1], saved);
   }
+
+  useEffect(() => {
+    const request = String(initialRequest || '').trim();
+    if (!autoCreate || !request || handoffHandledRef.current === handoffId) return;
+    handoffHandledRef.current = handoffId;
+    setNaturalRequest(request);
+    run('natural', async () => {
+      const preview = await documentApi.naturalCreatePreview({ request, company_profile_id: profileId, provider, language: initialOptions.language || 'en' });
+      setNaturalPreview(preview);
+      const created = await documentApi.create(previewToDocumentPayload(preview, profileId, 'LUMINA Mind Document'));
+      onApplyPreview?.(preview);
+      onDocumentSaved?.(created);
+      onHandoffConsumed?.();
+      return created;
+    });
+    // A handoff is single-use; changing provider/profile must not create a duplicate document.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoCreate, handoffId, initialRequest]);
 
   return (
     <aside className="doc-ai-panel" aria-label="AI document assistance">
