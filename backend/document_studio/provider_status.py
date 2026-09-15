@@ -7,22 +7,58 @@ from typing import Any
 from auth import require_owner
 from fastapi import APIRouter, Depends
 
-from .generation_orchestrator import SUPPORTED_PROVIDERS, DocumentAIProviderRegistry
+from .generation_orchestrator import (
+    DEFAULT_PROVIDER,
+    SUPPORTED_PROVIDERS,
+    DocumentAIProviderRegistry,
+)
 
 router = APIRouter()
 
-async def collect_document_provider_status(registry: DocumentAIProviderRegistry | None = None) -> dict[str, Any]:
+
+async def collect_document_provider_status(
+    registry: DocumentAIProviderRegistry | None = None,
+) -> dict[str, Any]:
+    """Return sanitized readiness for every supported provider.
+
+    Keep the advertised default in lock-step with the generation orchestrator.
+    A previous hard-coded ``ollama`` value made the production UI select the
+    local-only provider even though generation defaults to Groq.
+    """
     provider_registry = registry or DocumentAIProviderRegistry()
+
     async def status_for(name: str):
         try:
             payload = await provider_registry.get(name).status()
-            sanitized = {key: value for key, value in dict(payload or {}).items() if "key" not in key.casefold() and "secret" not in key.casefold() and "token" not in key.casefold()}
-            return name, {"name": name, **sanitized}
+            sanitized = {
+                key: value
+                for key, value in dict(payload or {}).items()
+                if "key" not in key.casefold()
+                and "secret" not in key.casefold()
+                and "token" not in key.casefold()
+            }
+            ready = bool(sanitized.get("ready", sanitized.get("available", False)))
+            return name, {"name": name, **sanitized, "ready": ready}
         except Exception as exc:
-            return name, {"name": name, "available": False, "ready": False, "error": f"Provider status unavailable: {type(exc).__name__}"}
-    pairs = await asyncio.gather(*(status_for(name) for name in sorted(SUPPORTED_PROVIDERS)))
+            return name, {
+                "name": name,
+                "available": False,
+                "ready": False,
+                "error": f"Provider status unavailable: {type(exc).__name__}",
+            }
+
+    pairs = await asyncio.gather(
+        *(status_for(name) for name in sorted(SUPPORTED_PROVIDERS))
+    )
     providers = {name: status for name, status in pairs}
-    return {"default_provider": "ollama", "providers": providers, "any_ready": any(bool(status.get("ready", status.get("available", False))) for status in providers.values())}
+    any_ready = any(bool(status.get("ready", False)) for status in providers.values())
+
+    return {
+        "default_provider": DEFAULT_PROVIDER,
+        "providers": providers,
+        "any_ready": any_ready,
+    }
+
 
 @router.get("/ai/providers/status")
 async def document_provider_status(_: str = Depends(require_owner)) -> dict[str, Any]:
