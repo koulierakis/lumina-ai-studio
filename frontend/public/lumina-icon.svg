@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="LUMINA">
+  <defs>
+    <radialGradient id="bg" cx="35%" cy="25%" r="90%">
+      <stop offset="0" stop-color="#16365f"/>
+      <stop offset="0.55" stop-color="#081523"/>
+      <stop offset="1" stop-color="#02060c"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f4dfad"/>
+      <stop offset="0.45" stop-color="#c6a15b"/>
+      <stop offset="1" stop-color="#7f5c25"/>
+    </linearGradient>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="18" y="18" width="476" height="476" rx="98" fill="none" stroke="#5da8e8" stroke-opacity=".42" stroke-width="3"/>
+  <circle cx="256" cy="238" r="146" fill="none" stroke="url(#gold)" stroke-opacity=".68" stroke-width="3" filter="url(#glow)"/>
+  <path d="M184 130h76v25c-18 2-27 9-27 25v179h67c42 0 65-19 78-61h25l-13 91H184v-25c19-3 28-10 28-27V181c0-17-9-24-28-26z" fill="url(#gold)"/>
+  <text x="256" y="449" text-anchor="middle" fill="#f0d69c" font-family="Arial,Helvetica,sans-serif" font-size="35" letter-spacing="10">LUMINA</text>
+</svg>
