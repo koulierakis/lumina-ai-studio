@@ -31,6 +31,7 @@ import {
 import { apiDelete, apiGet, apiPost, apiPut } from '../lib/api';
 import { documentApi } from '../documents/model';
 import { detectStudioIntent } from '../platform/studioHandoff';
+import { buildAuthoritativeTranscript } from '../platform/speechTranscript';
 
 const ROLE_OPTIONS = [
   ['auto', 'Auto', Sparkles],
@@ -321,11 +322,11 @@ export default function ExecutiveAdvisor() {
       setError('Η φωνητική πληκτρολόγηση δεν υποστηρίζεται από αυτόν τον browser. Χρησιμοποίησε Chrome ή Edge.');
       return;
     }
+    const baseText = message.trim();
     const recognition = new Recognition();
     recognition.lang = 'el-GR';
     recognition.continuous = true;
     recognition.interimResults = true;
-    let committed = message.trim();
     recognition.onstart = () => { setListening(true); setError(''); };
     recognition.onend = () => setListening(false);
     recognition.onerror = (event) => {
@@ -333,13 +334,8 @@ export default function ExecutiveAdvisor() {
       if (event.error !== 'aborted') setError(`Η φωνητική πληκτρολόγηση σταμάτησε: ${event.error || 'άγνωστο σφάλμα'}.`);
     };
     recognition.onresult = (event) => {
-      let interim = '';
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const transcript = event.results[index][0]?.transcript || '';
-        if (event.results[index].isFinal) committed = `${committed} ${transcript}`.trim();
-        else interim += transcript;
-      }
-      setMessage(`${committed}${interim ? ` ${interim}` : ''}`.trim());
+      const authoritativeTranscript = buildAuthoritativeTranscript(event.results);
+      setMessage([baseText, authoritativeTranscript].filter(Boolean).join(' ').trim());
     };
     recognitionRef.current = recognition;
     recognition.start();
