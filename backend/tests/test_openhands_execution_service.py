@@ -1,7 +1,13 @@
 from pathlib import Path
+
 import pytest
 from code_builder.openhands_adapter import OpenHandsRunResult
-from code_builder.openhands_execution_service import MAX_REVIEW_DIFF_CHARACTERS,OpenHandsExecutionService
+from code_builder.openhands_execution_service import (
+    MAX_REVIEW_DIFF_CHARACTERS,
+    OpenHandsExecutionService,
+)
+
+
 class FakeAdapter:
     def run(self,*,prompt,workspace_root,disposable_workspace):
         root=Path(workspace_root);(root/"existing.txt").write_text("changed\n",encoding="utf-8");(root/"new.txt").write_text("new\n",encoding="utf-8");return OpenHandsRunResult(("fake",),0,(),"","")

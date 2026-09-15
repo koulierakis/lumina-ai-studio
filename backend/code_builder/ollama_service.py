@@ -35,7 +35,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any, Final, TypeVar
 from urllib.parse import urlparse
@@ -45,10 +45,9 @@ from pydantic import BaseModel, ValidationError
 
 from .models import OllamaConnectionStatus
 
-
 LOGGER = logging.getLogger(__name__)
 
-UTC = timezone.utc
+UTC = UTC
 
 DEFAULT_OLLAMA_BASE_URL: Final[str] = "http://127.0.0.1:11434"
 DEFAULT_CONNECT_TIMEOUT_SECONDS: Final[float] = 5.0
@@ -387,7 +386,7 @@ class OllamaModelInformation:
     def from_api_data(
         cls,
         value: Mapping[str, Any],
-    ) -> "OllamaModelInformation":
+    ) -> OllamaModelInformation:
         """Build model information from an Ollama /api/tags entry."""
 
         details_value = value.get("details")
@@ -1141,7 +1140,7 @@ class OllamaService:
 
         return client
 
-    async def __aenter__(self) -> "OllamaService":
+    async def __aenter__(self) -> OllamaService:
         """Enter the async context manager."""
 
         self._ensure_open()
@@ -2249,11 +2248,11 @@ class OllamaService:
             images
         )
         normalized_keep_alive = self._validate_keep_alive(
-            (
+
                 self.configuration.default_keep_alive
                 if keep_alive is None
                 else keep_alive
-            )
+
         )
         normalized_think = self._validate_think(
             think
@@ -2365,11 +2364,11 @@ class OllamaService:
             options
         )
         normalized_keep_alive = self._validate_keep_alive(
-            (
+
                 self.configuration.default_keep_alive
                 if keep_alive is None
                 else keep_alive
-            )
+
         )
         normalized_think = self._validate_think(
             think

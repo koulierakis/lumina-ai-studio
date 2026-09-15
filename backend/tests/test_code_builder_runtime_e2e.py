@@ -4,16 +4,29 @@ import threading
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from code_builder.backup_service import BackupService
 from code_builder.build_service import BuildService, BuildServiceConfiguration
 from code_builder.patch_service import PatchService
 from code_builder.persistent_task_store import PersistentTaskStore
-from code_builder.planning_service import GeneratedChangePlan, GeneratedFileChange, GeneratedPlanStep
-from code_builder.router import CodeBuilderTaskPhase, StoredTask, TaskCreateRequest, create_code_builder_router
-from code_builder.task_service import TaskCancellationToken, TaskRequest, TaskService, TaskServiceConfiguration
+from code_builder.planning_service import (
+    GeneratedChangePlan,
+    GeneratedFileChange,
+    GeneratedPlanStep,
+)
+from code_builder.router import (
+    CodeBuilderTaskPhase,
+    StoredTask,
+    TaskCreateRequest,
+    create_code_builder_router,
+)
+from code_builder.task_service import (
+    TaskCancellationToken,
+    TaskRequest,
+    TaskService,
+    TaskServiceConfiguration,
+)
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class DeterministicRepository:

@@ -5,10 +5,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
-import pytest
-
-from code_builder.models import ChangePlan, ChangeType, ProposedFileChange
 import code_builder.patch_generation_service as patch_generation
+import pytest
+from code_builder.models import ChangePlan, ChangeType, ProposedFileChange
 from code_builder.patch_generation_service import (
     AIPatchGenerationError,
     _collect_plan_paths,

@@ -12,7 +12,6 @@ from document_studio.natural_creation import create_natural_document
 from document_studio.service import render_docx_bytes, render_pdf_bytes
 from persistence import SQLitePersistenceProvider
 
-
 document_router = importlib.import_module("document_studio.router")
 
 

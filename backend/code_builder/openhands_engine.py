@@ -1,8 +1,12 @@
 """Optional OpenHands coding engine boundary for LUMINA Code Builder."""
 from __future__ import annotations
+
 from dataclasses import dataclass
 from pathlib import Path
-from .openhands_execution_service import OpenHandsExecutionResult,OpenHandsExecutionService
+
+from .openhands_execution_service import OpenHandsExecutionResult, OpenHandsExecutionService
+
+
 @dataclass(frozen=True,slots=True)
 class OpenHandsEngineStatus:
     name:str;available:bool;safe_mode:bool=True

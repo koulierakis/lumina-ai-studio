@@ -8,9 +8,8 @@ ephemeral filesystem.
 from __future__ import annotations
 
 import os
-from pathlib import Path
-from typing import Tuple
 import uuid
+from pathlib import Path
 
 from storage_backends import LocalStorageBackend, create_storage_backend
 
@@ -74,7 +73,7 @@ def _backend():
     mode = signature[0]
     if _production_requires_cloud() and mode not in {"s3", "r2", "supabase"}:
         raise RuntimeError("Production user-file storage requires an S3-compatible STORAGE_BACKEND")
-    if _BACKEND is None or _BACKEND_SIGNATURE != signature:
+    if _BACKEND is None or signature != _BACKEND_SIGNATURE:
         _BACKEND = create_storage_backend(_root())
         _BACKEND_SIGNATURE = signature
     return _BACKEND
@@ -98,7 +97,7 @@ def _storage_key(filename: str, kind: str) -> str:
     return f"{prefix}/{safe_name}"
 
 
-def save_bytes(data: bytes, mime: str, kind: str = "reference") -> Tuple[str, str, int]:
+def save_bytes(data: bytes, mime: str, kind: str = "reference") -> tuple[str, str, int]:
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("Storage payload must be bytes")
     filename = f"{uuid.uuid4().hex}{_ext_from_mime(mime)}"
@@ -112,7 +111,7 @@ def save_bytes(data: bytes, mime: str, kind: str = "reference") -> Tuple[str, st
     return filename, location, len(data)
 
 
-def save_bytes_at_key(data: bytes, mime: str, key: str) -> Tuple[str, str, int]:
+def save_bytes_at_key(data: bytes, mime: str, key: str) -> tuple[str, str, int]:
     """Persist bytes at an explicit canonical key (used for owner-scoped voice references)."""
     if not isinstance(data, (bytes, bytearray)):
         raise TypeError("Storage payload must be bytes")

@@ -1,4 +1,10 @@
-from models import PersonalVoiceModel, VoiceExportRequest, VoiceJob, VoiceProject, VoiceRecordingSession
+from models import (
+    PersonalVoiceModel,
+    VoiceExportRequest,
+    VoiceJob,
+    VoiceProject,
+    VoiceRecordingSession,
+)
 
 
 def test_personal_voice_model_contains_required_profiles():

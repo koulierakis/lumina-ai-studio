@@ -1,6 +1,8 @@
 import pytest
 from code_builder.engine_registry import CodingEngineRegistry
 from code_builder.openhands_engine import OpenHandsEngine
+
+
 class FakeAdapter:
     def __init__(self,available):self.available=available
     def is_available(self):return self.available

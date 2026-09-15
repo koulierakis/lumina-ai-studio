@@ -23,7 +23,6 @@ from typing import Any
 
 import httpx
 import pytest
-
 from code_builder.ollama_service import (
     OllamaClientConfiguration,
     OllamaService,
@@ -236,7 +235,9 @@ def test_concurrent_worker_threads_are_isolated(stub_ollama_url: str) -> None:
 def test_injected_client_is_reused_across_loops(stub_ollama_url: str) -> None:
     """An explicitly injected client stays the caller's responsibility."""
 
-    injected = httpx.AsyncClient(base_url=stub_ollama_url)
+    # The stub is loopback-only; inherited workstation/CI proxies must not alter
+    # this transport or require optional SOCKS dependencies.
+    injected = httpx.AsyncClient(base_url=stub_ollama_url, trust_env=False)
     service = OllamaService(
         configuration=OllamaClientConfiguration(base_url=stub_ollama_url),
         client=injected,

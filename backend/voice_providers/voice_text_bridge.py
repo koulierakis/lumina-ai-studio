@@ -15,7 +15,7 @@ from collections import OrderedDict
 
 _MAX_ENTRIES = 128
 _LOCK = threading.Lock()
-_TEXT_BY_AUDIO_HASH: "OrderedDict[str, str]" = OrderedDict()
+_TEXT_BY_AUDIO_HASH: OrderedDict[str, str] = OrderedDict()
 
 
 def _key(audio: bytes) -> str:

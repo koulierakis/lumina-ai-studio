@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from code_builder.ollama_service import (
     OllamaClientConfiguration,
     OllamaEndpoint,

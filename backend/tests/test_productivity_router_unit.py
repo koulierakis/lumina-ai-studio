@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from productivity_router import _next_run, _validate_public_url
 
 
 def test_next_run_cadences() -> None:
-    current = datetime(2026, 8, 12, 6, 0, tzinfo=timezone.utc)
+    current = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
     assert (_next_run(current, "hourly") - current).total_seconds() == 3600
     assert (_next_run(current, "daily") - current).days == 1
     assert (_next_run(current, "weekly") - current).days == 7

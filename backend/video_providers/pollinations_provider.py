@@ -12,7 +12,13 @@ from urllib.parse import quote
 
 import httpx
 
-from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderCapabilities, VideoProviderError
+from .base import (
+    GeneratedVideo,
+    VideoGenerationInput,
+    VideoProvider,
+    VideoProviderCapabilities,
+    VideoProviderError,
+)
 
 logger = logging.getLogger("lumina.video.pollinations")
 

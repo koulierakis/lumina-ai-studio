@@ -1,7 +1,6 @@
 import hashlib
 
 import pytest
-
 from code_builder.openhands_adapter import OpenHandsRunResult
 from code_builder.openhands_execution_service import OpenHandsExecutionResult, OpenHandsFileChange
 from code_builder.openhands_patch_bridge import (

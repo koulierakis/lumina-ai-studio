@@ -29,7 +29,6 @@ from __future__ import annotations
 import codecs
 import difflib
 import hashlib
-import inspect
 import logging
 import os
 import re
@@ -39,7 +38,7 @@ import tempfile
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Final
@@ -54,10 +53,9 @@ from .security import (
     evaluate_safe_path,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
-UTC = timezone.utc
+UTC = UTC
 
 DEFAULT_ENCODING: Final[str] = "utf-8"
 UTF8_BOM: Final[bytes] = codecs.BOM_UTF8

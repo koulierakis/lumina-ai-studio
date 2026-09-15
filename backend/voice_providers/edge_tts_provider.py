@@ -8,7 +8,6 @@ import edge_tts
 from .base import BaseVoiceProvider
 from .voice_text_bridge import remember_source_text
 
-
 _GREEK_RE = re.compile(r"[\u0370-\u03ff\u1f00-\u1fff]")
 
 

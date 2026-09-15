@@ -1,5 +1,4 @@
 import pytest
-
 from code_builder.engine_preparation_service import (
     CodeBuilderEnginePreparationService,
     EnginePreparationError,

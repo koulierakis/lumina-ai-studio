@@ -8,11 +8,10 @@ from __future__ import annotations
 import math
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-
 
 TRAFFIC_TIMEOUT_SECONDS = 8.0
 WEATHER_TIMEOUT_SECONDS = 8.0
@@ -82,7 +81,7 @@ async def fetch_traffic_route(origin: dict[str, float], destination: dict[str, f
     if not status["configured"]: return {"status": "unavailable", "reason": "not_configured", **status}
     token = (os.environ.get("MAPBOX_DIRECTIONS_TOKEN") or os.environ.get("MAPBOX_ACCESS_TOKEN") or "").strip()
     url = f"https://api.mapbox.com/directions/v5/mapbox/driving-traffic/{origin['lng']},{origin['lat']};{destination['lng']},{destination['lat']}"
-    depart_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    depart_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     params = {"access_token": token, "alternatives": "true", "overview": "full", "geometries": "geojson", "annotations": "congestion,duration", "depart_at": depart_at}
     try:
         # Mapbox is a direct HTTPS provider.  Do not inherit the machine's
@@ -133,7 +132,7 @@ def parse_route_weather(payload: dict[str, Any], points: list[dict[str, float]])
     if any(float(value or 0) >= 45 for value in wind): hazards.append({"type": "strong-wind", "severity": "significant"})
     if any(int(value or 0) in {45, 48} for value in weather): hazards.append({"type": "fog", "severity": "significant"})
     if any(int(value or 0) in {95, 96, 99} for value in weather): hazards.append({"type": "thunderstorm", "severity": "high"})
-    return {"status": "available", "sample_count": len(points), "hazards": hazards, "checked_at": datetime.now(timezone.utc).isoformat()}
+    return {"status": "available", "sample_count": len(points), "hazards": hazards, "checked_at": datetime.now(UTC).isoformat()}
 
 
 async def fetch_route_weather(points: list[dict[str, float]]) -> dict[str, Any]:

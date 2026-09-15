@@ -24,7 +24,6 @@ from .patch_service import (
     ProposedPatchOperation,
 )
 
-
 DEFAULT_MODEL: Final[str] = "qwen2.5-coder:7b"
 DEFAULT_OLLAMA_URL: Final[str] = "http://127.0.0.1:11434"
 MAX_CONTEXT_FILES: Final[int] = 12
@@ -603,8 +602,8 @@ def install_ai_patch_generation() -> None:
 
     if getattr(PatchService, "_lumina_ai_patch_generation_installed", False):
         return
-    setattr(PatchService, "generate_patch", generate_patch)
-    setattr(PatchService, "_lumina_ai_patch_generation_installed", True)
+    PatchService.generate_patch = generate_patch
+    PatchService._lumina_ai_patch_generation_installed = True
 
 
 __all__ = [

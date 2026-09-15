@@ -16,7 +16,13 @@ import httpx
 from gradio_client import Client
 from huggingface_hub import InferenceClient
 
-from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderCapabilities, VideoProviderError
+from .base import (
+    GeneratedVideo,
+    VideoGenerationInput,
+    VideoProvider,
+    VideoProviderCapabilities,
+    VideoProviderError,
+)
 
 logger = logging.getLogger("lumina.video.huggingface")
 

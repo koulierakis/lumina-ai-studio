@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Mapping
 
-
 DEFAULT_OPENHANDS_BINARY: Final[str] = "openhands"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 1800.0
 MAX_PROMPT_CHARACTERS: Final[int] = 200_000

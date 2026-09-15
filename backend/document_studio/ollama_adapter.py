@@ -268,7 +268,7 @@ class OllamaDocumentAdapter:
                 elapsed_seconds=max(time.monotonic() - started_at, 0.0),
                 success=True,
             )
-        except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
+        except (TimeoutError, httpx.TimeoutException):
             return self._failure(started_at, model, f"Generation timed out after {bounded_timeout:g}s")
         except httpx.ConnectError:
             return self._failure(started_at, model, "Ollama is unavailable")

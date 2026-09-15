@@ -7,7 +7,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Optional
+from typing import Any, Callable
 
 logger = logging.getLogger("lumina.launcher.readiness")
 

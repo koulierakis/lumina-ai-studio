@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from reportlab.pdfbase import pdfmetrics
-
 from document_studio.pdf_fonts import (
     PDF_FONT_BOLD_NAME,
     PDF_FONT_NAME,
     ensure_pdf_font_aliases,
 )
+from reportlab.pdfbase import pdfmetrics
 
 
 def test_pdf_font_aliases_are_registered_before_export_service_uses_them():

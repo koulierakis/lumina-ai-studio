@@ -28,25 +28,23 @@ Endpoints (all prefixed with /api):
     GET  /health
 """
 from __future__ import annotations
+
 import asyncio
+import io
 import ipaddress
 import json
-import math
 import logging
+import math
 import os
-import io
 import re
-import socket
 import shutil
+import socket
 import subprocess
 import tempfile
-import traceback
 import wave
 from pathlib import Path
-from typing import List, Optional
 
 from dotenv import load_dotenv
-from PIL import Image, ImageSequence, UnidentifiedImageError
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -57,62 +55,121 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import FileResponse, Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from persistence import (  # noqa: E402
+    LocalPersistenceCollection,
+    SQLitePersistenceProvider,
+    TalkingPortraitCollection,
+    create_persistence_provider,
+)
+from PIL import Image, ImageSequence, UnidentifiedImageError
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from starlette.staticfiles import StaticFiles
-from persistence import LocalPersistenceCollection, SQLitePersistenceProvider, TalkingPortraitCollection, initialize_persistence_provider, create_persistence_provider  # noqa: E402
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
+from ai_runtime.manager import runtime_manager  # noqa: E402
+from ai_runtime.router import router as runtime_router  # noqa: E402
+from ai_runtime.schemas import RuntimeJob, RuntimeJobStatus  # noqa: E402
 from auth import issue_token, require_owner, verify_credentials  # noqa: E402
+from code_builder.backup_service import BackupService  # noqa: E402
+from code_builder.build_service import (  # noqa: E402
+    BuildService,
+    BuildServiceConfiguration,
+)
+from code_builder.models import RepositoryConfiguration  # noqa: E402
+from code_builder.ollama_adapter import create_ollama_task_adapter  # noqa: E402
+from code_builder.ollama_service import OllamaService  # noqa: E402
+from code_builder.patch_service import PatchService  # noqa: E402
+from code_builder.planning_service import (  # noqa: E402
+    PlanningConfiguration,
+    PlanningService,
+)
+from code_builder.repository_service import RepositoryService  # noqa: E402
+from code_builder.router import (  # noqa: E402
+    configure_code_builder_router,
+)
+from code_builder.router import (
+    router as code_builder_router,
+)
+from code_builder.task_service import create_task_service  # noqa: E402
+from code_builder_v2.applier import AtomicChangeApplier  # noqa: E402
+from code_builder_v2.backup import BackupService as BackupServiceV2  # noqa: E402
+from code_builder_v2.executor import CommandExecutor as CommandExecutorV2  # noqa: E402
+from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner  # noqa: E402
+from code_builder_v2.pipeline import ExecutionPipeline  # noqa: E402
+from code_builder_v2.repository import Repository as RepositoryV2  # noqa: E402
+from code_builder_v2.router import configure as configure_code_builder_v2_router  # noqa: E402
+from code_builder_v2.router import router as code_builder_v2_router
+from code_builder_v2.service import CodeBuilderService  # noqa: E402
+from code_builder_v2.store import JsonTaskStore  # noqa: E402
+from code_builder_v2.validation import ValidationRunner as ValidationRunnerV2  # noqa: E402
+from code_creator import create_project as code_create_project  # noqa: E402
+from code_creator import generate_project as code_generate_project
+from code_creator import get_project as code_get_project
+from code_creator import list_projects as code_list_projects
+from code_creator import ollama_status as code_ollama_status
+from code_creator import read_file as code_read_file
+from code_creator import run_safe_check as code_run_safe_check
+from developer_center import TASKS as DEVELOPER_TASKS  # noqa: E402
+from developer_center import local_system_metrics, repository_status
+from developer_center import manager as developer_manager
+from document_studio.router import configure_document_studio_router  # noqa: E402
+from document_studio.router import router as document_studio_router
+from driver_assistance_services import (  # noqa: E402
+    fetch_route_weather,
+    fetch_traffic_route,
+    sample_route_points,
+    traffic_provider_status,
+)
+from fastapi import Depends  # noqa: E402
+from local_tools import resolve_executable  # noqa: E402
 from login_limiter import login_limiter  # noqa: E402
-from developer_center import TASKS as DEVELOPER_TASKS, local_system_metrics, manager as developer_manager, repository_status  # noqa: E402
 from models import (  # noqa: E402
     AiEditJob,
+    DriverPreferences,
+    DriverSavedPlace,
+    DriverTrip,
     GalleryItem,
     GenerationJob,
     GenerationRequest,
     IdentityPack,
     IdentityPackCreate,
     IdentityPackUpdate,
-    Project,
-    ProjectCreate,
-    WorkspaceNotification,
-    DriverPreferences,
-    DriverSavedPlace,
-    DriverTrip,
     LoginRequest,
     MediaAsset,
+    PersonalVoiceModel,
     PhotoBatchJob,
     PhotoCollection,
+    Project,
+    ProjectCreate,
+    TalkingFaceJob,
+    TalkingPortraitInstallJob,
+    TalkingPortraitJob,
     TokenResponse,
+    TranscriptionJob,
+    VideoBrandKit,
     VideoGenerationJob,
     VideoLibraryOrganization,
-    PersonalVoiceModel,
-    VoiceJob,
+    VideoProject,
+    VideoTemplate,
+    VideoVoiceIntegrationRequest,
     VoiceExportRequest,
+    VoiceJob,
     VoiceLibraryOrganization,
     VoicePack,
     VoicePreset,
     VoiceProject,
     VoiceProjectVersion,
     VoiceRecordingSession,
-    VideoVoiceIntegrationRequest,
-    TranscriptionJob,
-    TalkingFaceJob,
-    TalkingPortraitInstallJob,
-    TalkingPortraitJob,
-    VideoBrandKit,
-    VideoTemplate,
-    VideoProject,
+    WorkspaceNotification,
     new_id,
     now_iso,
 )
+from platform_services import emit_notification  # noqa: E402
 from providers import (  # noqa: E402
     ErrorKind,
     GenerationInput,
@@ -120,57 +177,10 @@ from providers import (  # noqa: E402
     ProviderInvalidResponseError,
     ProviderTimeoutError,
     available_providers,
+)
+from providers import (
     manager as provider_manager,
 )
-from storage import delete_file, read_bytes, save_bytes, save_bytes_at_key, storage_health  # noqa: E402
-from local_tools import resolve_executable  # noqa: E402
-from video_providers import VideoGenerationInput, VideoProviderError, available_video_providers, get_video_provider, video_provider_catalog  # noqa: E402
-from platform_services import emit_notification  # noqa: E402
-from voice_providers import get_voice_provider, voice_provider_catalog  # noqa: E402
-from voice_providers.openvoice_v2 import OpenVoiceV2ToneConverter, ToneConversionError  # noqa: E402
-from stt_providers import get_stt_provider, stt_provider_catalog  # noqa: E402
-from talking_face_providers import get_talking_face_provider, talking_face_catalog  # noqa: E402
-from talking_portrait_providers import available_talking_portrait_providers, auto_detect_talking_portrait_provider, get_talking_portrait_provider, talking_portrait_catalog, TalkingPortraitInput, TalkingPortraitProviderError  # noqa: E402
-from talking_portrait_providers.base import TalkingPortraitCancelledError  # noqa: E402
-from talking_portrait_providers.liveportrait_installer import ACTIVE_INSTALL_STATES, LivePortraitInstaller, build_initial_install_payload, recent_log_lines  # noqa: E402
-from talking_portrait_providers.liveportrait_provider import LivePortraitProvider, latest_log_lines as latest_talking_portrait_log_lines  # noqa: E402
-from fastapi import Depends  # noqa: E402
-
-from code_builder.models import RepositoryConfiguration  # noqa: E402
-from code_builder.repository_service import RepositoryService  # noqa: E402
-from code_builder.backup_service import BackupService  # noqa: E402
-from code_builder.ollama_service import OllamaService  # noqa: E402
-from code_builder.ollama_adapter import create_ollama_task_adapter  # noqa: E402
-from code_builder.planning_service import (  # noqa: E402
-    PlanningConfiguration,
-    PlanningService,
-)
-from code_builder.patch_service import PatchService  # noqa: E402
-from code_builder.build_service import (  # noqa: E402
-    BuildService,
-    BuildServiceConfiguration,
-)
-from code_builder.task_service import create_task_service  # noqa: E402
-from code_builder.router import (  # noqa: E402
-    configure_code_builder_router,
-    router as code_builder_router,
-)
-from code_builder_v2.applier import AtomicChangeApplier  # noqa: E402
-from code_builder_v2.backup import BackupService as BackupServiceV2  # noqa: E402
-from code_builder_v2.executor import CommandExecutor as CommandExecutorV2  # noqa: E402
-from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner  # noqa: E402
-from code_builder_v2.pipeline import ExecutionPipeline  # noqa: E402
-from code_builder_v2.repository import Repository as RepositoryV2  # noqa: E402
-from code_builder_v2.router import configure as configure_code_builder_v2_router, router as code_builder_v2_router  # noqa: E402
-from code_builder_v2.service import CodeBuilderService  # noqa: E402
-from code_builder_v2.store import JsonTaskStore  # noqa: E402
-from code_builder_v2.validation import ValidationRunner as ValidationRunnerV2  # noqa: E402
-from document_studio.router import configure_document_studio_router, router as document_studio_router  # noqa: E402
-from ai_runtime.router import router as runtime_router  # noqa: E402
-from ai_runtime.manager import runtime_manager  # noqa: E402
-from ai_runtime.schemas import RuntimeJob, RuntimeJobStatus  # noqa: E402
-
-from code_creator import create_project as code_create_project, generate_project as code_generate_project, get_project as code_get_project, list_projects as code_list_projects, ollama_status as code_ollama_status, read_file as code_read_file, run_safe_check as code_run_safe_check  # noqa: E402
 from runtime_info import (  # noqa: E402
     APP_VERSION,
     build_installation_center,
@@ -180,12 +190,43 @@ from runtime_info import (  # noqa: E402
     save_runtime_settings,
     validate_runtime_settings,
 )
-from driver_assistance_services import (  # noqa: E402
-    fetch_route_weather,
-    fetch_traffic_route,
-    sample_route_points,
-    traffic_provider_status,
+from storage import (  # noqa: E402
+    delete_file,
+    read_bytes,
+    save_bytes,
+    save_bytes_at_key,
+    storage_health,
 )
+from stt_providers import get_stt_provider, stt_provider_catalog  # noqa: E402
+from talking_face_providers import get_talking_face_provider, talking_face_catalog  # noqa: E402
+from talking_portrait_providers import (  # noqa: E402
+    TalkingPortraitInput,
+    TalkingPortraitProviderError,
+    auto_detect_talking_portrait_provider,
+    available_talking_portrait_providers,
+    get_talking_portrait_provider,
+    talking_portrait_catalog,
+)
+from talking_portrait_providers.base import TalkingPortraitCancelledError  # noqa: E402
+from talking_portrait_providers.liveportrait_installer import (  # noqa: E402
+    ACTIVE_INSTALL_STATES,
+    LivePortraitInstaller,
+    build_initial_install_payload,
+    recent_log_lines,
+)
+from talking_portrait_providers.liveportrait_provider import LivePortraitProvider  # noqa: E402
+from talking_portrait_providers.liveportrait_provider import (
+    latest_log_lines as latest_talking_portrait_log_lines,
+)
+from video_providers import (  # noqa: E402
+    VideoGenerationInput,
+    VideoProviderError,
+    available_video_providers,
+    get_video_provider,
+    video_provider_catalog,
+)
+from voice_providers import get_voice_provider, voice_provider_catalog  # noqa: E402
+from voice_providers.openvoice_v2 import OpenVoiceV2ToneConverter, ToneConversionError  # noqa: E402
 
 logger = logging.getLogger("lumina")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -804,8 +845,8 @@ async def create_pack(body: IdentityPackCreate, owner: str = Depends(require_own
     return pack
 
 
-@api.get("/identity-packs", response_model=List[IdentityPack])
-async def list_packs(owner: str = Depends(require_owner)) -> List[IdentityPack]:
+@api.get("/identity-packs", response_model=list[IdentityPack])
+async def list_packs(owner: str = Depends(require_owner)) -> list[IdentityPack]:
     cursor = packs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1)
     return [IdentityPack(**d) async for d in cursor]
 
@@ -908,7 +949,7 @@ async def delete_pack(pack_id: str, owner: str = Depends(require_owner)) -> dict
 @api.post("/identity-packs/{pack_id}/photos", response_model=IdentityPack)
 async def upload_photos(
     pack_id: str,
-    files: List[UploadFile] = File(...),
+    files: list[UploadFile] = File(...),
     owner: str = Depends(require_owner),
 ) -> IdentityPack:
     if not files:
@@ -1193,19 +1234,19 @@ async def get_job(job_id: str, owner: str = Depends(require_owner)) -> Generatio
     return GenerationJob(**doc)
 
 
-@api.get("/jobs", response_model=List[GenerationJob])
-async def list_jobs(owner: str = Depends(require_owner), limit: int = 50) -> List[GenerationJob]:
+@api.get("/jobs", response_model=list[GenerationJob])
+async def list_jobs(owner: str = Depends(require_owner), limit: int = 50) -> list[GenerationJob]:
     cursor = jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(limit)
     return [GenerationJob(**d) async for d in cursor]
 
 
 # ---------- Gallery ----------
-@api.get("/gallery", response_model=List[GalleryItem])
+@api.get("/gallery", response_model=list[GalleryItem])
 async def list_gallery(
     owner: str = Depends(require_owner),
-    favorite: Optional[bool] = None,
+    favorite: bool | None = None,
     limit: int = 200,
-) -> List[GalleryItem]:
+) -> list[GalleryItem]:
     q: dict = {"owner_email": owner}
     if favorite is not None:
         q["favorite"] = favorite
@@ -1244,7 +1285,7 @@ async def delete_gallery_item(item_id: str, owner: str = Depends(require_owner))
 @api.post("/media/upload")
 async def upload_image_media(
     file: UploadFile = File(...),
-    project_id: Optional[str] = Form(None),
+    project_id: str | None = Form(None),
     edit_note: str = Form("uploaded-image"),
     tags: str = Form(""),
     owner: str = Depends(require_owner),
@@ -1444,8 +1485,8 @@ async def _run_ai_edit(job_id: str, owner: str) -> None:
         _validate_editor_image_bytes(src_bytes, src_mime, label="source")
 
         # Load mask if any
-        mask_bytes: Optional[bytes] = None
-        mask_mime: Optional[str] = None
+        mask_bytes: bytes | None = None
+        mask_mime: str | None = None
         if job.mask_media_id:
             m_doc = await media_coll.find_one({"id": job.mask_media_id, "owner_email": owner}, {"_id": 0})
             if m_doc:
@@ -1584,13 +1625,13 @@ async def create_ai_edit(
     source_media_id: str = Form(...),
     tool: str = Form(...),
     instruction: str = Form(""),
-    project_id: Optional[str] = Form(None),
-    identity_pack_id: Optional[str] = Form(None),
+    project_id: str | None = Form(None),
+    identity_pack_id: str | None = Form(None),
     identity_lock: str = Form("high"),
     reference_media_ids: str = Form(""),
     export_options: str = Form(""),
-    mask: Optional[UploadFile] = File(None),
-    provider: Optional[str] = Form(None),
+    mask: UploadFile | None = File(None),
+    provider: str | None = Form(None),
     owner: str = Depends(require_owner),
 ) -> AiEditJob:
     if tool not in AI_TOOL_PROMPTS:
@@ -1624,7 +1665,7 @@ async def create_ai_edit(
 
     provider_name = (provider or os.environ.get("IMAGE_PROVIDER") or "gemini").lower()
 
-    mask_media_id: Optional[str] = None
+    mask_media_id: str | None = None
     if mask is not None:
         m_mime = (mask.content_type or "").lower()
         if m_mime not in ALLOWED_MIMES:
@@ -1678,12 +1719,12 @@ async def get_ai_job(job_id: str, owner: str = Depends(require_owner)) -> AiEdit
     return AiEditJob(**doc)
 
 
-@api.get("/editor/ai-jobs", response_model=List[AiEditJob])
+@api.get("/editor/ai-jobs", response_model=list[AiEditJob])
 async def list_ai_jobs(
     owner: str = Depends(require_owner),
-    source_media_id: Optional[str] = None,
+    source_media_id: str | None = None,
     limit: int = 50,
-) -> List[AiEditJob]:
+) -> list[AiEditJob]:
     q: dict = {"owner_email": owner}
     if source_media_id:
         q["source_media_id"] = source_media_id
@@ -1817,7 +1858,7 @@ async def save_edited_version(
 
 
 @api.get("/editor/versions/{media_id}")
-async def list_versions(media_id: str, owner: str = Depends(require_owner)) -> List[dict]:
+async def list_versions(media_id: str, owner: str = Depends(require_owner)) -> list[dict]:
     """Return all edited versions descended from a source media id."""
     cursor = media_coll.find(
         {"parent_media_id": media_id, "owner_email": owner}, {"_id": 0}
@@ -1896,7 +1937,7 @@ async def clear_session(media_id: str, owner: str = Depends(require_owner)) -> d
 @api.get("/photo-studio/library")
 async def photo_library(
     q: str = "",
-    favorite: Optional[bool] = None,
+    favorite: bool | None = None,
     tags: str = "",
     collection_id: str = "",
     owner: str = Depends(require_owner),
@@ -2213,17 +2254,17 @@ async def list_video_providers(_: str = Depends(require_owner)) -> dict:
 @api.post("/video/generate", response_model=VideoGenerationJob)
 async def create_video_generation(
     background: BackgroundTasks,
-    file: Optional[UploadFile] = File(None),
-    files: List[UploadFile] = File([]),
+    file: UploadFile | None = File(None),
+    files: list[UploadFile] = File([]),
     prompt: str = Form(...),
     mode: str = Form("image-to-video"),
     negative_prompt: str = Form(""),
     duration_seconds: int = Form(5),
     aspect_ratio: str = Form("16:9"),
     resolution: str = Form("720p"), fps: int = Form(24), quality: str = Form("standard"),
-    camera_motion: str = Form("auto"), style: str = Form("cinematic"), seed: Optional[int] = Form(None),
-    source_job_id: Optional[str] = Form(None), priority: int = Form(0),
-    provider: Optional[str] = Form(None),
+    camera_motion: str = Form("auto"), style: str = Form("cinematic"), seed: int | None = Form(None),
+    source_job_id: str | None = Form(None), priority: int = Form(0),
+    provider: str | None = Form(None),
     owner: str = Depends(require_owner),
 ) -> VideoGenerationJob:
     if mode not in {"text-to-video", "image-to-video", "multi-image", "extend", "variation", "interpolation", "edit"}:
@@ -2281,8 +2322,8 @@ async def create_video_generation(
     return job
 
 
-@api.get("/video/jobs", response_model=List[VideoGenerationJob])
-async def list_video_generation_jobs(owner: str = Depends(require_owner), limit: int = 50, search: str = "", status: str = "", folder: str = "", collection: str = "", favorite: Optional[bool] = None, sort: str = "recent") -> List[VideoGenerationJob]:
+@api.get("/video/jobs", response_model=list[VideoGenerationJob])
+async def list_video_generation_jobs(owner: str = Depends(require_owner), limit: int = 50, search: str = "", status: str = "", folder: str = "", collection: str = "", favorite: bool | None = None, sort: str = "recent") -> list[VideoGenerationJob]:
     safe_limit = max(1, min(limit, 100))
     query: dict = {"owner_email": owner}
     if search.strip(): query["$or"] = [{"title": {"$regex": search.strip(), "$options": "i"}}, {"prompt": {"$regex": search.strip(), "$options": "i"}}]
@@ -2423,8 +2464,8 @@ async def delete_video_generation_job(job_id: str, owner: str = Depends(require_
     return {"ok": True}
 
 
-@api.get("/video/projects", response_model=List[VideoProject])
-async def list_video_projects(owner: str = Depends(require_owner)) -> List[VideoProject]:
+@api.get("/video/projects", response_model=list[VideoProject])
+async def list_video_projects(owner: str = Depends(require_owner)) -> list[VideoProject]:
     cursor = video_projects_coll.find({"owner_email": owner}, {"_id": 0}).sort("updated_at", -1)
     return [VideoProject(**d) async for d in cursor]
 
@@ -2509,8 +2550,8 @@ def _generate_video_template_from_brief(brief: str, brand: dict | None = None) -
     }
 
 
-@api.get("/video/templates", response_model=List[VideoTemplate])
-async def list_video_templates(owner: str = Depends(require_owner), scope: str = "") -> List[VideoTemplate]:
+@api.get("/video/templates", response_model=list[VideoTemplate])
+async def list_video_templates(owner: str = Depends(require_owner), scope: str = "") -> list[VideoTemplate]:
     query = {"owner_email": owner}
     if scope:
         query["scope"] = scope
@@ -2550,8 +2591,8 @@ async def update_video_template(template_id: str, body: dict, owner: str = Depen
     return VideoTemplate(**doc)
 
 
-@api.get("/video/brand-kits", response_model=List[VideoBrandKit])
-async def list_video_brand_kits(owner: str = Depends(require_owner)) -> List[VideoBrandKit]:
+@api.get("/video/brand-kits", response_model=list[VideoBrandKit])
+async def list_video_brand_kits(owner: str = Depends(require_owner)) -> list[VideoBrandKit]:
     cursor = video_brand_kits_coll.find({"owner_email": owner}, {"_id": 0}).sort("updated_at", -1).limit(50)
     return [VideoBrandKit(**doc) async for doc in cursor]
 
@@ -2872,8 +2913,8 @@ async def improve_personal_voice_model(body: dict, owner: str = Depends(require_
     await voice_personal_models_coll.replace_one({"id": doc["id"], "owner_email": owner}, doc)
     return PersonalVoiceModel(**doc)
 
-@api.get("/voice/presets", response_model=List[VoicePreset])
-async def list_voice_presets(_: str = Depends(require_owner)) -> List[VoicePreset]:
+@api.get("/voice/presets", response_model=list[VoicePreset])
+async def list_voice_presets(_: str = Depends(require_owner)) -> list[VoicePreset]:
     return VOICE_PRO_PRESETS
 
 @api.post("/voice/recordings", response_model=VoiceRecordingSession)
@@ -2882,8 +2923,8 @@ async def create_voice_recording(body: dict, owner: str = Depends(require_owner)
     await voice_recordings_coll.insert_one(item.model_dump())
     return item
 
-@api.get("/voice/recordings", response_model=List[VoiceRecordingSession])
-async def list_voice_recordings(owner: str = Depends(require_owner)) -> List[VoiceRecordingSession]:
+@api.get("/voice/recordings", response_model=list[VoiceRecordingSession])
+async def list_voice_recordings(owner: str = Depends(require_owner)) -> list[VoiceRecordingSession]:
     return [VoiceRecordingSession(**doc) async for doc in voice_recordings_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
 
 @api.post("/voice/projects", response_model=VoiceProject)
@@ -2894,8 +2935,8 @@ async def create_voice_project(body: dict, owner: str = Depends(require_owner)) 
     await voice_projects_coll.insert_one(project.model_dump())
     return project
 
-@api.get("/voice/projects", response_model=List[VoiceProject])
-async def list_voice_projects(owner: str = Depends(require_owner), search: str = "", favorite: Optional[bool] = None) -> List[VoiceProject]:
+@api.get("/voice/projects", response_model=list[VoiceProject])
+async def list_voice_projects(owner: str = Depends(require_owner), search: str = "", favorite: bool | None = None) -> list[VoiceProject]:
     query = {"owner_email": owner}
     if search: query["$or"] = [{"title": {"$regex": search, "$options": "i"}}, {"tags": search}]
     if favorite is not None: query["favorite"] = favorite
@@ -2907,9 +2948,9 @@ async def create_voice_job(
     text: str = Form(""),
     mode: str = Form("text-to-speech"),
     voice: str = Form("personal-user"),
-    voice_pack_id: Optional[str] = Form(None),
+    voice_pack_id: str | None = Form(None),
     style: str = Form("podcast"),
-    preset_id: Optional[str] = Form(None),
+    preset_id: str | None = Form(None),
     output_format: str = Form("wav"),
     sample_rate: int = Form(48000),
     bit_depth: int = Form(24),
@@ -2917,7 +2958,7 @@ async def create_voice_job(
     loudness_lufs: float = Form(-16),
     title: str = Form(""),
     tags: str = Form(""),
-    provider: Optional[str] = Form(None),
+    provider: str | None = Form(None),
     owner: str = Depends(require_owner),
 ) -> VoiceJob:
     if mode not in VOICE_MODES:
@@ -2987,8 +3028,8 @@ async def prepare_voice_video_integration(body: VideoVoiceIntegrationRequest, ow
     if body.audio_media_id and not await media_coll.find_one({"id": body.audio_media_id, "owner_email": owner}, {"_id": 0}): raise HTTPException(404, "Audio media not found")
     return {"ok": True, "action": body.action, "lip_sync_preparation": body.lip_sync_preparation, "handoff": {"audio_media_id": body.audio_media_id, "video_project_id": body.video_project_id, "sync_markers": [0.0], "metadata": body.metadata}}
 
-@api.get("/voice/jobs", response_model=List[VoiceJob])
-async def list_voice_jobs(owner: str = Depends(require_owner), search: str = "", status: str = "", folder: str = "", collection: str = "", favorite: Optional[bool] = None) -> List[VoiceJob]:
+@api.get("/voice/jobs", response_model=list[VoiceJob])
+async def list_voice_jobs(owner: str = Depends(require_owner), search: str = "", status: str = "", folder: str = "", collection: str = "", favorite: bool | None = None) -> list[VoiceJob]:
     query: dict = {"owner_email": owner}
     if search: query["$or"] = [{"title": {"$regex": search, "$options": "i"}}, {"text": {"$regex": search, "$options": "i"}}, {"tags": {"$regex": search, "$options": "i"}}]
     if status: query["status"] = status
@@ -3044,8 +3085,8 @@ async def create_voice_org(body: dict, owner: str = Depends(require_owner)) -> V
     item = VoiceLibraryOrganization(owner_email=owner, kind=kind, name=name); await voice_library_orgs_coll.insert_one(item.model_dump()); return item
 
 # ---------- Central platform: projects, unified work, search and settings ----------
-@api.get("/projects", response_model=List[Project])
-async def list_projects(include_archived: bool = False, owner: str = Depends(require_owner)) -> List[Project]:
+@api.get("/projects", response_model=list[Project])
+async def list_projects(include_archived: bool = False, owner: str = Depends(require_owner)) -> list[Project]:
     query = {"owner_email": owner}
     if not include_archived:
         query["status"] = {"$ne": "archived"}
@@ -3295,8 +3336,8 @@ async def save_driver_preferences(body: dict, owner: str = Depends(require_owner
     return await get_driver_preferences(owner)
 
 
-@api.get("/driver-assistance/places", response_model=List[DriverSavedPlace])
-async def list_driver_places(owner: str = Depends(require_owner)) -> List[DriverSavedPlace]:
+@api.get("/driver-assistance/places", response_model=list[DriverSavedPlace])
+async def list_driver_places(owner: str = Depends(require_owner)) -> list[DriverSavedPlace]:
     return [DriverSavedPlace(**doc) async for doc in driver_places_coll.find({"owner_email": owner}, {"_id": 0}).sort("updated_at", -1)]
 
 
@@ -3415,7 +3456,7 @@ async def driver_assistance_route_weather(body: dict, owner: str = Depends(requi
 
 
 @api.get("/media-library")
-async def media_library(q: str = "", media_type: str = "", source_module: str = "", favorite: Optional[bool] = None, project_id: str = "", folder: str = "", collection_id: str = "", sort: str = "newest", page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> dict:
+async def media_library(q: str = "", media_type: str = "", source_module: str = "", favorite: bool | None = None, project_id: str = "", folder: str = "", collection_id: str = "", sort: str = "newest", page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> dict:
     query: dict = {"owner_email": owner}
     if favorite is not None: query["favorite"] = favorite
     if project_id: query["project_id"] = project_id
@@ -3522,8 +3563,8 @@ async def workspace_jobs(status: str = "", module: str = "", sort: str = "newest
     return {"jobs": jobs[start:start + page_size], "count": total, "page": page, "page_size": page_size, "pages": (total + page_size - 1) // page_size, "active_count": len([job for job in jobs if job.get("status") in active]), "failed_count": len([job for job in jobs if job.get("normalized_status") == "failed"])}
 
 
-@api.get("/notifications", response_model=List[WorkspaceNotification])
-async def list_notifications(unread_only: bool = False, page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> List[WorkspaceNotification]:
+@api.get("/notifications", response_model=list[WorkspaceNotification])
+async def list_notifications(unread_only: bool = False, page: int = 1, page_size: int = 50, owner: str = Depends(require_owner)) -> list[WorkspaceNotification]:
     query = {"owner_email": owner}
     if unread_only: query["read"] = False
     page, page_size = max(1, page), max(1, min(100, page_size))
@@ -3565,8 +3606,8 @@ async def delete_notification(notification_id: str, owner: str = Depends(require
 # ---------- Voice Pack / Digital Human contracts ----------
 MAX_VOICE_SAMPLE_BYTES = 25 * 1024 * 1024
 
-@api.get("/voice/packs", response_model=List[VoicePack])
-async def list_voice_packs(owner: str = Depends(require_owner), include_archived: bool = False) -> List[VoicePack]:
+@api.get("/voice/packs", response_model=list[VoicePack])
+async def list_voice_packs(owner: str = Depends(require_owner), include_archived: bool = False) -> list[VoicePack]:
     query = {"owner_email": owner}
     if not include_archived: query["readiness_status"] = {"$ne": "archived"}
     return [VoicePack(**doc) async for doc in voice_packs_coll.find(query, {"_id": 0}).sort("updated_at", -1)]
@@ -3770,8 +3811,8 @@ async def create_talking_video(background: BackgroundTasks, body: dict, owner: s
         except Exception: await talking_face_jobs_coll.update_one({"id": job.id}, {"$set": {"status": "failed", "error": "The local talking-video simulation could not be completed.", "updated_at": now_iso()}})
     background.add_task(run); return job
 
-@api.get("/voice/talking-video/jobs", response_model=List[TalkingFaceJob])
-async def list_talking_jobs(owner: str = Depends(require_owner)) -> List[TalkingFaceJob]:
+@api.get("/voice/talking-video/jobs", response_model=list[TalkingFaceJob])
+async def list_talking_jobs(owner: str = Depends(require_owner)) -> list[TalkingFaceJob]:
     return [TalkingFaceJob(**doc) async for doc in talking_face_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1)]
 
 
@@ -3827,7 +3868,7 @@ async def _run_talking_portrait_job(job_id: str, owner: str) -> None:
         current = _asyncio.run(talking_portrait_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0}))
         return bool(current and current.get("status") == "cancelled")
 
-    async def stage(status: str, progress: int, eta: Optional[int], message: str = "") -> bool:
+    async def stage(status: str, progress: int, eta: int | None, message: str = "") -> bool:
         doc = await talking_portrait_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
         if not doc or doc.get("status") == "cancelled":
             return False
@@ -4017,7 +4058,7 @@ async def retry_talking_portrait_install(install_id: str, background: Background
 
 
 @api.post("/talking-portrait/generate", response_model=TalkingPortraitJob)
-async def create_talking_portrait_job(background: BackgroundTasks, photo: UploadFile = File(...), audio: UploadFile = File(...), identity_lock: bool = Form(True), natural_blinking: bool = Form(True), head_motion: float = Form(0.35), expression_intensity: float = Form(0.55), fps: int = Form(25), resolution: str = Form("512"), seed: Optional[int] = Form(None), title: str = Form("Talking portrait"), tags: str = Form(""), provider: Optional[str] = Form(None), owner: str = Depends(require_owner)) -> TalkingPortraitJob:
+async def create_talking_portrait_job(background: BackgroundTasks, photo: UploadFile = File(...), audio: UploadFile = File(...), identity_lock: bool = Form(True), natural_blinking: bool = Form(True), head_motion: float = Form(0.35), expression_intensity: float = Form(0.55), fps: int = Form(25), resolution: str = Form("512"), seed: int | None = Form(None), title: str = Form("Talking portrait"), tags: str = Form(""), provider: str | None = Form(None), owner: str = Depends(require_owner)) -> TalkingPortraitJob:
     selected_provider = (provider or os.environ.get("TALKING_PORTRAIT_PROVIDER") or auto_detect_talking_portrait_provider()).strip().lower()
     if selected_provider == "mock":
         selected_provider = "liveportrait"
@@ -4052,8 +4093,8 @@ async def create_talking_portrait_job(background: BackgroundTasks, photo: Upload
     return job
 
 
-@api.get("/talking-portrait/jobs", response_model=List[TalkingPortraitJob])
-async def list_talking_portrait_jobs(owner: str = Depends(require_owner), status: str = "", search: str = "", limit: int = 100) -> List[TalkingPortraitJob]:
+@api.get("/talking-portrait/jobs", response_model=list[TalkingPortraitJob])
+async def list_talking_portrait_jobs(owner: str = Depends(require_owner), status: str = "", search: str = "", limit: int = 100) -> list[TalkingPortraitJob]:
     query = {"owner_email": owner}
     if status:
         query["status"] = status
@@ -4287,4 +4328,3 @@ if FRONTEND_BUILD_DIR.exists():
             return FileResponse(candidate)
 
         return FileResponse(build_root / "index.html")
-

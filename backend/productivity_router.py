@@ -4,19 +4,18 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from html.parser import HTMLParser
 from typing import Any, Literal
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, field_validator
-
 from auth import require_owner
+from fastapi import APIRouter, Depends, HTTPException
 from persistence import LocalPersistenceCollection, PersistenceProvider, SQLitePersistenceProvider
 from platform_services import emit_notification
+from pydantic import BaseModel, Field, field_validator
 
 router = APIRouter(tags=["productivity"])
 _provider: PersistenceProvider | None = None
@@ -26,7 +25,7 @@ _scheduler_task: asyncio.Task | None = None
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _now_iso() -> str:
@@ -342,7 +341,7 @@ class AutomationInput(BaseModel):
     def require_timezone(cls, value: datetime) -> datetime:
         if value.tzinfo is None:
             raise ValueError("run_at must include a timezone offset.")
-        return value.astimezone(timezone.utc)
+        return value.astimezone(UTC)
 
 
 class AutomationPatch(BaseModel):
@@ -399,7 +398,7 @@ async def automation_tasks(owner: str = Depends(require_owner)) -> list[dict[str
 @router.post("/api/automations/tasks", status_code=201)
 async def automation_create(body: AutomationInput, owner: str = Depends(require_owner)) -> dict[str, Any]:
     records, _ = _repos()
-    run_at = body.run_at.astimezone(timezone.utc)
+    run_at = body.run_at.astimezone(UTC)
     row = _record(
         "automation_task",
         owner,
@@ -459,7 +458,7 @@ async def _automation_scheduler_loop() -> None:
                 if not raw:
                     continue
                 try:
-                    due = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(timezone.utc)
+                    due = datetime.fromisoformat(str(raw).replace("Z", "+00:00")).astimezone(UTC)
                 except ValueError:
                     continue
                 if due <= now:

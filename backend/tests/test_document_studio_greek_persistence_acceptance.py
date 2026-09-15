@@ -5,7 +5,6 @@ import importlib
 
 from persistence import SQLitePersistenceProvider
 
-
 document_router = importlib.import_module("document_studio.router")
 
 

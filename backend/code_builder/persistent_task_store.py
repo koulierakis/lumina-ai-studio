@@ -18,7 +18,6 @@ from .router import (
 )
 from .task_service import TaskCancellationToken, TaskRequest, TaskStatus
 
-
 _DEFAULT_DB_PATH = (
     Path(__file__).resolve().parents[2]
     / ".lumina-runtime"
@@ -34,7 +33,7 @@ _UNSAFE_RESTART_PHASES = {
     CodeBuilderTaskPhase.ROLLING_BACK,
 }
 
-_STORE_BY_TASK_ID: dict[str, "PersistentTaskStore"] = {}
+_STORE_BY_TASK_ID: dict[str, PersistentTaskStore] = {}
 _STORE_REGISTRY_LOCK = threading.RLock()
 _ORIGINAL_TOUCH = StoredTask.touch
 _TOUCH_INSTALLED = False

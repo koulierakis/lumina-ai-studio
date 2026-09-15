@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from code_builder_v2.security import UnsafePathError, normalize_relative_path, resolve_inside
 
 

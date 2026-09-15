@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 _SERVER_PROCESS: subprocess.Popen | None = None
 _SKIP_SERVER_ENV = "LUMINA_SKIP_TEST_SERVER"
 

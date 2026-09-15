@@ -4,7 +4,6 @@ import asyncio
 import io
 
 from PIL import Image
-
 from video_providers import available_video_providers, get_video_provider
 from video_providers.base import GeneratedVideo, VideoGenerationInput
 from video_providers.huggingface_provider import HuggingFaceVideoProvider
@@ -57,7 +56,7 @@ def test_huggingface_timeout_uses_pollinations_when_configured(monkeypatch):
     provider = HuggingFaceVideoProvider()
 
     async def timeout(_spec):
-        raise asyncio.TimeoutError()
+        raise TimeoutError()
 
     async def fallback(_self, _spec):
         return GeneratedVideo(

@@ -3,7 +3,11 @@ from pathlib import Path
 from code_builder.backup_service import BackupService
 from code_builder.build_service import BuildService, BuildServiceConfiguration
 from code_builder.patch_service import PatchService
-from code_builder.planning_service import GeneratedChangePlan, GeneratedFileChange, GeneratedPlanStep
+from code_builder.planning_service import (
+    GeneratedChangePlan,
+    GeneratedFileChange,
+    GeneratedPlanStep,
+)
 from code_builder.router import (
     CodeBuilderTaskPhase,
     StoredTask,

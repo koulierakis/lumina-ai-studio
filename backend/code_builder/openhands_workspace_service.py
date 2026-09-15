@@ -1,9 +1,13 @@
 """Prepare disposable repository copies for OpenHands execution."""
 from __future__ import annotations
-import os,shutil,tempfile
+
+import os
+import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
+
 _DEFAULT_IGNORES:Final[frozenset[str]]=frozenset({".git",".lumina-runtime",".pytest_cache","__pycache__","node_modules","dist","build",".env",".env.local",".env.production","venv",".venv","coverage",".coverage","logs","tmp","temp"})
 _SECRET_PREFIXES:Final[tuple[str,...]]=(".env.",)
 class OpenHandsWorkspaceError(RuntimeError):pass

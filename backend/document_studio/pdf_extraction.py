@@ -1,7 +1,9 @@
 """Robust Unicode PDF extraction for Document Studio imports."""
 from __future__ import annotations
+
 import io
 import re
+
 
 def _normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value or "").strip()

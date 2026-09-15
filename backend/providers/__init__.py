@@ -20,8 +20,8 @@ from .base import (
     ProviderTimeoutError,
     ProviderUnsupportedCapabilityError,
 )
-from .comfyui_provider import ComfyUIProvider
 from .cloudflare_provider import CloudflareFluxProvider
+from .comfyui_provider import ComfyUIProvider
 from .flux_hf_provider import FluxHFProvider
 from .gemini_provider import GeminiImageProvider
 from .manager import ProviderManager
@@ -30,7 +30,7 @@ from .openai_provider import OpenAIImageProvider
 from .skeletons import BflImageProvider, FalImageProvider, ReplicateImageProvider
 from .stable_diffusion_provider import LocalImageProvider, StableDiffusionProvider
 
-_REGISTRY: Dict[str, Type[ImageProvider]] = {
+_REGISTRY: dict[str, type[ImageProvider]] = {
     "cloudflare": CloudflareFluxProvider,
     "flux": FluxHFProvider,
     "comfyui": ComfyUIProvider,

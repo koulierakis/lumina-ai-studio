@@ -1,10 +1,14 @@
 """Credential-safe Document Studio AI provider readiness route."""
 from __future__ import annotations
+
 import asyncio
 from typing import Any
+
 from auth import require_owner
 from fastapi import APIRouter, Depends
-from .generation_orchestrator import DocumentAIProviderRegistry, SUPPORTED_PROVIDERS
+
+from .generation_orchestrator import SUPPORTED_PROVIDERS, DocumentAIProviderRegistry
+
 router = APIRouter()
 
 async def collect_document_provider_status(registry: DocumentAIProviderRegistry | None = None) -> dict[str, Any]:

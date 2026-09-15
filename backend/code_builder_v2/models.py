@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Literal
 from uuid import uuid4
@@ -46,7 +46,7 @@ class ExecutionReport(BaseModel):
 
 
 class TaskEvent(BaseModel):
-    at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     phase: TaskStatus
     message: str
 
@@ -58,11 +58,11 @@ class BuildTask(BaseModel):
     plan: ChangePlan | None = None
     execution: ExecutionReport | None = None
     error: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     events: list[TaskEvent] = Field(default_factory=list)
 
     def transition(self, status: TaskStatus, message: str) -> None:
         self.status = status
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = datetime.now(UTC)
         self.events.append(TaskEvent(phase=status, message=message))

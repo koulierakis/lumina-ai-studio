@@ -10,7 +10,6 @@ from gradio_client import Client, handle_file
 
 from .base import BaseSTTProvider
 
-
 DEFAULT_WHISPER_SPACE = "hf-audio/whisper-large-v3"
 DEFAULT_WHISPER_API_NAME = "/predict"
 

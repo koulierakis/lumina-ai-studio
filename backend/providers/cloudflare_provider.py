@@ -1,10 +1,21 @@
 """Cloudflare Workers AI FLUX.1 Schnell image provider."""
 from __future__ import annotations
+
 import asyncio
 import base64
 import os
+
 import httpx
-from .base import ErrorKind, GeneratedImage, GenerationInput, ImageProvider, ProviderCapabilities, ProviderError, ProviderInvalidResponseError
+
+from .base import (
+    ErrorKind,
+    GeneratedImage,
+    GenerationInput,
+    ImageProvider,
+    ProviderCapabilities,
+    ProviderError,
+    ProviderInvalidResponseError,
+)
 
 MODEL = "@cf/black-forest-labs/flux-1-schnell"
 

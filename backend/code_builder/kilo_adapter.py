@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Mapping, Sequence
 
-
 DEFAULT_KILO_BINARY: Final[str] = "kilo"
 DEFAULT_TIMEOUT_SECONDS: Final[float] = 900.0
 MAX_PROMPT_CHARACTERS: Final[int] = 200_000

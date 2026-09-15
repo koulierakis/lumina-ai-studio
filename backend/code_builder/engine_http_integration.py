@@ -14,11 +14,8 @@ def install_engine_http_routes() -> None:
     from .engine_http_routes import router as engine_router
     from .router import router as code_builder_router
 
-    expected_path = "/api/code-builder/engines"
-    if not any(getattr(route, "path", None) == expected_path for route in code_builder_router.routes):
-        code_builder_router.include_router(engine_router)
-
-    if not any(getattr(route, "path", None) == expected_path for route in code_builder_router.routes):
-        raise RuntimeError("Code Builder engine status route was not installed.")
-
+    # Keep idempotency under our control. FastAPI 0.141 represents a nested
+    # router as an opaque declaration until the parent router is mounted, so
+    # inspecting its private route objects here is no longer stable.
+    code_builder_router.include_router(engine_router)
     _INSTALLED = True

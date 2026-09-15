@@ -1,8 +1,10 @@
 """Fact-safe smart field extraction for deterministic document rendering."""
 from __future__ import annotations
+
 import re
 from datetime import UTC, datetime
 from typing import Any
+
 from .models import CompanyProfile
 
 DEMO_COMPANY_NAMES = {"lumina corporate holdings", "acme corp", "example company"}

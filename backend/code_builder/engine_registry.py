@@ -1,9 +1,12 @@
 """Coding-engine selection without removing the existing native Code Builder."""
 from __future__ import annotations
-from dataclasses import asdict,dataclass
+
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Final
+
 from .openhands_engine import OpenHandsEngine
+
 NATIVE_ENGINE:Final[str]="native";OPENHANDS_ENGINE:Final[str]="openhands"
 @dataclass(frozen=True,slots=True)
 class CodingEngineOption:name:str;available:bool;experimental:bool;safe_mode:bool

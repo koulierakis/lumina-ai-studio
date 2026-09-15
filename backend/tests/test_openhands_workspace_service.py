@@ -1,7 +1,9 @@
-from pathlib import Path
 import os
+from pathlib import Path
+
 import pytest
 from code_builder.openhands_workspace_service import OpenHandsWorkspaceService
+
 
 def test_workspace_is_copy_and_excludes_runtime_secrets_and_venv(tmp_path:Path):
     (tmp_path/"app.txt").write_text("safe",encoding="utf-8");(tmp_path/".env").write_text("SECRET=value",encoding="utf-8");(tmp_path/".env.development").write_text("OTHER=value",encoding="utf-8");(tmp_path/".lumina-runtime").mkdir();(tmp_path/".venv").mkdir();w=OpenHandsWorkspaceService().prepare(tmp_path)

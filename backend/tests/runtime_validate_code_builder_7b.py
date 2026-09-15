@@ -4,7 +4,7 @@ import asyncio
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -26,14 +26,13 @@ from code_builder.planning_service import (
 from code_builder.repository_service import RepositoryService
 from code_builder.task_service import TaskRequest
 
-
 TASK_INSTRUCTION = (
     "Add a small backend health-check test without changing public APIs."
 )
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _estimate_tokens(text: str) -> int:
@@ -123,37 +122,36 @@ async def _stream_generate(
         async with httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
-        ) as client:
-            async with client.stream(
-                "POST",
-                "/api/generate",
-                json=payload,
-            ) as response:
-                try:
-                    response.raise_for_status()
-                except httpx.HTTPStatusError as exc:
-                    error_type = type(exc).__name__
-                    error_detail = (await response.aread()).decode(
-                        "utf-8",
-                        errors="replace",
-                    )[:2_000]
-                    raise
-                async for line in response.aiter_lines():
-                    if not line.strip():
-                        continue
-                    now = time.monotonic()
-                    stream_chunk_count += 1
-                    if first_chunk_seconds is None:
-                        first_chunk_seconds = now - started
-                    event = json.loads(line)
-                    text = event.get("response")
-                    if isinstance(text, str) and text:
-                        content_parts.append(text)
-                        if first_content_seconds is None:
-                            first_content_seconds = now - started
-                    if event.get("done") is True:
-                        final_payload = event
-                        break
+        ) as client, client.stream(
+            "POST",
+            "/api/generate",
+            json=payload,
+        ) as response:
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                error_type = type(exc).__name__
+                error_detail = (await response.aread()).decode(
+                    "utf-8",
+                    errors="replace",
+                )[:2_000]
+                raise
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                now = time.monotonic()
+                stream_chunk_count += 1
+                if first_chunk_seconds is None:
+                    first_chunk_seconds = now - started
+                event = json.loads(line)
+                text = event.get("response")
+                if isinstance(text, str) and text:
+                    content_parts.append(text)
+                    if first_content_seconds is None:
+                        first_content_seconds = now - started
+                if event.get("done") is True:
+                    final_payload = event
+                    break
     except httpx.TimeoutException:
         error_type = "timeout"
     except httpx.HTTPError as exc:

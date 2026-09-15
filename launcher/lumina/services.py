@@ -8,13 +8,25 @@ import sys
 import time
 import webbrowser
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import load_config
-from .detect import detect_npm, detect_node, detect_ollama, detect_python
-from .errors import AlreadyRunningError, DependencyMissingError, LauncherError, PortInUseError, StartupTimeoutError
+from .detect import detect_node, detect_npm, detect_ollama, detect_python
+from .errors import (
+    AlreadyRunningError,
+    DependencyMissingError,
+    LauncherError,
+    PortInUseError,
+    StartupTimeoutError,
+)
 from .paths import find_repo_root, lock_path, logs_dir
-from .process_manager import cleanup_stale_pids, owns_process, pid_exists, record_service, stop_owned_service
+from .process_manager import (
+    cleanup_stale_pids,
+    owns_process,
+    pid_exists,
+    record_service,
+    stop_owned_service,
+)
 from .readiness import check_backend, check_frontend, check_ollama, port_in_use, wait_until
 from .state import clear_state, load_state, save_state
 

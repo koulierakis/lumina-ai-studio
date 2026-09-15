@@ -1,8 +1,11 @@
 """Cross-platform PDF font bootstrap for Document Studio exports."""
 from __future__ import annotations
+
 from pathlib import Path
+
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
+
 PDF_FONT_NAME = "LuminaUnicode"
 PDF_FONT_BOLD_NAME = "LuminaUnicodeBold"
 REGULAR_FONT_CANDIDATES = (

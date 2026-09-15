@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from code_builder.kilo_adapter import (
     KiloAdapter,
     KiloAdapterConfiguration,

@@ -1,7 +1,6 @@
 import types
 
 import pytest
-
 from document_studio.import_hardening import (
     DOCX_MIME,
     html_to_plain_text,

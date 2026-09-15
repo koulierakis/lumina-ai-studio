@@ -1,5 +1,4 @@
 import pytest
-
 from code_builder_v2.models import ChangePlan, PlannedChange
 from code_builder_v2.transaction import (
     GeneratedChange,

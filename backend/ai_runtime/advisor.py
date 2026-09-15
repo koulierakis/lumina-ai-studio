@@ -9,11 +9,9 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
-
 from code_builder.ollama_service import OllamaService, OllamaServiceError
+from pydantic import BaseModel, ConfigDict, Field
 from runtime_info import load_runtime_config
-
 
 ADVISOR_ROLES = {
     "auto": "Executive Advisor",

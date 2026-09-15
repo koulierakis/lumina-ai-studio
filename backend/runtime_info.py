@@ -17,9 +17,9 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from local_tools import resolve_executable, run_version
+from local_tools import run_version
 
 logger = logging.getLogger("lumina.runtime_info")
 
@@ -93,7 +93,7 @@ def _http_json(url: str, timeout: float = 3.0) -> tuple[bool, Any]:
         return False, {}
 
 
-def detect_node_version() -> Optional[str]:
+def detect_node_version() -> str | None:
     path = shutil.which("node") or shutil.which("node.exe")
     if not path:
         return None
@@ -131,7 +131,7 @@ def _powershell_json(script: str, timeout: float = 8.0) -> Any:
         return None
 
 
-def detect_npm_version() -> Optional[str]:
+def detect_npm_version() -> str | None:
     result = _run_version("npm", "--version")
     return result.get("version") if result.get("available") else None
 

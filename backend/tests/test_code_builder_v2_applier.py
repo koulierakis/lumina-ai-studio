@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from code_builder_v2.applier import ApplyError, AtomicChangeApplier, ProposedFileChange
 from code_builder_v2.backup import BackupService
 from code_builder_v2.models import ChangePlan, PlannedChange

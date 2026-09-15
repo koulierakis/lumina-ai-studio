@@ -1,11 +1,14 @@
 """Hardened Document Studio import endpoint."""
 from __future__ import annotations
+
 import importlib
 from typing import Annotated
+
 from auth import require_owner
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from models import MediaAsset
 from storage import save_bytes
+
 from .import_hardening import prepare_import_content, resolve_document_mime
 from .models import CorporateDocument
 from .source_facts import extract_source_corporate_facts

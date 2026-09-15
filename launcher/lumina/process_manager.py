@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .errors import ShutdownError
 from .state import load_state, save_state
@@ -23,7 +23,7 @@ SERVICE_MARKERS = {
 }
 
 
-def pid_exists(pid: Optional[int]) -> bool:
+def pid_exists(pid: int | None) -> bool:
     if not pid or pid <= 0:
         return False
     if sys.platform == "win32":
@@ -81,7 +81,7 @@ def process_command_line(pid: int) -> str:
     return ""
 
 
-def owns_process(service: str, pid: Optional[int], *, repo_root: Path | None = None) -> bool:
+def owns_process(service: str, pid: int | None, *, repo_root: Path | None = None) -> bool:
     """Return True only when the PID looks like a LUMINA-owned service process."""
     if not pid_exists(pid):
         return False

@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from code_builder.backup_service import BackupService
 from code_builder.build_service import (
     BuildCommandKind,

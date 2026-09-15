@@ -5,11 +5,17 @@ import asyncio
 import base64
 import io
 import os
-from typing import List
 
 import requests
 
-from .base import ErrorKind, GeneratedImage, GenerationInput, ImageProvider, ProviderCapabilities, ProviderError
+from .base import (
+    ErrorKind,
+    GeneratedImage,
+    GenerationInput,
+    ImageProvider,
+    ProviderCapabilities,
+    ProviderError,
+)
 
 
 class OpenAIImageProvider(ImageProvider):
@@ -34,7 +40,7 @@ class OpenAIImageProvider(ImageProvider):
     def _size(ratio: str) -> str:
         return {"16:9": "1536x1024", "9:16": "1024x1536"}.get(ratio, "1024x1024")
 
-    def _sync_generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    def _sync_generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         key = os.getenv("OPENAI_API_KEY")
         if not key:
             raise ProviderError(self.name, "OPENAI_API_KEY is missing", kind=ErrorKind.AUTH)
@@ -72,7 +78,7 @@ class OpenAIImageProvider(ImageProvider):
             raise ProviderError(self.name, response.text[:500], kind=kind, retryable=retryable,
                                 status_code=response.status_code)
 
-        output: List[GeneratedImage] = []
+        output: list[GeneratedImage] = []
         for item in response.json().get("data", []):
             if item.get("b64_json"):
                 output.append(GeneratedImage(base64.b64decode(item["b64_json"]), "image/png"))
@@ -84,7 +90,7 @@ class OpenAIImageProvider(ImageProvider):
             raise ProviderError(self.name, "OpenAI returned no image", kind=ErrorKind.UNAVAILABLE, retryable=True)
         return output
 
-    async def generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    async def generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         return await asyncio.to_thread(self._sync_generate, spec)
 
     def _sync_edit(

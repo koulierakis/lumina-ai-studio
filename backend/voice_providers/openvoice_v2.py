@@ -95,7 +95,7 @@ class OpenVoiceV2ToneConverter:
         ).strip() or "/generate_greek_voice"
 
     @classmethod
-    def from_env(cls) -> "OpenVoiceV2ToneConverter":
+    def from_env(cls) -> OpenVoiceV2ToneConverter:
         raw_timeout = os.environ.get(
             "CHATTERBOX_TIMEOUT_SECONDS",
             os.environ.get("OPENVOICE_V2_TIMEOUT_SECONDS", "180"),

@@ -16,7 +16,6 @@ from .base import (
     ProviderInvalidResponseError,
 )
 
-
 REPLICATE_FLUX_MODEL = "black-forest-labs/flux-schnell"
 
 

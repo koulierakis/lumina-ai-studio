@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 import runtime_info
 import server
 

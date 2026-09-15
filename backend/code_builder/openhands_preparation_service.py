@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-from .engine_registry import CodingEngineRegistry, OPENHANDS_ENGINE
+from .engine_registry import OPENHANDS_ENGINE, CodingEngineRegistry
 from .openhands_patch_bridge import build_patch_request_from_openhands
 
 

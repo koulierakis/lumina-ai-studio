@@ -25,10 +25,10 @@ Modules include:
 
 __version__ = "1.4.0"
 
-from .persistent_task_store import install_persistent_task_store
-from .patch_generation_service import install_ai_patch_generation
-from .task_engine_integration import install_task_engine_integration
 from .engine_http_integration import install_engine_http_routes
+from .patch_generation_service import install_ai_patch_generation
+from .persistent_task_store import install_persistent_task_store
+from .task_engine_integration import install_task_engine_integration
 
 install_persistent_task_store()
 install_ai_patch_generation()

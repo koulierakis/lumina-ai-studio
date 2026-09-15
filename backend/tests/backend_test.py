@@ -21,18 +21,18 @@ Focus:
 - Wrong-secret token: editor endpoints must 401 (owner scoping).
 """
 from __future__ import annotations
-import base64
+
 import io
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import jwt
 import pytest
 import requests
-from PIL import Image
 from dotenv import load_dotenv
+from PIL import Image
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -58,21 +58,16 @@ API = f"{BASE_URL}/api"
 EMAIL = os.environ.get("OWNER_EMAIL", "owner@lumina.local")
 PASSWORD = os.environ.get("LUMINA_TEST_OWNER_PASSWORD") or os.environ.get("OWNER_PASSWORD", "")
 
-# A minimal but *decodable* 8x8 PNG. 8x8 solid #7f7f7f PNG.
-PNG_8x8_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEV/f39/f3+Nl2p"
-    "PAAAAEUlEQVR4nGNgYGD4z8DwHwADgAH/mBAY7QAAAABJRU5ErkJggg=="
-).replace(" ", "")
-PNG_BYTES = base64.b64decode(PNG_8x8_B64)
+def _png_bytes(color: tuple[int, int, int]) -> bytes:
+    """Build strict, deterministic PNG fixtures accepted by current Pillow."""
+    output = io.BytesIO()
+    Image.new("RGB", (8, 8), color).save(output, format="PNG")
+    return output.getvalue()
 
-# A different valid PNG payload used for the "edited" version so we can check
-# that the parent bytes are still returned byte-for-byte (i.e., not overwritten
-# by the new upload).
-PNG_EDITED_B64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEX///8AAABVwtN+"
-    "AAAAEklEQVR4nGNgYGD4z8AAxAwMAAoAAf/6wq+AAAAAAElFTkSuQmCC"
-).replace(" ", "")
-PNG_EDITED_BYTES = base64.b64decode(PNG_EDITED_B64)
+
+PNG_BYTES = _png_bytes((127, 127, 127))
+# A visibly different payload proves editor versions never overwrite the parent.
+PNG_EDITED_BYTES = _png_bytes((255, 255, 255))
 
 
 # --- Fixtures -----------------------------------------------------------------
@@ -527,8 +522,8 @@ class TestEditorVersionsAndSessions:
         """A JWT signed with a bogus secret must not authenticate."""
         payload = {
             "sub": EMAIL,
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(hours=1),
         }
         bogus = jwt.encode(payload, "not-the-real-secret-xyz", algorithm="HS256")
         h = {"Authorization": f"Bearer {bogus}"}
@@ -1090,8 +1085,8 @@ class TestAiEditFoundation:
     def test_all_ai_editor_endpoints_reject_wrong_secret_token(self, api_client):
         payload = {
             "sub": EMAIL,
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(hours=1),
         }
         bogus = jwt.encode(payload, "not-the-real-secret-xyz", algorithm="HS256")
         h = {"Authorization": f"Bearer {bogus}"}

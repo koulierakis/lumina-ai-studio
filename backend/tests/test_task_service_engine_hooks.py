@@ -2,7 +2,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from code_builder import task_service_engine_hooks as hooks
 
 

@@ -2,7 +2,6 @@ import asyncio
 import base64
 
 import pytest
-
 from voice_providers import openvoice_v2
 from voice_providers.openvoice_v2 import OpenVoiceV2ToneConverter, ToneConversionError
 

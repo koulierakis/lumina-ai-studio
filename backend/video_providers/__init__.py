@@ -2,9 +2,9 @@
 from __future__ import annotations
 
 from .base import GeneratedVideo, VideoGenerationInput, VideoProvider, VideoProviderError
-from .mock_provider import MockVideoProvider
-from .luma_provider import LumaVideoProvider
 from .huggingface_provider import HuggingFaceVideoProvider
+from .luma_provider import LumaVideoProvider
+from .mock_provider import MockVideoProvider
 from .pollinations_provider import PollinationsVideoProvider
 
 _REGISTRY: dict[str, type[VideoProvider]] = {

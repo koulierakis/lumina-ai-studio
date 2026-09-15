@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import time
 from pathlib import Path
 
 import pytest
-
 from persistence import SQLitePersistenceProvider, initialize_persistence_provider
 
 

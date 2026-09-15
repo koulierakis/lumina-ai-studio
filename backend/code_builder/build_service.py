@@ -11,15 +11,12 @@ import time
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final, Literal, TypeAlias
+from typing import Any, Final, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from . import models as domain_models
-from . import patch_service
-from . import repository_service
 from . import security
-
 
 IS_WINDOWS: Final[bool] = os.name == "nt"
 
@@ -2385,7 +2382,7 @@ def execute_resolved_command(
         error_type = type(exc).__name__
         error_message = str(exc)
 
-    except FileNotFoundError as exc:
+    except FileNotFoundError:
         status = BuildStatus.ERROR
         error_type = BuildExecutableNotFoundError.__name__
         error_message = (

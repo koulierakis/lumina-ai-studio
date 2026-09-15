@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 from code_builder.backup_service import BackupService
 from code_builder.build_service import (
@@ -17,14 +17,6 @@ from code_builder.planning_service import (
     GeneratedFileChange,
     GeneratedPlanStep,
 )
-from code_builder.task_service import (
-    BackupPolicy,
-    RollbackPolicy,
-    TaskRequest,
-    TaskService,
-    TaskServiceConfiguration,
-    TaskStatus,
-)
 from code_builder.router import (
     ApprovalDecision,
     CodeBuilderTaskPhase,
@@ -34,6 +26,14 @@ from code_builder.router import (
     TaskStore,
     _phase_allows_approval,
     _task_request_from_api,
+)
+from code_builder.task_service import (
+    BackupPolicy,
+    RollbackPolicy,
+    TaskRequest,
+    TaskService,
+    TaskServiceConfiguration,
+    TaskStatus,
 )
 
 
