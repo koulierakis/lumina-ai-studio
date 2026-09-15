@@ -43,6 +43,15 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$processPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+if (-not $processPath) {
+    $processPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
+}
+if ($processPath) {
+    [Environment]::SetEnvironmentVariable('PATH', $null, 'Process')
+    [Environment]::SetEnvironmentVariable('Path', $processPath, 'Process')
+}
+
 # ─── Derive repository root ────────────────────────────────────
 if (-not $RepoRoot) {
     $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -105,6 +114,27 @@ function Test-Port {
 }
 
 # ─── HTTP health check ─────────────────────────────────────────
+function Get-ListeningPids {
+    param([int]$PortNumber)
+
+    $pids = @()
+    try {
+        $pids += Get-NetTCPConnection -LocalPort $PortNumber -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue
+    } catch {}
+
+    if (-not $pids) {
+        try {
+            $pattern = "^\s*TCP\s+\S+:$PortNumber\s+\S+\s+LISTENING\s+(\d+)\s*$"
+            $pids += netstat -ano | ForEach-Object {
+                if ($_ -match $pattern) { [int]$Matches[1] }
+            }
+        } catch {}
+    }
+
+    return @($pids | Where-Object { $_ } | Select-Object -Unique)
+}
+
 function Test-Http {
     param([string]$Url, [int]$TimeoutMs = 3000)
     try {
@@ -138,9 +168,7 @@ function Test-FrontendHealth {
 function Get-PortOwner {
     param([int]$PortNumber)
     try {
-        $conns = Get-NetTCPConnection -LocalPort $PortNumber -State Listen -ErrorAction SilentlyContinue
-        if (-not $conns) { return $null }
-        $pidVal = $conns[0].OwningProcess
+        $pidVal = @(Get-ListeningPids $PortNumber | Select-Object -First 1)[0]
         if (-not $pidVal) { return $null }
         $proc = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
         if (-not $proc) { return $null }
@@ -332,15 +360,14 @@ function Wait-DockerReady {
 function Start-DockerServices {
     param([string]$DockerPath)
     if (-not (Test-Path $ComposeFile)) {
-        Write-LogWarn "Docker compose file not found: $ComposeFile — skipping Docker services."
+        Write-LogWarn "Docker compose file not found: $ComposeFile - skipping Docker services."
         return $true
     }
 
     Write-Log 'Starting Docker services (Redis, Qdrant)...'
     $composeArgs = @('compose', '-f', "`"$ComposeFile`"", 'up', '-d', 'redis', 'qdrant')
     try {
-        $proc = Start-Process -FilePath $DockerPath -ArgumentList $composeArgs `
-            -NoNewWindow -PassThru -Wait -RedirectStandardOutput "$LogDir\docker_compose_up.log" -RedirectStandardError "$LogDir\docker_compose_up_err.log"
+        $proc = Start-Process -FilePath $DockerPath -ArgumentList $composeArgs -NoNewWindow -PassThru -Wait -RedirectStandardOutput "$LogDir\docker_compose_up.log" -RedirectStandardError "$LogDir\docker_compose_up_err.log"
         if ($proc.ExitCode -ne 0) {
             Write-LogWarn "docker compose up returned exit code $($proc.ExitCode). Services may already be running."
         }
@@ -363,19 +390,46 @@ function Start-DockerServices {
 
 # ─── Find Python ───────────────────────────────────────────────
 function Get-PythonCommand {
-    # Prefer Python 3.12 (the version used by the existing launcher)
-    $candidates = @('py -3.12', 'py -3.11', 'py -3', 'python', 'python3')
+    # Prefer Python 3.12, then 3.11, while remaining portable across Windows installs.
+    $candidates = @()
+
+    $pythonInstallRoots = @()
+    if ($env:LOCALAPPDATA) {
+        $pythonInstallRoots += Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    }
+    if ($env:ProgramFiles) {
+        $pythonInstallRoots += $env:ProgramFiles
+    }
+    if (${env:ProgramFiles(x86)}) {
+        $pythonInstallRoots += ${env:ProgramFiles(x86)}
+    }
+
+    foreach ($root in $pythonInstallRoots) {
+        foreach ($dirName in @('Python312', 'Python311')) {
+            $pythonExe = Join-Path (Join-Path $root $dirName) 'python.exe'
+            if (Test-Path $pythonExe) {
+                $candidates += @{ FilePath = $pythonExe; VersionArg = $null; Display = $pythonExe }
+            }
+        }
+    }
+
+    $candidates += @(
+        @{ FilePath = 'py'; VersionArg = '-3.12'; Display = 'py -3.12' },
+        @{ FilePath = 'py'; VersionArg = '-3.11'; Display = 'py -3.11' },
+        @{ FilePath = 'py'; VersionArg = '-3'; Display = 'py -3' },
+        @{ FilePath = 'python'; VersionArg = $null; Display = 'python' },
+        @{ FilePath = 'python3'; VersionArg = $null; Display = 'python3' }
+    )
+
     foreach ($c in $candidates) {
         try {
-            $parts = $c -split ' ', 2
-            $exe = $parts[0]
-            $verArg = if ($parts.Count -gt 1) { $parts[1] } else { '' }
+            $exe = $c['FilePath']
+            $verArg = $c['VersionArg']
             $argList = @()
             if ($verArg) { $argList += $verArg }
             $argList += @('-c', 'import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)')
-            $proc = Start-Process -FilePath $exe -ArgumentList $argList -NoNewWindow -PassThru -RedirectStandardOutput "$LogDir\py_probe.tmp" -RedirectStandardError "$LogDir\py_probe_err.tmp"
-            $proc.WaitForExit(8000) | Out-Null
-            if ($proc.ExitCode -eq 0) {
+            & $exe @argList *> $null
+            if ($LASTEXITCODE -eq 0) {
                 return $c
             }
         } catch {
@@ -390,9 +444,8 @@ function Get-NpmPath {
     $candidates = @('npm.cmd', 'npm')
     foreach ($c in $candidates) {
         try {
-            $proc = Start-Process -FilePath $c -ArgumentList '--version' -NoNewWindow -PassThru -RedirectStandardOutput "$LogDir\npm_probe.tmp" -RedirectStandardError "$LogDir\npm_probe_err.tmp"
-            $proc.WaitForExit(8000) | Out-Null
-            if ($proc.ExitCode -eq 0) {
+            & $c --version *> $null
+            if ($LASTEXITCODE -eq 0) {
                 return $c
             }
         } catch {
@@ -409,13 +462,13 @@ function Start-Backend {
 
     # Check if backend is already healthy
     if (Test-BackendHealth) {
-        Write-Log "Backend is already healthy at $healthUrl — reusing existing service."
+        Write-Log "Backend is already healthy at $healthUrl - reusing existing service."
         $owner = Get-PortOwner $BackendPort
         Write-ProcessDetails $owner 'Backend'
         return $true
     }
 
-    # Port is occupied but not healthy — investigate
+    # Port is occupied but not healthy - investigate
     if (Test-Port $BackendHost $BackendPort) {
         $owner = Get-PortOwner $BackendPort
         Write-LogWarn "Port $BackendPort is occupied but backend health check failed."
@@ -439,25 +492,22 @@ function Start-Backend {
         }
     }
 
-    # Port is free — start backend
+    # Port is free - start backend
     $pythonCmd = Get-PythonCommand
     if (-not $pythonCmd) {
         Write-LogError 'Python 3.11+ not found on PATH.'
         return $false
     }
 
-    $parts = $pythonCmd -split ' ', 2
-    $pyExe = $parts[0]
-    $pyVerArg = if ($parts.Count -gt 1) { @($parts[1]) } else { @() }
+    $pyExe = $pythonCmd['FilePath']
+    $pyVerArg = if ($pythonCmd['VersionArg']) { @($pythonCmd['VersionArg']) } else { @() }
 
     $beArgs = $pyVerArg + @('-m', 'uvicorn', 'server:app', '--host', $BackendHost, '--port', $BackendPort)
     Write-Log "Starting backend: $pyExe $($beArgs -join ' ')"
     Write-Log "Backend working directory: $BackendDir"
 
     try {
-        $proc = Start-Process -FilePath $pyExe -ArgumentList $beArgs `
-            -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput $BackendLog -RedirectStandardError "$LogDir\backend_err.log"
+        $proc = Start-Process -FilePath $pyExe -ArgumentList $beArgs -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $BackendLog -RedirectStandardError "$LogDir\backend_err.log"
         Write-Log "Backend process started (PID: $($proc.Id))."
     } catch {
         Write-LogError "Failed to start backend: $_"
@@ -475,13 +525,13 @@ function Start-Frontend {
 
     # Check if frontend is already healthy
     if (Test-FrontendHealth) {
-        Write-Log "Frontend is already healthy at $healthUrl — reusing existing service."
+        Write-Log "Frontend is already healthy at $healthUrl - reusing existing service."
         $owner = Get-PortOwner $FrontendPort
         Write-ProcessDetails $owner 'Frontend'
         return $true
     }
 
-    # Port is occupied but not healthy — investigate
+    # Port is occupied but not healthy - investigate
     $checkHost = if ($FrontendHost -in @('localhost', '0.0.0.0')) { '127.0.0.1' } else { $FrontendHost }
     if (Test-Port $checkHost $FrontendPort) {
         $owner = Get-PortOwner $FrontendPort
@@ -506,7 +556,7 @@ function Start-Frontend {
         }
     }
 
-    # Port is free — start frontend
+    # Port is free - start frontend
     $npmPath = Get-NpmPath
     if (-not $npmPath) {
         Write-LogError 'npm not found on PATH.'
@@ -517,9 +567,7 @@ function Start-Frontend {
     Write-Log "Frontend working directory: $FrontendDir"
 
     try {
-        $proc = Start-Process -FilePath $npmPath -ArgumentList 'start' `
-            -WorkingDirectory $FrontendDir -WindowStyle Hidden -PassThru `
-            -RedirectStandardOutput $FrontendLog -RedirectStandardError "$LogDir\frontend_err.log"
+        $proc = Start-Process -FilePath $npmPath -ArgumentList 'start' -WorkingDirectory $FrontendDir -WindowStyle Hidden -PassThru -RedirectStandardOutput $FrontendLog -RedirectStandardError "$LogDir\frontend_err.log"
         Write-Log "Frontend process started (PID: $($proc.Id))."
     } catch {
         Write-LogError "Failed to start frontend: $_"
@@ -547,8 +595,7 @@ function Stop-Lumina {
     Write-Log 'Stopping LUMINA-owned processes...'
 
     # Stop frontend (node processes on port 3000)
-    $frontendPids = Get-NetTCPConnection -LocalPort $FrontendPort -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue
+    $frontendPids = Get-ListeningPids $FrontendPort
     if ($frontendPids) {
         foreach ($pidVal in $frontendPids) {
             try {
@@ -567,8 +614,7 @@ function Stop-Lumina {
     }
 
     # Stop backend (python processes on port 8000)
-    $backendPids = Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue
+    $backendPids = Get-ListeningPids $BackendPort
     if ($backendPids) {
         foreach ($pidVal in $backendPids) {
             try {
@@ -584,6 +630,20 @@ function Stop-Lumina {
                 # Process may have already exited
             }
         }
+    }
+
+    Start-Sleep -Seconds 1
+    $remainingFrontend = Get-ListeningPids $FrontendPort
+    $remainingBackend = Get-ListeningPids $BackendPort
+    if ($remainingFrontend -or $remainingBackend) {
+        if ($remainingFrontend) {
+            Write-LogWarn "Frontend port $FrontendPort is still listening after stop attempt (PID(s): $($remainingFrontend -join ', '))."
+        }
+        if ($remainingBackend) {
+            Write-LogWarn "Backend port $BackendPort is still listening after stop attempt (PID(s): $($remainingBackend -join ', '))."
+        }
+        Write-LogWarn 'LUMINA stop completed with remaining listeners. Docker Desktop and containers remain running.'
+        return
     }
 
     Write-LogSuccess 'LUMINA processes stopped. Docker Desktop and containers remain running.'
@@ -616,7 +676,7 @@ function Show-Status {
 # ─── Main: START ───────────────────────────────────────────────
 function Invoke-Start {
     Write-Log '========================================'
-    Write-Log 'LUMINA AI — Starting...'
+    Write-Log 'LUMINA AI - Starting...'
     Write-Log "Repository root: $RepoRoot"
     Write-Log "Backend directory: $BackendDir"
     Write-Log "Frontend directory: $FrontendDir"
@@ -698,7 +758,7 @@ function Invoke-Start {
 # ─── Main: STOP ────────────────────────────────────────────────
 function Invoke-Stop {
     Write-Log '========================================'
-    Write-Log 'LUMINA AI — Stopping...'
+    Write-Log 'LUMINA AI - Stopping...'
     Write-Log '========================================'
     Stop-Lumina
     return 0

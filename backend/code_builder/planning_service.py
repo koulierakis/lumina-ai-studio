@@ -26,13 +26,11 @@ import hashlib
 import json
 import logging
 import math
-import os
 import re
 import time
-from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Final
@@ -52,15 +50,12 @@ from .ollama_service import (
     OllamaUnavailableError,
 )
 from .security import (
-    BlockedFileError,
-    UnsafePathError,
     evaluate_safe_path,
 )
 
-
 LOGGER = logging.getLogger(__name__)
 
-UTC = timezone.utc
+UTC = UTC
 
 DEFAULT_PLANNING_MODEL: Final[str] = "qwen2.5-coder:7b"
 DEFAULT_MAX_CONTEXT_FILES: Final[int] = 80
@@ -72,8 +67,8 @@ DEFAULT_MAX_PLAN_REPAIR_ATTEMPTS: Final[int] = 1
 DEFAULT_TEMPERATURE: Final[float] = 0.1
 DEFAULT_TOP_P: Final[float] = 0.9
 DEFAULT_CONTEXT_WINDOW: Final[int] = 4_096
-DEFAULT_MAX_OUTPUT_TOKENS: Final[int] = 2_048
-DEFAULT_INPUT_TOKEN_SAFETY_MARGIN: Final[int] = 2_048
+DEFAULT_MAX_OUTPUT_TOKENS: Final[int] = 1_024
+DEFAULT_INPUT_TOKEN_SAFETY_MARGIN: Final[int] = 256
 DEFAULT_FIXED_PROMPT_OVERHEAD_TOKENS: Final[int] = 1_500
 DEFAULT_MAX_CONTEXT_INPUT_TOKENS: Final[int] = 6_000
 DEFAULT_MAX_DEPENDENCY_EXPANSION_DEPTH: Final[int] = 1
@@ -795,7 +790,7 @@ class PlanningContextFile:
         }
 
         for key, value in optional_values.items():
-            if value not in (None, "", [], ()): 
+            if value not in (None, "", [], ()):
                 result[key] = value
 
         return result
@@ -2255,15 +2250,9 @@ class PlanningService:
             - self.configuration.maximum_output_tokens
             - self.configuration.input_token_safety_margin,
         )
-        if (
-            self.configuration.context_window == DEFAULT_CONTEXT_WINDOW
-            and self.configuration.input_token_safety_margin
-            == DEFAULT_INPUT_TOKEN_SAFETY_MARGIN
-        ):
-            adaptive_input_budget_tokens = max(
-                adaptive_input_budget_tokens,
-                self.configuration.maximum_context_input_tokens,
-            )
+        # Never expand repository context beyond the model's real input
+        # capacity. The previous default special-case could request more
+        # context tokens than the configured context window can hold.
         context_budget_tokens = max(
             512,
             min(

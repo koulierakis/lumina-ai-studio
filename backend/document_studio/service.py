@@ -7,7 +7,10 @@ import zipfile
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
+from models import now_iso
+from pydantic import BaseModel, ConfigDict, Field
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
@@ -16,22 +19,32 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
     BaseDocTemplate,
     Frame,
-    Image as RLImage,
     PageBreak,
     PageTemplate,
     Paragraph,
     Spacer,
 )
+from reportlab.platypus import (
+    Image as RLImage,
+)
 
-from models import now_iso
-
+from .document_ai_provider import DocumentAIProvider
+from .generation_orchestrator import (
+    DocumentAIProviderRegistry,
+    OrchestratedGenerationResult,
+)
 from .models import (
     ClauseTemplate,
     CompanyProfile,
     CorporateDocument,
     CorporateTemplate,
     DocumentAnalysisResult,
+    NaturalDocumentCreationRequest,
+    PackAdvisorRequest,
+    PackAdvisorResponse,
+    PackGenerationRequest,
 )
+from .natural_creation import NaturalCreationResult
 
 TEMPLATES: list[CorporateTemplate] = [
     CorporateTemplate(
@@ -1568,8 +1581,7 @@ def apply_track_change_action(
     targets = [
         change
         for change in changes
-        if change.get("status") == "pending"
-        and (apply_all or change.get("id") in selected)
+        if change.get("status") == "pending" and (apply_all or change.get("id") in selected)
     ]
     if not targets:
         raise ValueError("No pending track changes matched the request")
@@ -1906,8 +1918,19 @@ def _parse_docx_to_html(data: bytes) -> str | None:
                         media_path = rels_map.get(rid)
                         if media_path and media_path in media_cache:
                             img_data = media_cache[media_path]
-                            ext = media_path.rsplit(".", 1)[-1].lower() if "." in media_path else "png"
-                            mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "bmp": "image/bmp", "webp": "image/webp"}
+                            ext = (
+                                media_path.rsplit(".", 1)[-1].lower()
+                                if "." in media_path
+                                else "png"
+                            )
+                            mime_map = {
+                                "png": "image/png",
+                                "jpg": "image/jpeg",
+                                "jpeg": "image/jpeg",
+                                "gif": "image/gif",
+                                "bmp": "image/bmp",
+                                "webp": "image/webp",
+                            }
                             img_mime = mime_map.get(ext, "image/png")
                             b64 = base64.b64encode(img_data).decode("ascii")
                             html_parts.append(
@@ -2139,7 +2162,7 @@ def _extract_figure_align(style: str) -> str:
         return "inline"
     if "width:100%" in style:
         return "full-width"
-    align_match = re.search(r'text-align:(left|right|center)', style, re.I)
+    align_match = re.search(r"text-align:(left|right|center)", style, re.I)
     if align_match:
         return align_match.group(1)
     return "center"
@@ -2147,7 +2170,7 @@ def _extract_figure_align(style: str) -> str:
 
 def _extract_img_width(style: str) -> float:
     """Extract width percentage from img style."""
-    width_match = re.search(r'width:(\d+(?:\.\d+)?)%', style, re.I)
+    width_match = re.search(r"width:(\d+(?:\.\d+)?)%", style, re.I)
     if width_match:
         return float(width_match.group(1))
     return 45.0
@@ -2155,7 +2178,7 @@ def _extract_img_width(style: str) -> float:
 
 def _is_safe_image_src(src: str) -> bool:
     """Check if image source is safe for export."""
-    return bool(re.match(r'^(https?://|data:image/)', src or "", re.I))
+    return bool(re.match(r"^(https?://|data:image/)", src or "", re.I))
 
 
 def _load_image_data(src: str) -> tuple[bytes, str] | None:
@@ -2165,7 +2188,7 @@ def _load_image_data(src: str) -> tuple[bytes, str] | None:
     """
     if not src:
         return None
-    data_match = re.match(r'data:image/(\w+);base64,(.+)', src, re.I)
+    data_match = re.match(r"data:image/(\w+);base64,(.+)", src, re.I)
     if data_match:
         import base64
 
@@ -2177,16 +2200,16 @@ def _load_image_data(src: str) -> tuple[bytes, str] | None:
             return data, fmt
         except Exception:
             return None
-    if src.startswith(('http://', 'https://')):
+    if src.startswith(("http://", "https://")):
         try:
             import urllib.request
 
             with urllib.request.urlopen(src, timeout=10) as response:
                 data = response.read()
-                content_type = response.headers.get('Content-Type', 'image/png')
-                fmt = content_type.split('/')[-1].lower() if '/' in content_type else 'png'
-                if fmt == 'svg+xml':
-                    fmt = 'svg'
+                content_type = response.headers.get("Content-Type", "image/png")
+                fmt = content_type.split("/")[-1].lower() if "/" in content_type else "png"
+                if fmt == "svg+xml":
+                    fmt = "svg"
                 return data, fmt
         except Exception:
             return None
@@ -2255,14 +2278,16 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
             if in_figure and figure_img.get("src"):
                 align = _extract_figure_align(figure_style)
                 width = _extract_img_width(figure_img.get("style", ""))
-                blocks.append({
-                    "type": "image",
-                    "src": figure_img["src"],
-                    "alt": figure_img.get("alt", ""),
-                    "caption": normalize_text(" ".join(figure_caption)),
-                    "align": align,
-                    "width": width,
-                })
+                blocks.append(
+                    {
+                        "type": "image",
+                        "src": figure_img["src"],
+                        "alt": figure_img.get("alt", ""),
+                        "caption": normalize_text(" ".join(figure_caption)),
+                        "align": align,
+                        "width": width,
+                    }
+                )
             in_figure = False
             figure_img = {}
             figure_caption = []
@@ -2275,14 +2300,16 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
                 if current:
                     blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
                     current = []
-                blocks.append({
-                    "type": "image",
-                    "src": img_attrs["src"],
-                    "alt": img_attrs.get("alt", ""),
-                    "caption": "",
-                    "align": "center",
-                    "width": _extract_img_width(img_attrs.get("style", "")),
-                })
+                blocks.append(
+                    {
+                        "type": "image",
+                        "src": img_attrs["src"],
+                        "alt": img_attrs.get("alt", ""),
+                        "caption": "",
+                        "align": "center",
+                        "width": _extract_img_width(img_attrs.get("style", "")),
+                    }
+                )
         elif lower.startswith("<figcaption"):
             in_figcaption = True
         elif lower.startswith("</figcaption"):
@@ -2328,7 +2355,11 @@ def _export_blocks(document: CorporateDocument) -> list[dict]:
                     current.append(text)
     if current:
         blocks.append({"type": "p", "text": normalize_text(" ".join(current))})
-    return [block for block in blocks if block.get("type") in ("page_break", "image") or block.get("text")]
+    return [
+        block
+        for block in blocks
+        if block.get("type") in ("page_break", "image") or block.get("text")
+    ]
 
 
 def _paginate_blocks(blocks: list[dict], layout: dict) -> list[list[dict]]:
@@ -2525,14 +2556,18 @@ def render_pdf_bytes(document: CorporateDocument, profile: CompanyProfile) -> by
 
     title_style = ParagraphStyle(
         name="DocTitle",
-        fontName=_PDF_FONT_BOLD_NAME if _PDF_FONT_BOLD_NAME in pdfmetrics.getRegisteredFontNames() else _PDF_FONT_NAME,
+        fontName=_PDF_FONT_BOLD_NAME
+        if _PDF_FONT_BOLD_NAME in pdfmetrics.getRegisteredFontNames()
+        else _PDF_FONT_NAME,
         fontSize=16,
         leading=22,
         spaceAfter=16,
     )
     heading_style = ParagraphStyle(
         name="Heading",
-        fontName=_PDF_FONT_BOLD_NAME if _PDF_FONT_BOLD_NAME in pdfmetrics.getRegisteredFontNames() else _PDF_FONT_NAME,
+        fontName=_PDF_FONT_BOLD_NAME
+        if _PDF_FONT_BOLD_NAME in pdfmetrics.getRegisteredFontNames()
+        else _PDF_FONT_NAME,
         fontSize=14,
         leading=18,
         spaceBefore=10,
@@ -2665,18 +2700,20 @@ def _prepare_docx_images(blocks: list[dict], layout: dict) -> list[dict]:
         ext = fmt
         if ext == "jpeg":
             ext = "jpg"
-        images.append({
-            "id": f"rIdImg{img_counter}",
-            "data": data,
-            "ext": ext,
-            "width_emu": target_width_emu,
-            "height_emu": target_height_emu,
-            "align": block.get("align", "center"),
-            "caption": block.get("caption", ""),
-            "alt": block.get("alt", ""),
-            "block_index": i,
-            "pic_id": img_counter,
-        })
+        images.append(
+            {
+                "id": f"rIdImg{img_counter}",
+                "data": data,
+                "ext": ext,
+                "width_emu": target_width_emu,
+                "height_emu": target_height_emu,
+                "align": block.get("align", "center"),
+                "caption": block.get("caption", ""),
+                "alt": block.get("alt", ""),
+                "block_index": i,
+                "pic_id": img_counter,
+            }
+        )
     return images
 
 
@@ -3146,3 +3183,330 @@ def render_merge_template(
     diagnostics["used_variables"] = sorted(set(diagnostics["used_variables"]))
     diagnostics["valid"] = not diagnostics["missing_variables"]
     return output, normalize_text(output), diagnostics
+
+
+# AI planning and preview boundary. These operations deliberately do not import or
+# invoke persistence, routes, or provider-specific transports.
+
+
+class DocumentStudioAIServiceError(RuntimeError):
+    """Sanitized service-level failure for AI-assisted document operations."""
+
+
+class InvalidAIServiceRequest(DocumentStudioAIServiceError):
+    """Raised when an AI preview request is incomplete or contradictory."""
+
+
+class UnsupportedAIDocumentType(DocumentStudioAIServiceError):
+    """Raised when a requested type is outside the canonical service registry."""
+
+
+class AIProviderUnavailable(DocumentStudioAIServiceError):
+    """Raised when a selected provider cannot complete the request."""
+
+
+class InvalidAIProvider(DocumentStudioAIServiceError):
+    """Raised when a provider name is outside the fixed allowlist."""
+
+
+class AIProviderTimedOut(DocumentStudioAIServiceError):
+    """Raised when provider execution exceeds its bounded timeout."""
+
+
+class MalformedAIGeneration(DocumentStudioAIServiceError):
+    """Raised when provider output does not satisfy the typed contract."""
+
+
+class AIFactIntegrityViolation(DocumentStudioAIServiceError):
+    """Raised when generated output violates fact or placeholder integrity."""
+
+
+class AIDocumentPreview(BaseModel):
+    """Validated AI output adapted to the existing canonical document model."""
+
+    model_config = ConfigDict(extra="forbid")
+    document: CorporateDocument
+    generation: OrchestratedGenerationResult
+    persisted: Literal[False] = False
+
+
+class PackGenerationItem(BaseModel):
+    """One explicit, ordered pack-preview outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+    document_type: str
+    status: Literal["generated", "failed", "skipped"]
+    preview: AIDocumentPreview | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class PackGenerationPreview(BaseModel):
+    """Non-persistent pack result with explicit partial-failure semantics."""
+
+    model_config = ConfigDict(extra="forbid")
+    objective: str
+    title: str
+    overall_status: Literal["complete", "partial_failure", "failed"]
+    items: list[PackGenerationItem] = Field(default_factory=list)
+    generated_count: int = 0
+    failed_count: int = 0
+    skipped_count: int = 0
+    persisted: Literal[False] = False
+
+
+def advise_document_pack(
+    request: PackAdvisorRequest, profile: CompanyProfile
+) -> PackAdvisorResponse:
+    """Return deterministic recommendations without generating or saving documents."""
+    from .pack_advisor import advise_documents
+
+    return advise_documents(request, profile)
+
+
+def _translate_ai_service_error(exc: Exception) -> DocumentStudioAIServiceError:
+    """Map implementation failures without exposing provider payloads or credentials."""
+    from .document_ai_provider import (
+        DocumentAIProviderError,
+        DocumentAIProviderTimeout,
+        MalformedDocumentAIResponse,
+    )
+    from .generation_orchestrator import (
+        GenerationFallbackError,
+        GenerationValidationError,
+        UnknownDocumentAIProvider,
+    )
+    from .natural_creation import InvalidNaturalCreationRequest, NaturalCreationProviderError
+
+    if isinstance(exc, DocumentStudioAIServiceError):
+        return exc
+    if isinstance(exc, InvalidNaturalCreationRequest):
+        return InvalidAIServiceRequest("The natural document request is invalid")
+    if isinstance(exc, UnknownDocumentAIProvider):
+        return InvalidAIProvider("The requested document AI provider is not supported")
+    if isinstance(exc, DocumentAIProviderTimeout):
+        return AIProviderTimedOut("The document AI provider timed out")
+    if isinstance(exc, GenerationValidationError):
+        return AIFactIntegrityViolation("Generated output failed fact-safety validation")
+    if isinstance(exc, MalformedDocumentAIResponse):
+        return MalformedAIGeneration("The document AI provider returned invalid output")
+    if isinstance(exc, NaturalCreationProviderError):
+        cause = exc.__cause__
+        if isinstance(cause, DocumentAIProviderTimeout):
+            return AIProviderTimedOut("The document AI provider timed out")
+        if isinstance(cause, MalformedDocumentAIResponse):
+            return MalformedAIGeneration("The document AI provider returned invalid output")
+        return AIProviderUnavailable("The document AI provider is unavailable")
+    if isinstance(exc, (GenerationFallbackError, DocumentAIProviderError)):
+        return AIProviderUnavailable("Document AI generation failed")
+    return DocumentStudioAIServiceError("Document AI generation failed")
+
+
+async def create_natural_document_preview(
+    request: NaturalDocumentCreationRequest,
+    profile: CompanyProfile,
+    provider: DocumentAIProvider,
+    *,
+    timeout_seconds: float = 90.0,
+) -> NaturalCreationResult:
+    """Create a fact-safe typed intermediate draft without persistence side effects."""
+    from .generation_orchestrator import validate_generation
+    from .natural_creation import create_natural_document
+
+    try:
+        result = await create_natural_document(
+            request, profile, provider, timeout_seconds=timeout_seconds
+        )
+        validate_generation(result)
+        return result
+    except Exception as exc:
+        raise _translate_ai_service_error(exc) from exc
+
+
+def _canonical_document_html(title: str, content: str) -> str:
+    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
+    body = "".join(f"<p>{html.escape(part)}</p>" for part in paragraphs)
+    return f"<article><h1>{html.escape(title)}</h1>{body}</article>"
+
+
+def _adapt_generation_to_document(
+    generation: OrchestratedGenerationResult,
+    profile: CompanyProfile,
+    *,
+    existing_document: CorporateDocument | None = None,
+) -> CorporateDocument:
+    """Adapt validated content into CorporateDocument without saving or mutating facts."""
+    output = generation.generation.document
+    content_html = _canonical_document_html(output.title, output.content)
+    generation_metadata = generation.metadata.model_dump(mode="json")
+    fact_context = {
+        "verified_facts": generation.generation.verified_facts,
+        "fact_provenance": generation.generation.fact_provenance,
+        "user_supplied_facts": generation.generation.user_supplied_facts,
+        "generated_claims": [
+            claim.model_dump(mode="json") for claim in generation.generation.generated_claims
+        ],
+    }
+    metadata = dict(existing_document.metadata) if existing_document else {}
+    metadata["ai_generation"] = generation_metadata
+    metadata["ai_fact_context"] = fact_context
+    metadata["review_status"] = generation.generation.review_status
+    values = {
+        "owner_email": existing_document.owner_email if existing_document else profile.owner_email,
+        "title": output.title,
+        "document_type": output.document_type,
+        "category": output.category,
+        "country": existing_document.country if existing_document else "GR",
+        "language": output.language,
+        "company_profile_id": profile.id,
+        "content_html": content_html,
+        "content_text": output.content,
+        "searchable_text": normalize_text(content_html),
+        "metadata": metadata,
+        "updated_at": now_iso(),
+    }
+    if existing_document:
+        return existing_document.model_copy(update=values)
+    return CorporateDocument(**values)
+
+
+async def generate_ai_document_preview(
+    request: NaturalDocumentCreationRequest,
+    profile: CompanyProfile,
+    *,
+    document_type: str | None = None,
+    provider_name: str | None = None,
+    fallback_provider_name: str | None = None,
+    registry: DocumentAIProviderRegistry | None = None,
+    existing_document: CorporateDocument | None = None,
+    timeout_seconds: float = 90.0,
+) -> AIDocumentPreview:
+    """Generate, validate, and adapt one draft without writing to persistence."""
+    from .generation_orchestrator import generate_document as orchestrate_generation
+
+    selected_type = (document_type or request.requested_type or "").strip()
+    if not selected_type:
+        raise InvalidAIServiceRequest("An explicit canonical document type is required")
+    if selected_type not in DOCUMENT_CLASS_DEFINITIONS:
+        raise UnsupportedAIDocumentType(
+            f"Unsupported Document Studio document type: {selected_type}"
+        )
+    if fallback_provider_name and not request.allow_fallback:
+        raise InvalidAIServiceRequest("Fallback was supplied but is disabled by the request")
+    selected_provider = provider_name or request.provider
+    generation_request = request.model_copy(update={"requested_type": selected_type})
+    try:
+        generation = await orchestrate_generation(
+            generation_request,
+            profile,
+            provider_name=selected_provider,
+            fallback_provider_name=fallback_provider_name if request.allow_fallback else None,
+            registry=registry,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        raise _translate_ai_service_error(exc) from exc
+    document = _adapt_generation_to_document(
+        generation, profile, existing_document=existing_document
+    )
+    return AIDocumentPreview(document=document, generation=generation)
+
+
+def _pack_error_details(exc: Exception) -> tuple[str, str]:
+    if isinstance(exc, AIProviderTimedOut):
+        return "provider_timeout", "The document AI provider timed out"
+    if isinstance(exc, AIProviderUnavailable):
+        return "provider_unavailable", "The document AI provider is unavailable"
+    if isinstance(exc, MalformedAIGeneration):
+        return "malformed_ai_result", "The document AI provider returned invalid output"
+    if isinstance(exc, AIFactIntegrityViolation):
+        return "fact_integrity_violation", "Generated output failed fact-safety validation"
+    if isinstance(exc, UnsupportedAIDocumentType):
+        return "unsupported_document_type", "The document type is not supported"
+    return "generation_failed", "Document generation failed"
+
+
+async def generate_document_pack_preview(
+    request: PackGenerationRequest,
+    profile: CompanyProfile,
+    *,
+    provider_name: str | None = None,
+    fallback_provider_name: str | None = None,
+    registry: DocumentAIProviderRegistry | None = None,
+    timeout_seconds: float = 90.0,
+) -> PackGenerationPreview:
+    """Generate explicit pack previews independently, with no persistence side effects."""
+    if not request.objective.strip():
+        raise InvalidAIServiceRequest("A pack objective is required")
+    if not request.selected_document_types:
+        raise InvalidAIServiceRequest("Explicit selected document types are required")
+    invalid = [
+        value
+        for value in request.selected_document_types
+        if value not in DOCUMENT_CLASS_DEFINITIONS
+    ]
+    if invalid:
+        raise UnsupportedAIDocumentType(f"Unsupported Document Studio document type: {invalid[0]}")
+
+    seen: set[str] = set()
+    items: list[PackGenerationItem] = []
+    for document_type in request.selected_document_types:
+        if document_type in seen:
+            items.append(
+                PackGenerationItem(
+                    document_type=document_type,
+                    status="skipped",
+                    error_code="duplicate_document_type",
+                    error_message="Duplicate document type was skipped",
+                )
+            )
+            continue
+        seen.add(document_type)
+        generation_request = NaturalDocumentCreationRequest(
+            request=request.objective,
+            company_profile_id=request.company_profile_id,
+            requested_type=document_type,
+            provider=provider_name,
+            allow_fallback=bool(fallback_provider_name),
+        )
+        try:
+            preview = await generate_ai_document_preview(
+                generation_request,
+                profile,
+                provider_name=provider_name,
+                fallback_provider_name=fallback_provider_name,
+                registry=registry,
+                timeout_seconds=timeout_seconds,
+            )
+            items.append(
+                PackGenerationItem(document_type=document_type, status="generated", preview=preview)
+            )
+        except DocumentStudioAIServiceError as exc:
+            error_code, message = _pack_error_details(exc)
+            items.append(
+                PackGenerationItem(
+                    document_type=document_type,
+                    status="failed",
+                    error_code=error_code,
+                    error_message=message,
+                )
+            )
+
+    generated_count = sum(item.status == "generated" for item in items)
+    failed_count = sum(item.status == "failed" for item in items)
+    skipped_count = sum(item.status == "skipped" for item in items)
+    if failed_count == 0:
+        overall_status = "complete"
+    elif generated_count:
+        overall_status = "partial_failure"
+    else:
+        overall_status = "failed"
+    return PackGenerationPreview(
+        objective=request.objective,
+        title=request.title,
+        overall_status=overall_status,
+        items=items,
+        generated_count=generated_count,
+        failed_count=failed_count,
+        skipped_count=skipped_count,
+    )

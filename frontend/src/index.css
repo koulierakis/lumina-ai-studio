@@ -20,6 +20,54 @@
   }
 }
 
+/* Collapsible, in-flow AI assistance. The editor remains the primary scroll surface. */
+.doc-tool-btn.is-active { border-color: #7c5cc4; background: #f1edfb; color: #563a99; }
+.doc-ai-panel { flex: 0 0 auto; max-height: min(52vh, 560px); overflow-y: auto; padding: 14px 20px 18px; border-bottom: 1px solid #d9dde3; background: #fbfafc; color: #273142; }
+.doc-ai-panel-header, .doc-ai-panel-header > div, .doc-ai-preview-heading, .doc-ai-metadata, .doc-ai-selection-actions, .doc-ai-pack-summary, .doc-ai-pack-item { display: flex; align-items: center; }
+.doc-ai-panel-header { justify-content: space-between; margin-bottom: 12px; }
+.doc-ai-panel-header > div { gap: 8px; }
+.doc-ai-panel-header span { color: #6b7280; font-size: 12px; }
+.doc-ai-panel-header button { border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.doc-ai-grid { display: grid; grid-template-columns: repeat(4, minmax(230px, 1fr)); gap: 12px; min-width: 0; }
+.doc-ai-section { min-width: 0; padding: 12px; border: 1px solid #ded9e8; border-radius: 10px; background: #fff; }
+.doc-ai-section h3 { margin: 0 0 9px; color: #35265c; font-size: 14px; }
+.doc-ai-section > button, .doc-ai-apply, .doc-ai-selection-actions button, .doc-ai-pack-item button { min-height: 34px; border: 1px solid #7654bd; border-radius: 6px; background: #7654bd; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+.doc-ai-section > button { width: 100%; }
+.doc-ai-section button:disabled { opacity: 0.45; cursor: not-allowed; }
+.doc-ai-field { display: grid; gap: 5px; margin-bottom: 8px; color: #4b5563; font-size: 12px; }
+.doc-ai-field textarea, .doc-ai-field select { width: 100%; min-width: 0; border: 1px solid #cfd4dc; border-radius: 6px; background: #fff; color: #202938; font: inherit; }
+.doc-ai-field textarea { min-height: 66px; padding: 8px; resize: vertical; }
+.doc-ai-field select { height: 34px; padding: 0 8px; }
+.doc-ai-error, .doc-ai-warning, .doc-ai-missing { display: flex; align-items: flex-start; gap: 5px; color: #9a3412; }
+.doc-ai-error { margin-bottom: 10px; padding: 9px 11px; border: 1px solid #fdba74; border-radius: 7px; background: #fff7ed; font-size: 13px; }
+.doc-ai-recommendations, .doc-ai-preview, .doc-ai-pack-results { display: grid; gap: 7px; margin-top: 10px; }
+.doc-ai-readiness { color: #4b5563; font-size: 12px; font-weight: 700; }
+.doc-ai-recommendation { display: grid; grid-template-columns: auto 1fr; gap: 7px; padding: 7px; border: 1px solid #e5e7eb; border-left: 3px solid #7c5cc4; border-radius: 6px; font-size: 11px; }
+.doc-ai-recommendation.optional { border-left-color: #94a3b8; }
+.doc-ai-recommendation > span, .doc-ai-pack-item > span { display: grid; gap: 2px; min-width: 0; }
+.doc-ai-recommendation em { color: #694bb0; font-size: 10px; font-style: normal; text-transform: uppercase; }
+.doc-ai-recommendation small, .doc-ai-pack-item small, .doc-ai-preview p, .doc-ai-empty { margin: 0; color: #667085; font-size: 11px; line-height: 1.4; }
+.doc-ai-missing { margin-top: 3px; font-size: 10px; }
+.doc-ai-selection-actions { flex-wrap: wrap; gap: 6px; }
+.doc-ai-selection-actions button, .doc-ai-pack-item button { min-height: 28px; padding: 0 8px; background: #fff; color: #6544aa; }
+.doc-ai-preview { padding: 9px; border: 1px solid #c8e5d7; border-radius: 7px; background: #f5fbf8; }
+.doc-ai-preview-heading { justify-content: space-between; gap: 8px; }
+.doc-ai-status { padding: 2px 6px; border-radius: 999px; background: #dcfce7; color: #166534; font-size: 9px; text-transform: uppercase; }
+.doc-ai-metadata { flex-wrap: wrap; gap: 8px; color: #596273; font-size: 10px; }
+.doc-ai-pack-summary { gap: 5px; font-size: 11px; font-weight: 700; }
+.doc-ai-pack-summary.partial_failure, .doc-ai-pack-summary.failed, .doc-ai-pack-item.failed { color: #b42318; }
+.doc-ai-pack-item { gap: 7px; padding: 7px; border: 1px solid #e3e6eb; border-radius: 6px; font-size: 11px; }
+.doc-ai-pack-item > span { flex: 1; }
+
+@media (max-width: 1180px) {
+  .doc-ai-grid { grid-template-columns: repeat(2, minmax(240px, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .doc-ai-panel { max-height: none; padding: 12px; }
+  .doc-ai-grid { grid-template-columns: 1fr; }
+}
+
 :root {
   color-scheme: dark;
 }

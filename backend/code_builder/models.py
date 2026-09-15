@@ -19,7 +19,7 @@ The models are designed for Pydantic v2 and cover:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
@@ -37,7 +37,7 @@ from pydantic import (
 def utc_now() -> datetime:
     """Return the current UTC datetime."""
 
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class StrictModel(BaseModel):
@@ -290,7 +290,7 @@ class SourceLocation(StrictModel):
     end_column: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
-    def validate_line_range(self) -> "SourceLocation":
+    def validate_line_range(self) -> SourceLocation:
         if self.end_line < self.start_line:
             raise ValueError("end_line cannot be smaller than start_line.")
 
@@ -559,7 +559,7 @@ class UnifiedDiff(StrictModel):
     generated_at: datetime = Field(default_factory=utc_now)
 
     @model_validator(mode="after")
-    def validate_diff_counts(self) -> "UnifiedDiff":
+    def validate_diff_counts(self) -> UnifiedDiff:
         if not self.changed and (self.additions > 0 or self.deletions > 0):
             raise ValueError(
                 "A diff marked as unchanged cannot contain additions "
@@ -590,7 +590,7 @@ class ProposedFileChange(StrictModel):
     protection_reason: str | None = None
 
     @model_validator(mode="after")
-    def validate_change_payload(self) -> "ProposedFileChange":
+    def validate_change_payload(self) -> ProposedFileChange:
         if self.change_type == ChangeType.CREATE:
             if self.old_content not in (None, ""):
                 raise ValueError(
@@ -665,7 +665,7 @@ class ChangePlan(StrictModel):
     rejected_at: datetime | None = None
 
     @model_validator(mode="after")
-    def synchronize_estimates(self) -> "ChangePlan":
+    def synchronize_estimates(self) -> ChangePlan:
         actual_file_count = len(self.changes)
 
         if self.estimated_files_changed == 0 and actual_file_count > 0:
@@ -683,7 +683,7 @@ class ChangeApprovalRequest(StrictModel):
     user_note: str | None = None
 
     @model_validator(mode="after")
-    def validate_approval_selection(self) -> "ChangeApprovalRequest":
+    def validate_approval_selection(self) -> ChangeApprovalRequest:
         if not self.approve_all and not self.approved_change_ids:
             raise ValueError(
                 "Select at least one change or set approve_all to true."
@@ -1085,7 +1085,7 @@ class RepositoryTreeNode(StrictModel):
     name: str = Field(min_length=1)
     relative_path: str
     node_type: Literal["file", "directory"]
-    children: list["RepositoryTreeNode"] = Field(default_factory=list)
+    children: list[RepositoryTreeNode] = Field(default_factory=list)
     metadata: FileMetadata | None = None
     expanded: bool = False
 

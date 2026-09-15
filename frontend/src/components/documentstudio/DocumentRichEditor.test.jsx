@@ -1,3 +1,6 @@
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import DocumentRichEditor from './DocumentRichEditor';
 import {
   calculateMeasuredPages,
   normalizeLegacyPageBreaks,
@@ -6,6 +9,32 @@ import {
   pageDimensions,
   sanitizeEditorHtml,
 } from './editorModel';
+
+describe('DocumentRichEditor editability lifecycle', () => {
+  let host;
+  let root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    host.remove();
+  });
+
+  test('becomes editable when initialization finishes without remounting Lexical', async () => {
+    const props = { html: '<p></p>', onHtmlChange: jest.fn() };
+    await act(async () => root.render(<DocumentRichEditor {...props} disabled />));
+    expect(host.querySelector('[contenteditable]')?.getAttribute('contenteditable')).toBe('false');
+
+    await act(async () => root.render(<DocumentRichEditor {...props} disabled={false} />));
+    expect(host.querySelector('[contenteditable]')?.getAttribute('contenteditable')).toBe('true');
+  });
+});
 
 describe('DocumentRichEditor production foundation', () => {
   test('sanitizes dangerous pasted html while preserving safe formatting', () => {

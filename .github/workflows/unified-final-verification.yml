@@ -1,0 +1,101 @@
+name: Unified final verification
+
+on:
+  push:
+    branches:
+      - integration/lumina-final-unified
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-recovery:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r backend/requirements.txt
+      - name: Code Builder restart persistence
+        run: python -m pytest backend/tests/test_code_builder_persistence_restart.py -q
+      - name: Code Builder controlled E2E and hardening
+        run: >-
+          python -m pytest
+          backend/tests/test_code_builder_controlled_e2e.py
+          backend/tests/test_code_builder_execution_pipeline.py
+          backend/tests/test_code_builder_interruption_rollback.py
+          backend/tests/test_code_builder_idempotency_contract.py
+          -q
+      - name: Mentor persistence contract
+        run: python -m pytest backend/tests/test_mentor_unit.py -q
+      - name: Remote access contract
+        run: python -m pytest launcher/tests/test_mobile_remote_access.py -q
+
+  frontend-regression:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Frontend tests
+        run: CI=true npm test -- --watchAll=false --runInBand
+      - name: Production build
+        run: npm run build
+      - name: Embedded Drive assets are present in production build
+        run: |
+          test -f build/drive/index.html
+          test -f build/drive/app-v2.js
+          test -f build/drive/navigation-search.js
+          test -f build/drive/road-safety.js
+          test -f build/drive/sw.js
+
+  drive-compatibility:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax-check embedded Drive scripts
+        run: |
+          for f in frontend/public/drive/*.js; do
+            node --check "$f"
+          done
+      - name: Verify required Drive shell and capabilities
+        run: |
+          grep -q 'Αναζήτηση με όνομα ή διεύθυνση' frontend/public/drive/index.html
+          grep -q 'serviceWorker.register' frontend/public/drive/index.html
+          grep -q 'shared-gps.js' frontend/public/drive/index.html
+          grep -q 'navigation-search.js' frontend/public/drive/index.html
+          grep -q 'road-safety.js' frontend/public/drive/index.html
+          grep -q 'map-poi-layer.js' frontend/public/drive/index.html
+          grep -q 'walking-router.js' frontend/public/drive/index.html
+      - name: Verify standalone Drive source remains untouched
+        run: |
+          git fetch origin feature/lumina-drive-assistant --depth=1
+          test "$(git show origin/feature/lumina-drive-assistant:drive-assistant/index.html | git hash-object --stdin)" = "$(git hash-object frontend/public/drive/index.html)"
+
+  persistence-safety:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Diagnostics tool is read-only and handles missing runtime database safely
+        run: |
+          set +e
+          python tools/identity_pack_diagnostics.py --database "$RUNNER_TEMP/nonexistent.db" --storage "$RUNNER_TEMP/storage" > "$RUNNER_TEMP/diag.json"
+          code=$?
+          set -e
+          test "$code" -eq 1
+          grep -q 'database_not_found' "$RUNNER_TEMP/diag.json"

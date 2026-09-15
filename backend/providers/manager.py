@@ -6,8 +6,8 @@ import logging
 import os
 import time
 from collections import Counter
-from datetime import datetime, timezone
-from typing import Awaitable, Callable, Type
+from datetime import UTC, datetime
+from typing import Awaitable, Callable
 
 from .base import (
     ErrorKind,
@@ -44,11 +44,11 @@ def _env_int(name: str, default: int) -> int:
 def _utc_iso(epoch: float | None) -> str | None:
     if not epoch:
         return None
-    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat()
+    return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
 
 
 class ProviderManager:
-    def __init__(self, registry: dict[str, Type[ImageProvider]]) -> None:
+    def __init__(self, registry: dict[str, type[ImageProvider]]) -> None:
         self.registry = registry
         self.usage = Counter()
         self.failures = Counter()
@@ -219,7 +219,7 @@ class ProviderManager:
                             safe_message=exc.public_message(),
                         ) from exc
                     break
-                except Exception as exc:
+                except Exception:
                     wrapped = ProviderError(
                         provider.name,
                         "Provider request failed.",

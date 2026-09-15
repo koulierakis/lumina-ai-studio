@@ -7,8 +7,9 @@ import os
 import sqlite3
 import threading
 from abc import ABC, abstractmethod
+from datetime import UTC
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional
+from typing import Any, AsyncIterator
 
 logger = logging.getLogger("lumina.persistence")
 
@@ -20,9 +21,9 @@ def runtime_database_path() -> Path:
 
 
 def _now_iso() -> str:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _json_default(value: Any) -> str:
@@ -33,12 +34,12 @@ class PersistenceCursor:
     def __init__(self, rows: list[dict[str, Any]]):
         self.rows = rows
 
-    def sort(self, key: str, direction: int = 1) -> "PersistenceCursor":
+    def sort(self, key: str, direction: int = 1) -> PersistenceCursor:
         reverse = direction < 0
         self.rows.sort(key=lambda item: item.get(key) or "", reverse=reverse)
         return self
 
-    def limit(self, count: int) -> "PersistenceCursor":
+    def limit(self, count: int) -> PersistenceCursor:
         self.rows = self.rows[: max(0, int(count))]
         return self
 
@@ -69,7 +70,7 @@ class PersistenceProvider(ABC):
     async def insert_one(self, table: str, document: dict[str, Any]) -> None: ...
 
     @abstractmethod
-    async def find_one(self, table: str, query: dict[str, Any]) -> Optional[dict[str, Any]]: ...
+    async def find_one(self, table: str, query: dict[str, Any]) -> dict[str, Any] | None: ...
 
     @abstractmethod
     def find(self, table: str, query: dict[str, Any]) -> PersistenceCursor: ...
@@ -87,6 +88,50 @@ class PersistenceProvider(ABC):
     def diagnostics(self) -> dict[str, Any]: ...
 
 
+class MongoPersistenceProvider(PersistenceProvider):
+    name = "mongo"
+
+    def __init__(self, db: Any, client: Any):
+        if db is None or client is None:
+            raise ValueError("Mongo persistence requires both db and client")
+        self.db = db
+        self.client = client
+        self.ready = False
+
+    async def initialize(self) -> None:
+        await asyncio.wait_for(self.client.admin.command("ping"), timeout=1.5)
+        self.ready = True
+
+    async def verify(self) -> None:
+        await asyncio.wait_for(self.client.admin.command("ping"), timeout=1.5)
+
+    async def recover_active_jobs(self) -> None:
+        interrupted = {"$set": {"status": "failed", "stage": "interrupted", "safe_error_message": "The backend restarted before this job finished.", "error": "The backend restarted before this job finished.", "updated_at": _now_iso(), "completed_at": _now_iso()}}
+        for table in ("talking_portrait_jobs", "talking_portrait_install_jobs"):
+            await self.db[table].update_many({"status": {"$in": list(ACTIVE_JOB_STATUSES)}}, interrupted)
+
+    async def insert_one(self, table: str, document: dict[str, Any]) -> None:
+        await self.db[table].insert_one(document)
+
+    async def find_one(self, table: str, query: dict[str, Any]) -> dict[str, Any] | None:
+        return await self.db[table].find_one(query, {"_id": 0})
+
+    def find(self, table: str, query: dict[str, Any]) -> Any:
+        return self.db[table].find(query, {"_id": 0})
+
+    async def update_one(self, table: str, query: dict[str, Any], update: dict[str, Any]) -> None:
+        await self.db[table].update_one(query, update)
+
+    async def replace_one(self, table: str, query: dict[str, Any], document: dict[str, Any]) -> None:
+        await self.db[table].replace_one(query, document)
+
+    async def count_documents(self, table: str, query: dict[str, Any]) -> int:
+        return await self.db[table].count_documents(query)
+
+    def diagnostics(self) -> dict[str, Any]:
+        return {"provider": self.name, "ready": self.ready, "fallback_active": False, "mongo_configured": True, "mongo_available": self.ready}
+
+
 class SQLitePersistenceProvider(PersistenceProvider):
     name = "sqlite"
     TABLES = {
@@ -101,7 +146,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         "enterprise_document_template_versions", "document_people", "document_banks",
         "document_clauses", "talking_portrait_jobs",
         "talking_portrait_install_jobs", "talking_portrait_logs", "talking_portrait_outputs",
-        "provider_status",
+        "provider_status", "mentor_sessions",
     }
 
     def __init__(self, path: Path | None = None, *, fallback_active: bool = False, mongo_configured: bool = False, mongo_available: bool = False):
@@ -166,15 +211,17 @@ class SQLitePersistenceProvider(PersistenceProvider):
         interrupted = {"status": "failed", "stage": "interrupted", "safe_error_message": "The backend restarted before this job finished.", "error": "The backend restarted before this job finished.", "updated_at": _now_iso(), "completed_at": _now_iso()}
         for table in ("talking_portrait_jobs", "talking_portrait_install_jobs"):
             for status in ACTIVE_JOB_STATUSES:
-                rows = list((await asyncio.to_thread(self._find_sync, table, {"status": status})))
+                rows = list(await asyncio.to_thread(self._find_sync, table, {"status": status}))
                 for row in rows:
                     await self.update_one(table, {"id": row["id"]}, {"$set": interrupted})
 
     def _normalize(self, table: str, document: dict[str, Any]) -> dict[str, Any]:
         data = dict(document)
+        document_id = str(data.get("id") or data.get("install_job_id") or _now_iso())
+        data["id"] = document_id
         metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
         return {
-            "id": str(data.get("id") or data.get("install_job_id") or _now_iso()),
+            "id": document_id,
             "owner_email": data.get("owner_email"),
             "provider": data.get("provider"),
             "status": data.get("status"),
@@ -250,7 +297,7 @@ class SQLitePersistenceProvider(PersistenceProvider):
         docs = [json.loads(row["data_json"]) for row in rows]
         return [doc for doc in docs if self._matches(doc, query)]
 
-    async def find_one(self, table: str, query: dict[str, Any]) -> Optional[dict[str, Any]]:
+    async def find_one(self, table: str, query: dict[str, Any]) -> dict[str, Any] | None:
         rows = await asyncio.to_thread(self._find_sync, table, query)
         return rows[0] if rows else None
 
@@ -300,8 +347,13 @@ class SQLitePersistenceProvider(PersistenceProvider):
         return len(rows)
 
     async def replace_one(self, table: str, query: dict[str, Any], document: dict[str, Any]) -> None:
-        if await self.find_one(table, query):
-            await self.insert_one(table, document)
+        existing = await self.find_one(table, query)
+        if not existing:
+            return
+        replacement = dict(document)
+        if not replacement.get("id") and existing.get("id"):
+            replacement["id"] = existing["id"]
+        await self.insert_one(table, replacement)
 
     def _delete_sync(self, table: str, query: dict[str, Any]) -> int:
         rows = self._find_sync(table, {})
@@ -336,7 +388,7 @@ class TalkingPortraitCollection:
     async def insert_one(self, document: dict[str, Any]) -> None:
         await self.provider.insert_one(self.table, document)
 
-    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         del projection
         return await self.provider.find_one(self.table, query)
 
@@ -366,7 +418,7 @@ class LocalPersistenceCollection:
     async def insert_one(self, document: dict[str, Any]) -> None:
         await self.provider.insert_one(self.table, document)
 
-    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         doc = await self.provider.find_one(self.table, query)
         return _project_document(doc, projection)
 
@@ -384,7 +436,10 @@ class LocalPersistenceCollection:
         return type("UpdateResult", (), {"modified_count": modified})()
 
     async def replace_one(self, query: dict[str, Any], document: dict[str, Any], upsert: bool = False) -> None:
-        if upsert or await self.provider.find_one(self.table, query):
+        existing = await self.provider.find_one(self.table, query)
+        if existing:
+            await self.provider.replace_one(self.table, query, document)
+        elif upsert:
             await self.provider.insert_one(self.table, document)
 
     async def delete_one(self, query: dict[str, Any]) -> Any:
@@ -395,7 +450,7 @@ class LocalPersistenceCollection:
         deleted = await self.provider.delete_many(self.table, query)
         return type("DeleteResult", (), {"deleted_count": deleted})()
 
-    async def find_one_and_update(self, query: dict[str, Any], update: dict[str, Any], return_document: Any = None, projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one_and_update(self, query: dict[str, Any], update: dict[str, Any], return_document: Any = None, projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         del return_document
         doc = await self.provider.find_one(self.table, query)
         if not doc:
@@ -404,7 +459,7 @@ class LocalPersistenceCollection:
         await self.provider.insert_one(self.table, new_doc)
         return _project_document(new_doc, projection)
 
-    async def find_one_and_delete(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> Optional[dict[str, Any]]:
+    async def find_one_and_delete(self, query: dict[str, Any], projection: dict[str, Any] | None = None) -> dict[str, Any] | None:
         doc = await self.provider.find_one(self.table, query)
         if not doc:
             return None
@@ -415,7 +470,7 @@ class LocalPersistenceCollection:
         return await self.provider.count_documents(self.table, query)
 
 
-def _project_document(document: Optional[dict[str, Any]], projection: dict[str, Any] | None) -> Optional[dict[str, Any]]:
+def _project_document(document: dict[str, Any] | None, projection: dict[str, Any] | None) -> dict[str, Any] | None:
     if document is None or not projection:
         return document
     doc = dict(document)
@@ -427,14 +482,57 @@ def _project_document(document: Optional[dict[str, Any]], projection: dict[str, 
     return doc
 
 
+def _database_mode() -> str:
+    mode = os.environ.get("LUMINA_DATABASE_PROVIDER", "sqlite").strip().lower()
+    if mode not in {"sqlite", "mongo", "auto"}:
+        logger.warning("Unknown LUMINA_DATABASE_PROVIDER=%s; using sqlite", mode)
+        return "sqlite"
+    return mode
+
+
 def create_persistence_provider(db: Any = None, client: Any = None) -> PersistenceProvider:
-    del db, client
-    return SQLitePersistenceProvider(mongo_configured=False, mongo_available=False)
+    mode = _database_mode()
+    if mode == "mongo" and db is not None and client is not None:
+        return MongoPersistenceProvider(db, client)
+    return SQLitePersistenceProvider(
+        mongo_configured=bool(os.environ.get("MONGO_URL")),
+        mongo_available=False,
+    )
 
 
 async def initialize_persistence_provider(db: Any = None, client: Any = None) -> PersistenceProvider:
-    del db, client
-    provider = SQLitePersistenceProvider(mongo_configured=False, mongo_available=False)
+    mode = _database_mode()
+    mongo_configured = bool(os.environ.get("MONGO_URL"))
+
+    if mode in {"mongo", "auto"} and db is not None and client is not None and mongo_configured:
+        try:
+            mongo = MongoPersistenceProvider(db, client)
+            await mongo.initialize()
+            await mongo.verify()
+            await mongo.recover_active_jobs()
+            return mongo
+        except Exception:
+            if mode == "mongo":
+                raise
+            logger.warning("Mongo unavailable; falling back to SQLite", exc_info=True)
+            provider = SQLitePersistenceProvider(
+                fallback_active=True,
+                mongo_configured=True,
+                mongo_available=False,
+            )
+            await provider.initialize()
+            await provider.verify()
+            await provider.recover_active_jobs()
+            return provider
+
+    if mode == "mongo":
+        raise RuntimeError("Mongo persistence requested but MONGO_URL/db/client is unavailable")
+
+    provider = SQLitePersistenceProvider(
+        fallback_active=(mode == "auto" and mongo_configured),
+        mongo_configured=mongo_configured,
+        mongo_available=False,
+    )
     await provider.initialize()
     await provider.verify()
     await provider.recover_active_jobs()

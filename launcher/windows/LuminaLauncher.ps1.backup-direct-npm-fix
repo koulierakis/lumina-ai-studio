@@ -1,0 +1,723 @@
+﻿#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Production-quality Windows desktop launcher for the LUMINA AI Operating System.
+.DESCRIPTION
+  1. Detects whether Docker Desktop is running.
+  2. Starts Docker Desktop if required.
+  3. Starts or verifies the required Docker services (Redis and Qdrant).
+  4. Starts the LUMINA backend using uvicorn.
+  5. Starts the LUMINA frontend using npm start.
+  6. Avoids duplicate processes if services are already running.
+  7. Waits until backend and frontend health checks confirm readiness.
+  8. Opens the LUMINA application in the default browser.
+  9. Displays a clear error message if any service fails.
+.PARAMETER Action
+  "start" (default), "stop", or "status".
+.PARAMETER RepoRoot
+  Override the auto-detected repository root.
+.EXAMPLE
+  .\LuminaLauncher.ps1 -Action start
+.EXAMPLE
+  .\LuminaLauncher.ps1 -Action stop
+#>
+[CmdletBinding()]
+param(
+    [ValidateSet('start', 'stop', 'status')]
+    [string]$Action = 'start',
+
+    [string]$RepoRoot,
+
+    [int]$BackendPort = 8000,
+    [int]$FrontendPort = 3000,
+    [string]$BackendHost = '127.0.0.1',
+    [string]$FrontendHost = 'localhost',
+
+    [int]$StartupTimeoutSeconds = 180,
+    [int]$PollIntervalSeconds = 2,
+
+    [string]$DockerComposeFile = 'docker-compose.dev.yml'
+)
+
+# ─── Strict mode & error preferences ───────────────────────────
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+# ─── Derive repository root ────────────────────────────────────
+if (-not $RepoRoot) {
+    $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+}
+$RepoRoot = [System.IO.Path]::GetFullPath($RepoRoot)
+
+# ─── Paths ─────────────────────────────────────────────────────
+$LogDir = Join-Path $RepoRoot '.lumina-runtime\logs'
+$LogFile = Join-Path $LogDir 'runtime.log'
+$RuntimeDir = Join-Path $RepoRoot '.lumina-runtime'
+$ComposeFile = Join-Path $RepoRoot $DockerComposeFile
+$BackendDir = Join-Path $RepoRoot 'backend'
+$FrontendDir = Join-Path $RepoRoot 'frontend'
+$BackendLog = Join-Path $LogDir 'backend.log'
+$FrontendLog = Join-Path $LogDir 'frontend.log'
+
+# ─── Ensure log directory ──────────────────────────────────────
+if (-not (Test-Path $LogDir)) {
+    New-Item -ItemType Directory -Path $LogDir -Force | Out-Null
+}
+
+# ─── Logging ───────────────────────────────────────────────────
+function Write-Log {
+    param([string]$Message, [string]$Level = 'INFO')
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss,fff'
+    $line = "$timestamp [$Level] $Message"
+    Add-Content -Path $LogFile -Value $line -Encoding UTF8
+    if ($Level -eq 'ERROR') {
+        Write-Host $line -ForegroundColor Red
+    } elseif ($Level -eq 'WARN') {
+        Write-Host $line -ForegroundColor Yellow
+    } elseif ($Level -eq 'SUCCESS') {
+        Write-Host $line -ForegroundColor Green
+    } else {
+        Write-Host $line -ForegroundColor Cyan
+    }
+}
+
+function Write-LogError { param([string]$Msg) Write-Log $Msg 'ERROR' }
+function Write-LogWarn { param([string]$Msg) Write-Log $Msg 'WARN' }
+function Write-LogSuccess { param([string]$Msg) Write-Log $Msg 'SUCCESS' }
+
+# ─── Port check ────────────────────────────────────────────────
+function Test-Port {
+    param([string]$HostName, [int]$PortNumber)
+    try {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        $iar = $tcp.BeginConnect($HostName, $PortNumber, $null, $null)
+        $success = $iar.AsyncWaitHandle.WaitOne(800, $false)
+        if ($success) {
+            $tcp.EndConnect($iar)
+            $tcp.Close()
+            return $true
+        }
+        $tcp.Close()
+        return $false
+    } catch {
+        return $false
+    }
+}
+
+# ─── HTTP health check ─────────────────────────────────────────
+function Test-Http {
+    param([string]$Url, [int]$TimeoutMs = 3000)
+    try {
+        $request = [System.Net.WebRequest]::Create($Url)
+        $request.Method = 'GET'
+        $request.Timeout = $TimeoutMs
+        $response = $request.GetResponse()
+        $statusCode = [int]$response.StatusCode
+        $response.Close()
+        return ($statusCode -ge 200 -and $statusCode -lt 500)
+    } catch {
+        return $false
+    }
+}
+
+function Test-BackendHealth {
+    param([string]$HostName = $BackendHost, [int]$PortNumber = $BackendPort)
+    $url = "http://${HostName}:${PortNumber}/api/health"
+    $ok = Test-Http $url
+    return $ok
+}
+
+function Test-FrontendHealth {
+    param([string]$HostName = $FrontendHost, [int]$PortNumber = $FrontendPort)
+    $url = "http://${HostName}:${PortNumber}/"
+    $ok = Test-Http $url
+    return $ok
+}
+
+# ─── Get port owner (PID, process name, executable, command line) ──
+function Get-PortOwner {
+    param([int]$PortNumber)
+    try {
+        $conns = Get-NetTCPConnection -LocalPort $PortNumber -State Listen -ErrorAction SilentlyContinue
+        if (-not $conns) { return $null }
+        $pidVal = $conns[0].OwningProcess
+        if (-not $pidVal) { return $null }
+        $proc = Get-Process -Id $pidVal -ErrorAction SilentlyContinue
+        if (-not $proc) { return $null }
+        $cmdLine = ''
+        try {
+            $wmi = Get-CimInstance Win32_Process -Filter "ProcessId=$pidVal" -ErrorAction SilentlyContinue
+            if ($wmi) { $cmdLine = $wmi.CommandLine }
+        } catch {}
+        return @{
+            PID = $pidVal
+            ProcessName = $proc.ProcessName
+            Path = $proc.Path
+            CommandLine = $cmdLine
+        }
+    } catch {
+        return $null
+    }
+}
+
+# ─── Check if a process is LUMINA-owned ─────────────────────────
+function Test-IsLuminaProcess {
+    param($PortOwner, [string]$ServiceType)
+
+    if (-not $PortOwner) { return $false }
+
+    $cmdLine = $PortOwner.CommandLine
+    $exePath = $PortOwner.Path
+
+    # Evidence 1: Command line references the LUMINA repository
+    if ($cmdLine -and $cmdLine -like "*$RepoRoot*") {
+        Write-Log "Process $($PortOwner.PID) is LUMINA-owned: command line references repo root."
+        return $true
+    }
+
+    # Evidence 2: Backend process running uvicorn with server:app
+    if ($ServiceType -eq 'backend' -and $cmdLine -and $cmdLine -match 'uvicorn.*server:app') {
+        Write-Log "Process $($PortOwner.PID) is LUMINA-owned: uvicorn server:app detected."
+        return $true
+    }
+
+    # Evidence 3: Frontend process running craco start or react-scripts
+    if ($ServiceType -eq 'frontend' -and $cmdLine -and ($cmdLine -match 'craco|react-scripts|webpack')) {
+        if ($exePath -and $exePath -like "*$FrontendDir*") {
+            Write-Log "Process $($PortOwner.PID) is LUMINA-owned: frontend executable in repo."
+            return $true
+        }
+    }
+
+    # Evidence 4: Health endpoint responds successfully
+    if ($ServiceType -eq 'backend' -and (Test-BackendHealth)) {
+        Write-Log "Process $($PortOwner.PID) is LUMINA-owned: backend health endpoint responds."
+        return $true
+    }
+    if ($ServiceType -eq 'frontend' -and (Test-FrontendHealth)) {
+        Write-Log "Process $($PortOwner.PID) is LUMINA-owned: frontend health endpoint responds."
+        return $true
+    }
+
+    return $false
+}
+
+# ─── Log process details ───────────────────────────────────────
+function Write-ProcessDetails {
+    param($PortOwner, [string]$Label)
+    if (-not $PortOwner) {
+        Write-Log "  $Label port owner: no process found."
+        return
+    }
+    Write-Log "  $Label port owner details:"
+    Write-Log "    PID: $($PortOwner.PID)"
+    Write-Log "    Process name: $($PortOwner.ProcessName)"
+    Write-Log "    Executable path: $($PortOwner.Path)"
+    Write-Log "    Command line: $($PortOwner.CommandLine)"
+}
+
+# ─── Read backend log tail (for diagnostics) ──────────────────
+function Get-BackendLogTail {
+    param([int]$Lines = 30)
+    try {
+        if (Test-Path $BackendLog) {
+            return Get-Content $BackendLog -Tail $Lines -ErrorAction SilentlyContinue
+        }
+    } catch {}
+    return @()
+}
+
+# ─── Wait for readiness ────────────────────────────────────────
+function Wait-Ready {
+    param(
+        [scriptblock]$Probe,
+        [string]$Label,
+        [int]$TimeoutSec = $StartupTimeoutSeconds,
+        [int]$IntervalSec = $PollIntervalSeconds
+    )
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    $attempts = 0
+    while ((Get-Date) -lt $deadline) {
+        $attempts++
+        if (& $Probe) {
+            Write-LogSuccess "$Label is ready (after $attempts attempt(s))."
+            return $true
+        }
+        Start-Sleep -Seconds $IntervalSec
+    }
+    Write-LogError "$Label readiness timed out after ${TimeoutSec}s ($attempts attempts)."
+
+    # If backend timed out, log the actual backend error
+    if ($Label -eq 'Backend') {
+        $tail = Get-BackendLogTail -Lines 30
+        if ($tail) {
+            Write-LogError "=== Backend log (last 30 lines) ==="
+            foreach ($line in $tail) {
+                Write-LogError "  $line"
+            }
+            Write-LogError "=== End backend log ==="
+        } else {
+            Write-LogError "No backend log found at $BackendLog"
+        }
+    }
+
+    return $false
+}
+
+# ─── Docker detection ──────────────────────────────────────────
+function Get-DockerPath {
+    $candidates = @(
+        'docker',
+        "$env:ProgramFiles\Docker\Docker\resources\bin\docker.exe",
+        "${env:ProgramFiles(x86)}\Docker\Docker\resources\bin\docker.exe",
+        "$env:LOCALAPPDATA\Docker\resources\bin\docker.exe"
+    )
+    foreach ($c in $candidates) {
+        try {
+            $proc = Start-Process -FilePath $c -ArgumentList 'version', '--format', '{{.Server.Version}}' `
+                -NoNewWindow -PassThru -RedirectStandardOutput "$LogDir\docker_probe.tmp" -RedirectStandardError "$LogDir\docker_probe_err.tmp"
+            $proc.WaitForExit(8000) | Out-Null
+            if ($proc.ExitCode -eq 0) {
+                return $c
+            }
+        } catch {
+            continue
+        }
+    }
+    return $null
+}
+
+function Test-DockerRunning {
+    param([string]$DockerPath)
+    try {
+        $proc = Start-Process -FilePath $DockerPath -ArgumentList 'info', '--format', '{{.ServerVersion}}' `
+            -NoNewWindow -PassThru -RedirectStandardOutput "$LogDir\docker_info.tmp" -RedirectStandardError "$LogDir\docker_info_err.tmp"
+        $proc.WaitForExit(15000) | Out-Null
+        return ($proc.ExitCode -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Start-DockerDesktop {
+    $dockerDesktopPaths = @(
+        "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe",
+        "${env:ProgramFiles(x86)}\Docker\Docker\Docker Desktop.exe"
+    )
+    foreach ($path in $dockerDesktopPaths) {
+        if (Test-Path $path) {
+            Write-Log "Starting Docker Desktop: $path"
+            Start-Process -FilePath $path
+            return $true
+        }
+    }
+    return $false
+}
+
+function Wait-DockerReady {
+    param([string]$DockerPath, [int]$TimeoutSec = 120)
+    $deadline = (Get-Date).AddSeconds($TimeoutSec)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-DockerRunning $DockerPath) {
+            Write-LogSuccess 'Docker Desktop is ready.'
+            return $true
+        }
+        Write-Log 'Waiting for Docker Desktop to initialize...'
+        Start-Sleep -Seconds 5
+    }
+    return $false
+}
+
+# ─── Docker Compose services ───────────────────────────────────
+function Start-DockerServices {
+    param([string]$DockerPath)
+    if (-not (Test-Path $ComposeFile)) {
+        Write-LogWarn "Docker compose file not found: $ComposeFile — skipping Docker services."
+        return $true
+    }
+
+    Write-Log 'Starting Docker services (Redis, Qdrant)...'
+    $composeArgs = @('compose', '-f', "`"$ComposeFile`"", 'up', '-d', 'redis', 'qdrant')
+    try {
+        $proc = Start-Process -FilePath $DockerPath -ArgumentList $composeArgs `
+            -NoNewWindow -PassThru -Wait -RedirectStandardOutput "$LogDir\docker_compose_up.log" -RedirectStandardError "$LogDir\docker_compose_up_err.log"
+        if ($proc.ExitCode -ne 0) {
+            Write-LogWarn "docker compose up returned exit code $($proc.ExitCode). Services may already be running."
+        }
+    } catch {
+        Write-LogWarn "docker compose up failed: $_"
+    }
+
+    # Verify Redis and Qdrant are up
+    $redisReady = Wait-Ready -Probe { Test-Port '127.0.0.1' 6379 } -Label 'Redis' -TimeoutSec 30 -IntervalSec 2
+    $qdrantReady = Wait-Ready -Probe { Test-Port '127.0.0.1' 6333 } -Label 'Qdrant' -TimeoutSec 30 -IntervalSec 2
+
+    if (-not $redisReady) {
+        Write-LogWarn 'Redis did not become available on port 6379. Backend may still work if it falls back to in-memory mode.'
+    }
+    if (-not $qdrantReady) {
+        Write-LogWarn 'Qdrant did not become available on port 6333. Backend may still work if it falls back to in-memory mode.'
+    }
+    return $true
+}
+
+# ─── Find Python ───────────────────────────────────────────────
+function Get-PythonCommand {
+    $py = Get-Command py -ErrorAction SilentlyContinue
+    if ($py) {
+        foreach ($version in @('-3.12', '-3.11', '-3')) {
+            try {
+                & $py.Source $version -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    return "py $version"
+                }
+            } catch {}
+        }
+    }
+
+    foreach ($exeName in @('python', 'python3')) {
+        $exe = Get-Command $exeName -ErrorAction SilentlyContinue
+        if (-not $exe) { continue }
+        try {
+            & $exe.Source -c "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)" 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                return $exe.Source
+            }
+        } catch {}
+    }
+
+    return $null
+}
+
+# ─── Find npm ──────────────────────────────────────────────────
+function Get-NpmPath {
+    $candidates = @('npm.cmd', 'npm')
+    foreach ($c in $candidates) {
+        try {
+            $proc = Start-Process -FilePath $c -ArgumentList '--version' -NoNewWindow -PassThru -RedirectStandardOutput "$LogDir\npm_probe.tmp" -RedirectStandardError "$LogDir\npm_probe_err.tmp"
+            $proc.WaitForExit(8000) | Out-Null
+            if ($proc.ExitCode -eq 0) {
+                return $c
+            }
+        } catch {
+            continue
+        }
+    }
+    return $null
+}
+
+# ─── Start backend (with port conflict handling) ──────────────
+function Start-Backend {
+    $healthUrl = "http://${BackendHost}:${BackendPort}/api/health"
+    Write-Log "Backend health check URL: $healthUrl"
+
+    # Check if backend is already healthy
+    if (Test-BackendHealth) {
+        Write-Log "Backend is already healthy at $healthUrl — reusing existing service."
+        $owner = Get-PortOwner $BackendPort
+        Write-ProcessDetails $owner 'Backend'
+        return $true
+    }
+
+    # Port is occupied but not healthy — investigate
+    if (Test-Port $BackendHost $BackendPort) {
+        $owner = Get-PortOwner $BackendPort
+        Write-LogWarn "Port $BackendPort is occupied but backend health check failed."
+        Write-ProcessDetails $owner 'Backend'
+
+        if ($owner -and (Test-IsLuminaProcess $owner 'backend')) {
+            Write-LogWarn "Port $BackendPort is held by a LUMINA backend process (PID $($owner.PID)) but it is not healthy."
+            Write-LogWarn "The process may be starting up or has crashed. Waiting for it to become healthy..."
+            $ready = Wait-Ready -Probe { Test-BackendHealth } -Label 'Backend' -TimeoutSec 60
+            if ($ready) {
+                Write-LogSuccess "Backend became healthy. Reusing existing process."
+                return $true
+            }
+            Write-LogError "LUMINA backend process (PID $($owner.PID)) did not become healthy. Check $BackendLog for errors."
+            return $false
+        } else {
+            Write-LogError "Port $BackendPort is occupied by an unrelated process:"
+            Write-ProcessDetails $owner 'Backend'
+            Write-LogError "Cannot start backend. Stop the conflicting process or change the backend port."
+            return $false
+        }
+    }
+
+    # Port is free — start backend
+    $pythonCmd = Get-PythonCommand
+    if (-not $pythonCmd) {
+        Write-LogError 'Python 3.11+ not found on PATH.'
+        return $false
+    }
+
+$pyExe = 'C:\Users\User\AppData\Local\Programs\Python\Python312\python.exe'
+$pyVerArg = @()
+
+$beArgs = @('-m', 'uvicorn', 'server:app', '--host', $BackendHost, '--port', $BackendPort)
+    Write-Log "Starting backend: $pyExe $($beArgs -join ' ')"
+    Write-Log "Backend working directory: $BackendDir"
+
+    try {
+        $proc = Start-Process -FilePath $pyExe -ArgumentList $beArgs `
+            -WorkingDirectory $BackendDir -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $BackendLog -RedirectStandardError "$LogDir\backend_err.log"
+        Write-Log "Backend process started (PID: $($proc.Id))."
+    } catch {
+        Write-LogError "Failed to start backend: $_"
+        return $false
+    }
+
+    $ready = Wait-Ready -Probe { Test-BackendHealth } -Label 'Backend' -TimeoutSec $StartupTimeoutSeconds
+    return $ready
+}
+
+# ─── Start frontend (with port conflict handling) ─────────────
+function Start-Frontend {
+    $healthUrl = "http://${FrontendHost}:${FrontendPort}/"
+    Write-Log "Frontend health check URL: $healthUrl"
+
+    # Check if frontend is already healthy
+    if (Test-FrontendHealth) {
+        Write-Log "Frontend is already healthy at $healthUrl — reusing existing service."
+        $owner = Get-PortOwner $FrontendPort
+        Write-ProcessDetails $owner 'Frontend'
+        return $true
+    }
+
+    # Port is occupied but not healthy — investigate
+    $checkHost = if ($FrontendHost -in @('localhost', '0.0.0.0')) { '127.0.0.1' } else { $FrontendHost }
+    if (Test-Port $checkHost $FrontendPort) {
+        $owner = Get-PortOwner $FrontendPort
+        Write-LogWarn "Port $FrontendPort is occupied but frontend health check failed."
+        Write-ProcessDetails $owner 'Frontend'
+
+        if ($owner -and (Test-IsLuminaProcess $owner 'frontend')) {
+            Write-LogWarn "Port $FrontendPort is held by a LUMINA frontend process (PID $($owner.PID)) but it is not healthy."
+            Write-LogWarn "The process may be starting up or has crashed. Waiting for it to become healthy..."
+            $ready = Wait-Ready -Probe { Test-FrontendHealth } -Label 'Frontend' -TimeoutSec 60
+            if ($ready) {
+                Write-LogSuccess "Frontend became healthy. Reusing existing process."
+                return $true
+            }
+            Write-LogError "LUMINA frontend process (PID $($owner.PID)) did not become healthy. Check $FrontendLog for errors."
+            return $false
+        } else {
+            Write-LogError "Port $FrontendPort is occupied by an unrelated process:"
+            Write-ProcessDetails $owner 'Frontend'
+            Write-LogError "Cannot start frontend. Stop the conflicting process or change the frontend port."
+            return $false
+        }
+    }
+
+    # Port is free — start frontend
+    $npmPath = Get-NpmPath
+    if (-not $npmPath) {
+        Write-LogError 'npm not found on PATH.'
+        return $false
+    }
+
+    Write-Log "Starting frontend: $npmPath start"
+    Write-Log "Frontend working directory: $FrontendDir"
+
+    try {
+        $proc = Start-Process -FilePath $npmPath -ArgumentList 'start' `
+            -WorkingDirectory $FrontendDir -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $FrontendLog -RedirectStandardError "$LogDir\frontend_err.log"
+        Write-Log "Frontend process started (PID: $($proc.Id))."
+    } catch {
+        Write-LogError "Failed to start frontend: $_"
+        return $false
+    }
+
+    $ready = Wait-Ready -Probe { Test-FrontendHealth } -Label 'Frontend' -TimeoutSec $StartupTimeoutSeconds
+    return $ready
+}
+
+# ─── Open browser ──────────────────────────────────────────────
+function Open-Browser {
+    $url = "http://${FrontendHost}:${FrontendPort}/"
+    Write-Log "Opening browser: $url"
+    try {
+        Start-Process $url
+        Write-LogSuccess 'Browser opened.'
+    } catch {
+        Write-LogWarn "Could not open browser: $_"
+    }
+}
+
+# ─── Stop LUMINA processes (only LUMINA-owned) ─────────────────
+function Stop-Lumina {
+    Write-Log 'Stopping LUMINA-owned processes...'
+
+    # Stop frontend (node processes on port 3000)
+    $frontendPids = Get-NetTCPConnection -LocalPort $FrontendPort -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue
+    if ($frontendPids) {
+        foreach ($pidVal in $frontendPids) {
+            try {
+                $proc = Get-Process -Id $pidVal -ErrorAction Stop
+                $owner = Get-PortOwner $FrontendPort
+                if (Test-IsLuminaProcess $owner 'frontend') {
+                    Write-Log "Stopping LUMINA frontend process (PID: $pidVal, $($proc.ProcessName))"
+                    Stop-Process -Id $pidVal -Force -ErrorAction Stop
+                } else {
+                    Write-Log "Skipping non-LUMINA process on port $FrontendPort (PID: $pidVal, $($proc.ProcessName))"
+                }
+            } catch {
+                # Process may have already exited
+            }
+        }
+    }
+
+    # Stop backend (python processes on port 8000)
+    $backendPids = Get-NetTCPConnection -LocalPort $BackendPort -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty OwningProcess -ErrorAction SilentlyContinue
+    if ($backendPids) {
+        foreach ($pidVal in $backendPids) {
+            try {
+                $proc = Get-Process -Id $pidVal -ErrorAction Stop
+                $owner = Get-PortOwner $BackendPort
+                if (Test-IsLuminaProcess $owner 'backend') {
+                    Write-Log "Stopping LUMINA backend process (PID: $pidVal, $($proc.ProcessName))"
+                    Stop-Process -Id $pidVal -Force -ErrorAction Stop
+                } else {
+                    Write-Log "Skipping non-LUMINA process on port $BackendPort (PID: $pidVal, $($proc.ProcessName))"
+                }
+            } catch {
+                # Process may have already exited
+            }
+        }
+    }
+
+    Write-LogSuccess 'LUMINA processes stopped. Docker Desktop and containers remain running.'
+}
+
+# ─── Status report ─────────────────────────────────────────────
+function Show-Status {
+    Write-Log '=== LUMINA Status ==='
+    $backendOk = Test-BackendHealth
+    $frontendOk = Test-FrontendHealth
+    $redisOk = Test-Port '127.0.0.1' 6379
+    $qdrantOk = Test-Port '127.0.0.1' 6333
+
+    Write-Log ("Backend  (port $BackendPort): {0}" -f $(if ($backendOk) { 'RUNNING' } else { 'STOPPED' }))
+    Write-Log ("Frontend (port $FrontendPort): {0}" -f $(if ($frontendOk) { 'RUNNING' } else { 'STOPPED' }))
+    Write-Log ("Redis    (port 6379): {0}" -f $(if ($redisOk) { 'RUNNING' } else { 'STOPPED' }))
+    Write-Log ("Qdrant   (port 6333): {0}" -f $(if ($qdrantOk) { 'RUNNING' } else { 'STOPPED' }))
+
+    # Show port owner details
+    if (-not $backendOk) {
+        $owner = Get-PortOwner $BackendPort
+        if ($owner) { Write-ProcessDetails $owner 'Backend' }
+    }
+    if (-not $frontendOk) {
+        $owner = Get-PortOwner $FrontendPort
+        if ($owner) { Write-ProcessDetails $owner 'Frontend' }
+    }
+}
+
+# ─── Main: START ───────────────────────────────────────────────
+function Invoke-Start {
+    Write-Log '========================================'
+    Write-Log 'LUMINA AI — Starting...'
+    Write-Log "Repository root: $RepoRoot"
+    Write-Log "Backend directory: $BackendDir"
+    Write-Log "Frontend directory: $FrontendDir"
+    Write-Log "Backend health URL: http://${BackendHost}:${BackendPort}/api/health"
+    Write-Log "Frontend health URL: http://${FrontendHost}:${FrontendPort}/"
+    Write-Log '========================================'
+
+    # Check if already running
+    $backendRunning = Test-BackendHealth
+    $frontendRunning = Test-FrontendHealth
+
+    if ($backendRunning -and $frontendRunning) {
+        Write-Log 'LUMINA is already running (backend and frontend healthy). Opening browser...'
+        Open-Browser
+        return 0
+    }
+
+    # 1. Docker Desktop detection
+    Write-Log 'Step 1: Checking Docker Desktop...'
+    $dockerPath = Get-DockerPath
+    if ($dockerPath) {
+        Write-Log "Docker found: $dockerPath"
+        if (-not (Test-DockerRunning $dockerPath)) {
+            Write-Log 'Docker Desktop is not running. Attempting to start it...'
+            $started = Start-DockerDesktop
+            if ($started) {
+                $dockerReady = Wait-DockerReady $dockerPath -TimeoutSec 120
+                if (-not $dockerReady) {
+                    Write-LogError 'Docker Desktop did not become ready within 120 seconds.'
+                    Write-LogError 'LUMINA can still start without Docker, but Redis and Qdrant will be unavailable.'
+                }
+            } else {
+                Write-LogWarn 'Docker Desktop executable not found. Continuing without Docker services.'
+            }
+        } else {
+            Write-LogSuccess 'Docker Desktop is already running.'
+        }
+
+        # 2. Start Docker services
+        if (Test-DockerRunning $dockerPath) {
+            Write-Log 'Step 2: Starting Docker services (Redis, Qdrant)...'
+            Start-DockerServices $dockerPath | Out-Null
+        }
+    } else {
+        Write-LogWarn 'Docker not found on PATH. Redis and Qdrant will be unavailable.'
+        Write-LogWarn 'LUMINA backend may still start in degraded mode.'
+    }
+
+    # 3. Start backend
+    Write-Log 'Step 3: Starting backend...'
+    $backendOk = Start-Backend
+    if (-not $backendOk) {
+        Write-LogError 'Backend failed to start. Aborting.'
+        Write-LogError "Check backend log: $BackendLog"
+        Write-LogError "Check runtime log: $LogFile"
+        return 1
+    }
+
+    # 4. Start frontend
+    Write-Log 'Step 4: Starting frontend...'
+    $frontendOk = Start-Frontend
+    if (-not $frontendOk) {
+        Write-LogError 'Frontend failed to start. Aborting.'
+        Write-LogError "Check frontend log: $FrontendLog"
+        Write-LogError "Check runtime log: $LogFile"
+        return 1
+    }
+
+    # 5. Open browser
+    Write-Log 'Step 5: Opening browser...'
+    Open-Browser
+
+    Write-LogSuccess '========================================'
+    Write-LogSuccess 'LUMINA AI is ready!'
+    Write-LogSuccess '========================================'
+    return 0
+}
+
+# ─── Main: STOP ────────────────────────────────────────────────
+function Invoke-Stop {
+    Write-Log '========================================'
+    Write-Log 'LUMINA AI — Stopping...'
+    Write-Log '========================================'
+    Stop-Lumina
+    return 0
+}
+
+# ─── Entry point ───────────────────────────────────────────────
+try {
+    switch ($Action) {
+        'start' { $exitCode = Invoke-Start }
+        'stop' { $exitCode = Invoke-Stop }
+        'status' { Show-Status; $exitCode = 0 }
+    }
+} catch {
+    Write-LogError "Unexpected error: $_"
+    Write-LogError $_.ScriptStackTrace
+    $exitCode = 1
+}
+
+exit $exitCode

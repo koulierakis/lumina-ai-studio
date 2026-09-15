@@ -21,18 +21,19 @@ Focus:
 - Wrong-secret token: editor endpoints must 401 (owner scoping).
 """
 from __future__ import annotations
+
 import base64
 import io
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import jwt
 import pytest
 import requests
-from PIL import Image
 from dotenv import load_dotenv
+from PIL import Image
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -524,8 +525,8 @@ class TestEditorVersionsAndSessions:
         """A JWT signed with a bogus secret must not authenticate."""
         payload = {
             "sub": EMAIL,
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(hours=1),
         }
         bogus = jwt.encode(payload, "not-the-real-secret-xyz", algorithm="HS256")
         h = {"Authorization": f"Bearer {bogus}"}
@@ -1081,8 +1082,8 @@ class TestAiEditFoundation:
     def test_all_ai_editor_endpoints_reject_wrong_secret_token(self, api_client):
         payload = {
             "sub": EMAIL,
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(hours=1),
         }
         bogus = jwt.encode(payload, "not-the-real-secret-xyz", algorithm="HS256")
         h = {"Authorization": f"Bearer {bogus}"}

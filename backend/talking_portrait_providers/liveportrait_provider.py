@@ -7,9 +7,9 @@ import datetime
 import hashlib
 import json
 import os
-import signal
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -17,8 +17,14 @@ import wave
 from collections import deque
 from pathlib import Path
 
-from .base import GeneratedTalkingPortrait, TalkingPortraitCancelledError, TalkingPortraitCapabilities, TalkingPortraitInput, TalkingPortraitProvider, TalkingPortraitProviderError
-
+from .base import (
+    GeneratedTalkingPortrait,
+    TalkingPortraitCancelledError,
+    TalkingPortraitCapabilities,
+    TalkingPortraitInput,
+    TalkingPortraitProvider,
+    TalkingPortraitProviderError,
+)
 
 _RUNNING_INFERENCE: dict[str, object | None] = {"pid": None, "command": None, "started_at": None, "stage": None}
 
@@ -124,7 +130,7 @@ class _LocalLipSyncEngine:
                 _raise_if_cancelled(should_cancel, LivePortraitProvider.name, process.pid)
                 await asyncio.sleep(1)
             stdout_data, stderr_data = await asyncio.wait_for(communicate_task, timeout=timeout_seconds)
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             _terminate_process_tree(process.pid)
             raise TalkingPortraitProviderError(LivePortraitProvider.name, f"{engine} lip-sync timed out", f"{engine} lip-sync timed out before a complete talking portrait could be generated.", retryable=True, stage="lip_sync", technical_details={"engine": engine, "command": command, "timeout_seconds": timeout_seconds}) from exc
         finally:
@@ -241,7 +247,7 @@ class _LocalLipSyncEngine:
         digest = hashlib.sha256()
         digest.update(cls._file_sha256(portrait_path).encode("ascii"))
         digest.update(cls._file_sha256(audio_path).encode("ascii"))
-        digest.update(f"{duration:.6f}:{fps}:{chunk_seconds}:{overlap_seconds}".encode("utf-8"))
+        digest.update(f"{duration:.6f}:{fps}:{chunk_seconds}:{overlap_seconds}".encode())
         return cls._repo_root() / "runtime" / "talking_portrait_chunks" / digest.hexdigest()[:24]
 
     @classmethod
@@ -337,7 +343,7 @@ def _runtime_log_path() -> Path:
 
 
 def _utc_now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
+    return datetime.datetime.now(datetime.UTC).isoformat().replace("+00:00", "Z")
 
 
 def _log_event(stage: str, message: str, **details) -> None:
@@ -636,7 +642,7 @@ class LivePortraitProvider(TalkingPortraitProvider):
                     _raise_if_cancelled(spec.should_cancel, self.name, process.pid)
                     await asyncio.sleep(1)
                 await asyncio.wait_for(wait_task, timeout=timeout_seconds)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 elapsed = round(time.time() - started, 3)
                 last_stdout = list(stdout_lines)[-40:]
                 last_stderr = list(stderr_lines)[-40:]
@@ -654,7 +660,7 @@ class LivePortraitProvider(TalkingPortraitProvider):
             stdout = "\n".join(stdout_lines)
             stderr = "\n".join(stderr_lines)
             _log_event("subprocess_exit", "LivePortrait subprocess exited", pid=process.pid, exit_code=process.returncode, elapsed_seconds=round(time.time() - started, 3), stdout_tail=list(stdout_lines)[-40:], stderr_tail=list(stderr_lines)[-40:])
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise TalkingPortraitProviderError(self.name, "LivePortrait timed out", "LivePortrait timed out during real inference.", retryable=True, stage="inference", technical_details={"command": command}) from exc
         finally:
             _RUNNING_INFERENCE.update({"pid": None, "command": None, "started_at": None, "stage": None})

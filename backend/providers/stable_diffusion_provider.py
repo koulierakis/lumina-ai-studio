@@ -4,11 +4,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import os
-from typing import List
 
 import requests
 
-from .base import ErrorKind, GeneratedImage, GenerationInput, ImageProvider, ProviderCapabilities, ProviderError
+from .base import (
+    ErrorKind,
+    GeneratedImage,
+    GenerationInput,
+    ImageProvider,
+    ProviderCapabilities,
+    ProviderError,
+)
 
 
 class StableDiffusionProvider(ImageProvider):
@@ -32,7 +38,7 @@ class StableDiffusionProvider(ImageProvider):
             "3:2": (960, 640), "1:1": (768, 768),
         }.get(ratio, (768, 768))
 
-    def _sync_generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    def _sync_generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         url = os.getenv("STABLE_DIFFUSION_URL")
         if not url:
             raise ProviderError(self.name, "STABLE_DIFFUSION_URL is missing", kind=ErrorKind.AUTH)
@@ -65,7 +71,7 @@ class StableDiffusionProvider(ImageProvider):
             raise ProviderError(self.name, "Endpoint returned no images")
         return images
 
-    async def generate(self, spec: GenerationInput) -> List[GeneratedImage]:
+    async def generate(self, spec: GenerationInput) -> list[GeneratedImage]:
         if spec.reference_images:
             raise ProviderError(self.name, "This connector is configured for text-to-image only",
                                 kind=ErrorKind.UNSUPPORTED)

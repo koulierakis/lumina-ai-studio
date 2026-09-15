@@ -18,7 +18,6 @@ from .backup_service import (
     BackupService,
 )
 from .build_service import (
-    BuildCommandResult,
     BuildCommandSpec,
     BuildExecutionOptions,
     BuildSequenceResult,
@@ -28,14 +27,12 @@ from .build_service import (
     create_default_validation_sequence,
 )
 from .ollama_service import OllamaService
-from .patch_service import PatchService
-from .patch_service import PatchRequestPayload
+from .patch_service import PatchRequestPayload, PatchService
 from .planning_service import PlanningService
 from .repository_service import RepositoryService
 from .security import (
     SecurityError,
 )
-
 
 DEFAULT_TASK_TIMEOUT_SECONDS: Final[float] = 3600.0
 DEFAULT_ANALYSIS_TIMEOUT_SECONDS: Final[float] = 300.0
@@ -797,9 +794,19 @@ def _extract_paths(source: Any) -> tuple[str, ...]:
                     "target_path",
                 ),
             )
+            destination_path = _extract_value(
+                item,
+                (
+                    "destination_path",
+                    "new_path",
+                    "destination",
+                ),
+            )
 
             if nested_path is not None:
                 paths.append(str(nested_path))
+            if destination_path is not None:
+                paths.append(str(destination_path))
 
         return tuple(dict.fromkeys(paths))
 
@@ -860,6 +867,59 @@ def _build_patch_request_from_metadata(
             ),
         }
     )
+
+    # Metadata patch operations honor task create/delete/exclusion policy.
+    create_operations = {"create", "add", "new", "create_file"}
+    delete_operations = {"delete", "remove", "delete_file"}
+    rename_operations = {"rename", "move", "rename_file"}
+
+    for operation in payload.operations:
+        operation_name = str(operation.operation).strip().casefold().replace("-", "_").replace(" ", "_")
+        if (
+            operation_name in create_operations
+            or bool(operation.create_if_missing)
+        ) and not context.request.allow_file_creation:
+            raise TaskPatchError(
+                "Patch requests file creation, but this task does not permit creating files."
+            )
+        if operation_name in delete_operations and not context.request.allow_file_deletion:
+            raise TaskPatchError(
+                "Patch requests file deletion, but this task does not permit deleting files."
+            )
+        if operation_name in rename_operations and (
+            not context.request.allow_file_creation
+            or not context.request.allow_file_deletion
+        ):
+            raise TaskPatchError(
+                "Patch requests a rename/move, which requires both file creation and deletion permission."
+            )
+
+    repository_root = context.configuration.repository_root
+    excluded_roots = tuple(
+        _normalize_repository_path(
+            repository_root,
+            excluded_path,
+            must_exist=False,
+        )
+        for excluded_path in context.request.excluded_paths
+    )
+    for operation in payload.operations:
+        candidate_paths = [operation.path]
+        if operation.destination_path:
+            candidate_paths.append(operation.destination_path)
+        for path_text in candidate_paths:
+            resolved = _normalize_repository_path(
+                repository_root,
+                path_text,
+                must_exist=False,
+            )
+            if any(
+                resolved == excluded_root or excluded_root in resolved.parents
+                for excluded_root in excluded_roots
+            ):
+                raise TaskPatchError(
+                    f"Patch targets an excluded path: {path_text}"
+                )
 
     planned_paths = _extract_plan_operation_paths(context.plan)
 
@@ -1164,7 +1224,8 @@ def _run_awaitable_sync(
 
     import asyncio
     import inspect
-    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeoutError
 
     if not inspect.isawaitable(awaitable):
         return awaitable
@@ -1195,9 +1256,10 @@ def _run_awaitable_sync(
     except RuntimeError:
         try:
             return asyncio.run(_runner())
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise TaskTimeoutError(
-                f"{operation_name} timed out."
+                f"{operation_name} timed out.",
+                timeout_seconds=timeout_seconds,
             ) from exc
 
     def _run_in_thread() -> Any:
@@ -1210,7 +1272,8 @@ def _run_awaitable_sync(
         except FutureTimeoutError as exc:
             future.cancel()
             raise TaskTimeoutError(
-                f"{operation_name} timed out."
+                f"{operation_name} timed out.",
+                timeout_seconds=timeout_seconds,
             ) from exc
 
 
@@ -1810,7 +1873,7 @@ def _resolve_build_commands(
     if not context.configuration.use_default_build_sequence:
         return ()
 
-    return create_default_validation_sequence(
+    commands = create_default_validation_sequence(
         backend_directory=(
             context.configuration.default_backend_directory
         ),
@@ -1830,6 +1893,23 @@ def _resolve_build_commands(
             context.remaining_seconds(),
         ),
     )
+
+    frontend_root = (
+        context.configuration.repository_root
+        / context.configuration.default_frontend_directory
+    )
+    has_typescript_config = any(
+        (frontend_root / name).is_file()
+        for name in ("tsconfig.json", "tsconfig.base.json")
+    )
+    if not has_typescript_config:
+        commands = tuple(
+            command
+            for command in commands
+            if command.command_id != "frontend-typescript"
+        )
+
+    return commands
 
 
 def _run_build(
@@ -3000,6 +3080,30 @@ class TaskService:
             message="Implementation planning started.",
         )
 
+        approved_preparation_plan = _extract_value(
+            context.request.metadata,
+            ("approved_preparation_plan",),
+        )
+
+        if approved_preparation_plan is not None:
+            context.plan = approved_preparation_plan
+            context.raise_if_interrupted()
+            planned_paths = _extract_paths(context.plan)
+            self._record_event(
+                context,
+                recorder,
+                stage=TaskStage.PLANNING,
+                status=TaskStatus.PLANNING,
+                level=TaskEventLevel.INFO,
+                message="Approved prepared implementation plan reused.",
+                details={
+                    "plan_type": type(context.plan).__name__,
+                    "planned_paths": list(planned_paths),
+                    "approved_preparation_reused": True,
+                },
+            )
+            return
+
         try:
             context.plan = _create_plan(
                 context,
@@ -3556,13 +3660,13 @@ class TaskService:
             )
 
             raise TaskRollbackError(
-                (
+
                     "Task failed and rollback also failed. "
                     f"Original error: "
                     f"{_safe_error_message(original_error)}. "
                     f"Rollback error: "
                     f"{_safe_error_message(rollback_error)}"
-                )
+
             ) from rollback_error
 
         context.rollback_succeeded = True

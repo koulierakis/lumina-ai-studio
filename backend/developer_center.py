@@ -10,11 +10,10 @@ import sys
 import time
 import urllib.request
 from collections import deque
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, AsyncIterator
 from uuid import uuid4
-
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HISTORY_FILE = Path(os.environ.get("DEVELOPER_CENTER_HISTORY", REPO_ROOT / ".lumina-developer-history.json"))
@@ -45,7 +44,7 @@ TASKS: dict[str, dict[str, Any]] = {
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def sanitize_text(value: str | None) -> str:
@@ -88,7 +87,7 @@ async def _command_output(command: list[str], cwd: Path, timeout: int = 300) -> 
     try:
         output, _ = await asyncio.wait_for(process.communicate(), timeout=timeout)
         return process.returncode or 0, sanitize_text(output.decode("utf-8", errors="replace"))
-    except asyncio.TimeoutError:
+    except TimeoutError:
         process.kill()
         await process.wait()
         return 1, "Task exceeded its safe execution time limit."
@@ -235,7 +234,7 @@ class DeveloperTaskManager:
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=20)
                     yield f"event: {event['event']}\ndata: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     yield ": keepalive\n\n"
         finally:
             self.subscribers.discard(queue)

@@ -7,7 +7,7 @@ import Login from './pages/Login';
 import IdentityPacks from './pages/IdentityPacks';
 import Generate from './pages/Generate';
 import Gallery from './pages/Gallery';
-import ComingSoon from './pages/ComingSoon';
+import ProductivityCenter from './pages/ProductivityCenter';
 import Editor from './pages/Editor';
 import EditorLanding from './pages/EditorLanding';
 import VideoStudio from './pages/VideoStudio';
@@ -18,7 +18,11 @@ import WorkspaceCenter from './pages/WorkspaceCenter';
 import ProjectDetail from './pages/ProjectDetail';
 import PlatformHub from './pages/PlatformHub';
 import CodeCreator from './pages/CodeCreator';
+import CodeBuilder from './pages/CodeBuilder';
 import DocumentStudio from './pages/DocumentStudio';
+import ExecutiveAdvisor from './pages/ExecutiveAdvisor';
+import Mentor from './pages/Mentor';
+import LuminaDrive from './pages/LuminaDrive';
 
 export default function App() {
   return (
@@ -49,8 +53,12 @@ export default function App() {
             >
               <Route index element={<Navigate to="dashboard" replace />} />
               <Route path="dashboard" element={<Dashboard />} />
+              <Route path="advisor" element={<ExecutiveAdvisor />} />
+              <Route path="mentor" element={<Mentor />} />
+              <Route path="drive" element={<LuminaDrive />} />
               <Route path="developer" element={<DeveloperCenter />} />
               <Route path="code-creator" element={<CodeCreator />} />
+              <Route path="code-builder" element={<CodeBuilder />} />
               <Route path="generate" element={<Generate />} />
               <Route path="identity" element={<IdentityPacks />} />
               <Route path="gallery" element={<Gallery />} />
@@ -64,9 +72,9 @@ export default function App() {
               <Route path="projects" element={<WorkspaceCenter mode="projects" />} />
               <Route path="projects/:projectId" element={<ProjectDetail />} />
               <Route path="documents" element={<DocumentStudio />} />
-              <Route path="finance" element={<ComingSoon title="JSA Finance" />} />
-              <Route path="research" element={<ComingSoon title="Internet Research" />} />
-              <Route path="automations" element={<ComingSoon title="Automations" />} />
+              <Route path="finance" element={<ProductivityCenter mode="finance" />} />
+              <Route path="research" element={<ProductivityCenter mode="research" />} />
+              <Route path="automations" element={<ProductivityCenter mode="automations" />} />
               <Route path="settings" element={<WorkspaceCenter mode="settings" />} />
               <Route path="search" element={<WorkspaceCenter mode="search" />} />
             </Route>

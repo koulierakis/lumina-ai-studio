@@ -35,6 +35,7 @@ export default function Gallery() {
   const toggleFav = async (item) => {
     const data = await apiPatch(`/gallery/${item.id}`, { favorite: !item.favorite });
     setItems((xs) => xs.map((x) => (x.id === item.id ? data : x)));
+    setViewer((current) => (current?.id === item.id ? data : current));
   };
 
   const remove = async (item) => {

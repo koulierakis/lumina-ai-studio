@@ -3,10 +3,15 @@ from __future__ import annotations
 import asyncio
 import sys
 
-import pytest
-
 import developer_center
-from developer_center import DeveloperTaskManager, TASKS, repository_status, sanitize_text, task_command
+import pytest
+from developer_center import (
+    TASKS,
+    DeveloperTaskManager,
+    repository_status,
+    sanitize_text,
+    task_command,
+)
 
 
 def test_task_allowlist_rejects_arbitrary_commands():
