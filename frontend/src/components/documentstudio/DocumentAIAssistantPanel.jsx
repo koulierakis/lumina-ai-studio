@@ -30,7 +30,7 @@ function ProviderSelect({ value, onChange, label = 'Provider' }) {
     <label className="doc-ai-field doc-ai-provider-field">
       <span>{label}</span>
       <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Automatic (Ollama)</option>
+        <option value="groq">Automatic (Groq)</option>
         {DOCUMENT_AI_PROVIDERS.map((providerName) => (
           <option key={providerName} value={providerName}>{providerName === 'groq' ? 'Groq' : 'Ollama'}</option>
         ))}
@@ -124,7 +124,7 @@ export default function DocumentAIAssistantPanel({ profileId, initialRequest = '
   const [advisor, setAdvisor] = useState(null);
   const [selectedTypes, setSelectedTypes] = useState([]);
   const [documentType, setDocumentType] = useState('nda');
-  const [provider, setProvider] = useState('');
+  const [provider, setProvider] = useState('groq');
   const [fallbackProvider, setFallbackProvider] = useState('');
   const [naturalPreview, setNaturalPreview] = useState(null);
   const [aiPreview, setAIPreview] = useState(null);

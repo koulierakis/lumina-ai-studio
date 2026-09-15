@@ -325,7 +325,7 @@ export default function ExecutiveAdvisor() {
     recognition.lang = 'el-GR';
     recognition.continuous = true;
     recognition.interimResults = true;
-    let committed = message.trim();
+    const dictationBase = message.trim();
     recognition.onstart = () => { setListening(true); setError(''); };
     recognition.onend = () => setListening(false);
     recognition.onerror = (event) => {
@@ -333,13 +333,17 @@ export default function ExecutiveAdvisor() {
       if (event.error !== 'aborted') setError(`Η φωνητική πληκτρολόγηση σταμάτησε: ${event.error || 'άγνωστο σφάλμα'}.`);
     };
     recognition.onresult = (event) => {
-      let interim = '';
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const transcript = event.results[index][0]?.transcript || '';
-        if (event.results[index].isFinal) committed = `${committed} ${transcript}`.trim();
-        else interim += transcript;
+      let finalText = '';
+      let interimText = '';
+      // Web Speech can re-emit earlier results while a phrase evolves. Rebuild
+      // from the authoritative result list instead of appending deltas.
+      for (let index = 0; index < event.results.length; index += 1) {
+        const transcript = (event.results[index][0]?.transcript || '').trim();
+        if (!transcript) continue;
+        if (event.results[index].isFinal) finalText = `${finalText} ${transcript}`.trim();
+        else interimText = `${interimText} ${transcript}`.trim();
       }
-      setMessage(`${committed}${interim ? ` ${interim}` : ''}`.trim());
+      setMessage([dictationBase, finalText, interimText].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim());
     };
     recognitionRef.current = recognition;
     recognition.start();
