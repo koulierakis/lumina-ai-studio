@@ -263,7 +263,7 @@ class LivePortraitInstaller:
             if free < 12 * 1024 * 1024 * 1024:
                 raise InstallerError("insufficient_disk_space", "Insufficient disk space. At least 12 GB free is required for LivePortrait.", {"free_bytes": free})
             if os.name == "nt":
-                os.system("git config --global core.longpaths true >NUL 2>NUL")
+                self.run_command([self.git, "config", "--global", "core.longpaths", "true"], stage="checking_git", timeout=15)
             self.stage("cloning_repository", 30, "Cloning or updating LivePortrait repository")
             if not (self.root / ".git").exists():
                 self.root.parent.mkdir(parents=True, exist_ok=True)
