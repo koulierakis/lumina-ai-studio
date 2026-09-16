@@ -4,10 +4,8 @@ import asyncio
 import io
 from pathlib import Path
 
-from starlette.datastructures import Headers
-from starlette.datastructures import UploadFile
-
 import openvoice_service
+from starlette.datastructures import Headers, UploadFile
 
 
 def test_checkpoint_cache_is_initialized_with_downloaded_files(monkeypatch, tmp_path: Path):
