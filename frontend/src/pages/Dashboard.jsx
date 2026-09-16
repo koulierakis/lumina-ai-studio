@@ -32,14 +32,18 @@ export default function Dashboard() {
     let overview = null;
     let system = null;
     const panelErrors = {};
-    try {
-      overview = await apiGet('/workspace/overview');
-    } catch {
+    const [overviewResult, systemResult] = await Promise.allSettled([
+      apiGet('/workspace/overview', { timeout: 10000, retry: false }),
+      apiGet('/system/status', { timeout: 10000, retry: false }),
+    ]);
+    if (overviewResult.status === 'fulfilled') {
+      overview = overviewResult.value;
+    } else {
       panelErrors.overview = 'Workspace overview is unavailable.';
     }
-    try {
-      system = await apiGet('/system/status');
-    } catch {
+    if (systemResult.status === 'fulfilled') {
+      system = systemResult.value;
+    } else {
       panelErrors.system = 'System status is unavailable.';
     }
     if (overview) {

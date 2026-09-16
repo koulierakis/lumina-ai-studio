@@ -641,7 +641,8 @@ async def system_status(owner: str = Depends(require_owner)) -> dict:
     except Exception:
         logger.exception("Active job count unavailable for system status")
         active = 0
-    return build_system_status(active_jobs=active)
+    # Local runtime probes perform blocking process and network checks.
+    return await asyncio.to_thread(build_system_status, active_jobs=active)
 
 
 @api.get("/system/environment")
@@ -3173,16 +3174,26 @@ def _job_view(doc: dict, module: str, job_type: str) -> dict:
     }
 
 
+async def _recent_rows(collection, owner: str, sort_key: str, limit: int) -> list[dict]:
+    # LocalPersistenceCollection.find() performs a synchronous PostgreSQL query.
+    # Keep that work off the event loop so other API requests stay responsive.
+    def read():
+        return collection.find({"owner_email": owner}, {"_id": 0}).sort(sort_key, -1).limit(limit)
+
+    cursor = await asyncio.to_thread(read)
+    return [doc async for doc in cursor]
+
+
 async def _central_jobs(owner: str) -> list[dict]:
-    editor_docs = [doc async for doc in ai_edit_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    editor_docs = await _recent_rows(ai_edit_jobs_coll, owner, "created_at", 100)
     editor_ids = {doc.get("id") for doc in editor_docs}
-    image_docs = [doc async for doc in jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    image_docs = await _recent_rows(jobs_coll, owner, "created_at", 100)
     # AI editor retries create a companion GenerationJob with the same id; expose it once.
     image = [_job_view(doc, "image", "image-generation") for doc in image_docs if doc.get("id") not in editor_ids and not str(doc.get("mode", "")).startswith("edit:")]
     editor = [_job_view(doc, "image-editor", "image-edit") for doc in editor_docs]
-    video = [_job_view(doc, "video", "video-generation") async for doc in video_generation_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
-    voice = [_job_view(doc, "voice", "voice-generation") async for doc in voice_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
-    talking_portrait = [_job_view(doc, "talking-portrait", "talking-portrait") async for doc in talking_portrait_jobs_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(100)]
+    video = [_job_view(doc, "video", "video-generation") for doc in await _recent_rows(video_generation_jobs_coll, owner, "created_at", 100)]
+    voice = [_job_view(doc, "voice", "voice-generation") for doc in await _recent_rows(voice_jobs_coll, owner, "created_at", 100)]
+    talking_portrait = [_job_view(doc, "talking-portrait", "talking-portrait") for doc in await _recent_rows(talking_portrait_jobs_coll, owner, "created_at", 100)]
     return sorted(image + editor + video + voice + talking_portrait, key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)[:400]
 
 
@@ -3213,17 +3224,24 @@ async def workspace_overview(owner: str = Depends(require_owner)) -> dict:
         logger.exception("Workspace notification sync failed")
         errors["notifications"] = "Job notifications could not be refreshed."
     try:
-        media = [doc async for doc in media_coll.find({"owner_email": owner}, {"_id": 0}).sort("created_at", -1).limit(12)]
+        media = await _recent_rows(media_coll, owner, "created_at", 12)
     except Exception:
         media = []
         errors["media"] = "Recent media is unavailable."
     try:
-        projects = [doc async for doc in projects_coll.find({"owner_email": owner}, {"_id": 0}).sort("updated_at", -1).limit(6)]
+        projects = await _recent_rows(projects_coll, owner, "updated_at", 6)
     except Exception:
         projects = []
         errors["projects"] = "Recent projects are unavailable."
     try:
-        readiness = await settings_readiness(owner)
+        # The Control Center only consumes provider readiness. The full settings
+        # probe scans local models, processes and devices and can stall a cloud
+        # request while the dashboard waits for its initial data.
+        statuses = await provider_manager.statuses()
+        readiness = {"providers": [
+            {"id": item.get("id"), "configured": bool(item.get("configured")),
+             "healthy": bool(item.get("healthy"))} for item in statuses
+        ]}
     except Exception:
         readiness = {"providers": [], "storage": {"available": False}, "security": {}}
         errors["readiness"] = "System readiness is unavailable."
