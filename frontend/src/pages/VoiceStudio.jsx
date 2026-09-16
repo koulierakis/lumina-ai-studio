@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AudioLines, Download, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiGet, fetchMediaBlobUrl, uploadFormData } from '../lib/api';
+import { apiGet, apiPost, fetchMediaBlobUrl, uploadFormData } from '../lib/api';
 import { handoffForTarget } from '../platform/studioHandoff';
 
 export const LUMINA_VOICES = [
@@ -45,11 +45,50 @@ export default function VoiceStudio() {
   const [audioUrl, setAudioUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const [providerReady, setProviderReady] = useState(null);
+  const [voicePacks, setVoicePacks] = useState([]);
+  const [packName, setPackName] = useState('Γιάννης');
+  const [consent, setConsent] = useState(false);
+  const [packBusy, setPackBusy] = useState(false);
+  const [resultVoice, setResultVoice] = useState('');
 
   const selectedVoice = useMemo(
-    () => LUMINA_VOICES.find((voice) => voice.id === voiceId) || LUMINA_VOICES[0],
-    [voiceId]
+    () => voicePacks.find((pack) => `pack:${pack.id}` === voiceId)
+      ? { name: voicePacks.find((pack) => `pack:${pack.id}` === voiceId).name, providerVoice: 'el-GR-NestorasNeural' }
+      : LUMINA_VOICES.find((voice) => voice.id === voiceId) || LUMINA_VOICES[0],
+    [voiceId, voicePacks]
   );
+
+  useEffect(() => {
+    apiGet('/voice/packs').then(setVoicePacks).catch(() => toast.error('Δεν φορτώθηκαν οι προσωπικές φωνές.'));
+  }, []);
+
+  async function createPack() {
+    if (!packName.trim() || !consent) return;
+    setPackBusy(true);
+    try {
+      const pack = await apiPost('/voice/packs', {
+        name: packName.trim(), language: 'el-GR', consent_confirmed: true,
+        ownership_declaration: 'Έχω δικαίωμα χρήσης και συναίνεση για το δείγμα φωνής.',
+      });
+      setVoicePacks((items) => [pack, ...items]);
+      setVoiceId(`pack:${pack.id}`);
+      toast.success('Η προσωπική φωνή δημιουργήθηκε. Πρόσθεσε δείγμα ήχου.');
+    } catch (error) { toast.error(error?.message || 'Αποτυχία δημιουργίας φωνής.'); }
+    finally { setPackBusy(false); }
+  }
+
+  async function uploadSample(packId, file) {
+    if (!file) return;
+    setPackBusy(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const result = await uploadFormData(`/voice/packs/${packId}/samples`, form);
+      setVoicePacks((items) => items.map((item) => item.id === packId ? result.pack : item));
+      toast.success('Το δείγμα φωνής αποθηκεύτηκε.');
+    } catch (error) { toast.error(error?.message || 'Αποτυχία μεταφόρτωσης δείγματος.'); }
+    finally { setPackBusy(false); }
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -91,8 +130,13 @@ export default function VoiceStudio() {
     event?.preventDefault?.();
     const clean = String(textOverride || text).trim();
     const effectiveVoice = LUMINA_VOICES.find((voice) => voice.id === options.voiceId) || selectedVoice;
+    const selectedPack = voicePacks.find((pack) => `pack:${pack.id}` === (options.voiceId || voiceId));
     if (!clean) {
       toast.error('Γράψε πρώτα το κείμενο που θέλεις να μετατρέψεις σε φωνή.');
+      return;
+    }
+    if (selectedPack && !selectedPack.sample_count) {
+      toast.error('Πρόσθεσε πρώτα δείγμα στη προσωπική φωνή.');
       return;
     }
 
@@ -111,11 +155,16 @@ export default function VoiceStudio() {
       form.append('style', STYLE_TO_BACKEND[style]);
       form.append('output_format', 'mp3');
       form.append('provider', 'edge-tts');
+      if (selectedPack) form.append('voice_pack_id', selectedPack.id);
       form.append('title', `${effectiveVoice.name} · ${style}`);
 
       const created = await uploadFormData('/voice/generate', form);
       setJob(created);
       const completed = await waitForJob(created.id);
+
+      if (selectedPack && completed.metadata?.tone_conversion_applied !== true) {
+        throw new Error('Η κλωνοποίηση φωνής δεν ολοκληρώθηκε. Δεν θα εμφανιστεί η βασική φωνή ως προσωπική.');
+      }
 
       if (!completed.output_media_id) {
         throw new Error('Η δημιουργία ολοκληρώθηκε χωρίς αρχείο ήχου.');
@@ -123,6 +172,7 @@ export default function VoiceStudio() {
 
       const url = await fetchMediaBlobUrl(completed.output_media_id);
       setAudioUrl(url);
+      setResultVoice(effectiveVoice.name);
       toast.success('Η φωνή δημιουργήθηκε.');
     } catch (error) {
       toast.error(error?.message || 'Η δημιουργία φωνής απέτυχε.');
@@ -160,7 +210,7 @@ export default function VoiceStudio() {
           </p>
           <h1 className="mt-2 font-display text-4xl">Voice Studio</h1>
           <p className="mt-2 max-w-2xl text-sm text-white/55">
-            Δημιούργησε φυσική ελληνική ομιλία με τον Ανδρέα και την Αριάδνη.
+            Δημιούργησε ελληνική ομιλία με έτοιμη ή προσωπική φωνή.
           </p>
         </header>
 
@@ -209,6 +259,30 @@ export default function VoiceStudio() {
                     </button>
                   );
                 })}
+                {voicePacks.map((pack) => (
+                  <button key={pack.id} type="button" onClick={() => setVoiceId(`pack:${pack.id}`)}
+                    className={`rounded-xl border p-4 text-left ${voiceId === `pack:${pack.id}` ? 'border-gold bg-gold/10' : 'border-white/10 bg-white/[.03]'}`}>
+                    <p className="font-medium">{pack.name}</p>
+                    <p className="text-xs text-white/45">Προσωπική φωνή · {pack.sample_count || 0} δείγματα</p>
+                  </button>
+                ))}
+              </div>
+              {voiceId.startsWith('pack:') && !voicePacks.find((pack) => `pack:${pack.id}` === voiceId)?.sample_count && (
+                <label className="mt-3 block text-sm text-white/70">Δείγμα φωνής (WAV ή MP3)
+                  <input type="file" accept="audio/wav,audio/x-wav,audio/mpeg,audio/mp4,audio/ogg,audio/webm" disabled={packBusy}
+                    onChange={(event) => uploadSample(voiceId.slice(5), event.target.files?.[0])} className="mt-2 block w-full text-xs" />
+                </label>
+              )}
+              <div className="mt-4 rounded-xl border border-white/10 p-4">
+                <p className="text-sm">Νέα προσωπική φωνή</p>
+                <input aria-label="Όνομα προσωπικής φωνής" value={packName} onChange={(event) => setPackName(event.target.value)}
+                  className="mt-2 w-full rounded-lg border border-white/10 bg-black/30 p-2 text-sm" />
+                <label className="mt-3 flex gap-2 text-xs text-white/65">
+                  <input type="checkbox" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
+                  Έχω δικαίωμα χρήσης και συναίνεση για αυτή τη φωνή.
+                </label>
+                <button type="button" onClick={createPack} disabled={packBusy || !consent || !packName.trim()}
+                  className="mt-3 rounded-lg bg-white/10 px-3 py-2 text-sm disabled:opacity-40">Δημιουργία προσωπικής φωνής</button>
               </div>
             </div>
 
@@ -231,7 +305,7 @@ export default function VoiceStudio() {
             <button
               type="button"
               onClick={generate}
-              disabled={busy || !text.trim()}
+              disabled={busy || !text.trim() || (voiceId.startsWith('pack:') && !voicePacks.find((pack) => `pack:${pack.id}` === voiceId)?.sample_count)}
               className="mt-7 flex w-full items-center justify-center gap-2 rounded-xl bg-gold px-5 py-3 font-medium text-black transition disabled:cursor-not-allowed disabled:opacity-40"
             >
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
@@ -261,7 +335,7 @@ export default function VoiceStudio() {
               {audioUrl && (
                 <div className="space-y-5">
                   <div>
-                    <p className="font-medium">{selectedVoice.name}</p>
+                    <p className="font-medium">{resultVoice}</p>
                     <p className="text-xs text-white/45">Greek · {style}</p>
                   </div>
                   <audio controls src={audioUrl} className="w-full" />
