@@ -49,8 +49,8 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 ## Κατάσταση repository
 
 - Branch: `work/lumina-production-unified`
-- Remediation commit: `61fcc270f37da9ba1ea762247...`.
-- Τελικό local HEAD μετά το report commit: `902a2d93765cfdda2958a3e1d9982dedc5c77221`.
+- Remediation commits: `61fcc270f`, plus the backend test-lifecycle and Sonar remediation commit to follow.
+- Τελικό local HEAD: θα ενημερωθεί μετά το τελικό push αυτής της cycle.
 - Το HEAD συγχρονίστηκε αρχικά με το `origin/work/lumina-production-unified` και το commit ανέβηκε μόνο στο ίδιο branch.
 - Τα υπάρχοντα untracked `BUILDER`, `FUNCTIONAL`, `TEST` και `local_voice_engine/` διατηρήθηκαν ανέγγιχτα.
 
@@ -69,21 +69,23 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 - Frontend production build: **passed**.
 - Backend focused security/installer tests: **14 passed**.
 - Backend focused coverage test: **5 passed, 1 skipped**, XML generated.
-- Backend full suite: **615 passed, 46 failed, 4 skipped**. Τα failures είναι υπάρχοντα HTTP integration timeouts/shared-server behavior και ένα Windows newline assertion, όχι failures στα touched security files.
+- Backend full suite: **661 passed, 4 skipped, 0 failed** (`backend/tests launcher/tests`, serial, coverage XML generated).
+- Root causes fixed: unconsumed Uvicorn stdout pipe causing server backpressure/timeouts, and Windows CRLF text snapshot normalization.
 - Runtime/auth smoke: **passed** (`startup`, `health`, protected route, login, `auth/me`).
 - Frontend dependency audit: **29 advisories**, μεταξύ αυτών 14 high, κυρίως transitive CRA/webpack dependencies. Το `npm audit fix --force` δεν εφαρμόστηκε επειδή προτείνει breaking downgrade του `react-scripts`.
-- GitHub Actions: quality και Sonar runs ξεκίνησαν για το `61fcc270f` και ήταν `in_progress` κατά τη σύνταξη της αναφοράς.
-- Sonar Quality Gate και τελικά metrics: αναμένουν την ολοκλήρωση του remote scan και δεν ήταν διαθέσιμα τοπικά.
+- GitHub Actions for the prior commit: quality and Sonar **success**.
+- Latest known Sonar metrics: Quality Gate **OK**, coverage **46.3%**, duplications **0.7%**, maintainability **A**, security **41 issues / E**, reliability **113 issues / E**.
 
 ## Metrics πριν -> μετά
 
 - Security: `41 / E` -> εκκρεμεί νέο Sonar scan.
 - Reliability: `113 / E` -> εκκρεμεί νέο Sonar scan.
 - Maintainability: `34 / A` -> εκκρεμεί νέο Sonar scan.
-- Coverage: `0.0%` -> reports παράγονται και συνδέονται, τελικό ποσοστό εκκρεμεί νέο Sonar scan.
-- Sonar warnings: `2` -> εκκρεμεί νέο Sonar scan.
+- Coverage: `0.0%` -> `46.3%` στο τελευταίο ολοκληρωμένο Sonar analysis.
+- Sonar warnings: `2` -> το νέο scan μετά το remediation commit εκκρεμεί.
 
 ## Commit
 
 - `61fcc270f` — `ci: wire Sonar coverage and harden command execution`
+- Pending final remediation commit — backend test lifecycle, cross-platform snapshots, and concrete Sonar fixes.
 

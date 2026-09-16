@@ -80,7 +80,7 @@ class OpenHandsChangeCaptureService:
             try:
                 decoded = raw.decode("utf-8")
                 if "\x00" not in decoded:
-                    text = decoded
+                    text = decoded.replace("\r\n", "\n").replace("\r", "\n")
             except UnicodeDecodeError:
                 text = None
         return FileSnapshot(digest.hexdigest(), size, text)

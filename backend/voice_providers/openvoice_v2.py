@@ -429,6 +429,11 @@ class OpenVoiceV2ToneConverter:
             raise ToneConversionError("source_download_failed", "Could not download OpenVoice source.") from exc
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+            root_resolved = root.resolve()
+            for member in zf.infolist():
+                target = (root / member.filename).resolve()
+                if target != root_resolved and root_resolved not in target.parents:
+                    raise ToneConversionError("source_invalid", "OpenVoice source archive contains an unsafe path.")
             zf.extractall(root)
         extracted = root / "OpenVoice-main"
         if not (extracted / "openvoice").is_dir():

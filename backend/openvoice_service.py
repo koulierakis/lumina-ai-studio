@@ -28,6 +28,7 @@ def _checkpoint_paths() -> tuple[str, str]:
     cache_dir = Path(os.environ.get("OPENVOICE_CACHE_DIR", "/tmp/openvoice-v2"))
     converter_dir = cache_dir / "converter"
     converter_dir.mkdir(parents=True, exist_ok=True)
+    converter_dir.chmod(0o700)
 
     config_path = converter_dir / "config.json"
     checkpoint_path = converter_dir / "checkpoint.pth"
@@ -147,6 +148,7 @@ async def convert(
 
     converter = _get_converter()
     workdir = Path(tempfile.mkdtemp(prefix="lumina-openvoice-"))
+    workdir.chmod(0o700)
     try:
         source_path = workdir / f"source{_suffix_for_mime(source_audio.content_type, '.mp3')}"
         reference_path = workdir / f"reference{_suffix_for_mime(reference_audio.content_type, '.wav')}"

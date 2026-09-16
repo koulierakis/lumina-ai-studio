@@ -263,12 +263,12 @@ export function documentAccessibilityAudit(html = '', layout = {}) {
     }
   });
   if (!headings.length) issues.push({ severity: 'warning', code: 'headings', message: 'Add headings for screen-reader navigation.' });
-  headings.reduce((previous, heading) => {
+  headings.forEach((heading, index) => {
+    const previous = headings[index - 1];
     if (previous && heading.level - previous.level > 1) {
       issues.push({ severity: 'warning', code: 'heading-order', message: `Heading ${heading.text} skips a level.` });
     }
-    return heading;
-  }, null);
+  });
   if (tables.some((table) => table.rows > 1 && table.columns > 1) && !/<th\b/i.test(source)) {
     issues.push({ severity: 'warning', code: 'table-headers', message: 'Data tables should include header cells.' });
   }

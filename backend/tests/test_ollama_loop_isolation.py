@@ -215,7 +215,8 @@ def test_concurrent_worker_threads_are_isolated(stub_ollama_url: str) -> None:
             result = asyncio.run(
                 service.generate(model=PRIMARY_MODEL, prompt="threaded")
             )
-            assert result.content == json.dumps(_valid_payload())
+            if result.content != json.dumps(_valid_payload()):
+                raise AssertionError("worker returned an unexpected Ollama payload")
         except BaseException as exc:  # noqa: BLE001 - collected for assert
             errors.append(exc)
 

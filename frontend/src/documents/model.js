@@ -133,7 +133,7 @@ export function extractMergeFields(templateHtml = '') {
   const tokens = [...String(templateHtml || '').matchAll(/{{\s*([^#\/][^}|\s]*)(?:\|[^}]*)?\s*}}/g)]
     .map((match) => match[1].trim())
     .filter(Boolean);
-  return [...new Set(tokens)].sort();
+  return [...new Set(tokens)].sort((left, right) => left.localeCompare(right));
 }
 
 export function flattenMergeVariables(value = {}, prefix = '') {
@@ -153,7 +153,7 @@ export function validateMergeFields(templateHtml = '', variables = {}, requiredF
   const flattened = flattenMergeVariables(variables);
   const required = [...new Set([...(requiredFields || []), ...fields])];
   const missing = required.filter((field) => flattened[field] === undefined || flattened[field] === null || flattened[field] === '');
-  return { valid: missing.length === 0, fields, required, missing, available: Object.keys(flattened).sort() };
+  return { valid: missing.length === 0, fields, required, missing, available: Object.keys(flattened).sort((left, right) => left.localeCompare(right)) };
 }
 
 export function buildMergeFieldChip(field = '') {
