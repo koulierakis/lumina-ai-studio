@@ -3185,15 +3185,20 @@ async def _recent_rows(collection, owner: str, sort_key: str, limit: int) -> lis
 
 
 async def _central_jobs(owner: str) -> list[dict]:
-    editor_docs = await _recent_rows(ai_edit_jobs_coll, owner, "created_at", 100)
+    editor_docs, image_docs, video_docs, voice_docs, portrait_docs = await asyncio.gather(
+        _recent_rows(ai_edit_jobs_coll, owner, "created_at", 100),
+        _recent_rows(jobs_coll, owner, "created_at", 100),
+        _recent_rows(video_generation_jobs_coll, owner, "created_at", 100),
+        _recent_rows(voice_jobs_coll, owner, "created_at", 100),
+        _recent_rows(talking_portrait_jobs_coll, owner, "created_at", 100),
+    )
     editor_ids = {doc.get("id") for doc in editor_docs}
-    image_docs = await _recent_rows(jobs_coll, owner, "created_at", 100)
     # AI editor retries create a companion GenerationJob with the same id; expose it once.
     image = [_job_view(doc, "image", "image-generation") for doc in image_docs if doc.get("id") not in editor_ids and not str(doc.get("mode", "")).startswith("edit:")]
     editor = [_job_view(doc, "image-editor", "image-edit") for doc in editor_docs]
-    video = [_job_view(doc, "video", "video-generation") for doc in await _recent_rows(video_generation_jobs_coll, owner, "created_at", 100)]
-    voice = [_job_view(doc, "voice", "voice-generation") for doc in await _recent_rows(voice_jobs_coll, owner, "created_at", 100)]
-    talking_portrait = [_job_view(doc, "talking-portrait", "talking-portrait") for doc in await _recent_rows(talking_portrait_jobs_coll, owner, "created_at", 100)]
+    video = [_job_view(doc, "video", "video-generation") for doc in video_docs]
+    voice = [_job_view(doc, "voice", "voice-generation") for doc in voice_docs]
+    talking_portrait = [_job_view(doc, "talking-portrait", "talking-portrait") for doc in portrait_docs]
     return sorted(image + editor + video + voice + talking_portrait, key=lambda item: item.get("updated_at") or item.get("created_at") or "", reverse=True)[:400]
 
 
@@ -3207,42 +3212,46 @@ async def _sync_job_notifications(owner: str, jobs: list[dict]) -> None:
         module = str(job.get("module") or "workspace")
         title = str(job.get("title") or job.get("prompt") or job.get("job_type") or "Workspace job")[:200]
         message = f"{module.replace('-', ' ').title()} job {state}."
-        await emit_notification(notifications_coll, owner, category, title, message, "job", str(job.get("id")), module)
+        try:
+            await emit_notification(notifications_coll, owner, category, title, message, "job", str(job.get("id")), module)
+        except Exception:
+            logger.exception("Workspace notification sync failed")
+            return
 
 
 @api.get("/workspace/overview")
-async def workspace_overview(owner: str = Depends(require_owner)) -> dict:
+async def workspace_overview(background: BackgroundTasks, owner: str = Depends(require_owner)) -> dict:
     errors: dict[str, str] = {}
-    try:
-        jobs = await _central_jobs(owner)
-    except Exception:
-        jobs = []
+    results = await asyncio.gather(
+        _central_jobs(owner),
+        _recent_rows(media_coll, owner, "created_at", 12),
+        _recent_rows(projects_coll, owner, "updated_at", 6),
+        provider_manager.statuses(),
+        return_exceptions=True,
+    )
+    jobs_result, media_result, projects_result, statuses_result = results
+    jobs = jobs_result if not isinstance(jobs_result, Exception) else []
+    if isinstance(jobs_result, Exception):
         errors["jobs"] = "Job information is unavailable."
-    try:
-        await _sync_job_notifications(owner, jobs)
-    except Exception:
-        logger.exception("Workspace notification sync failed")
-        errors["notifications"] = "Job notifications could not be refreshed."
-    try:
-        media = await _recent_rows(media_coll, owner, "created_at", 12)
-    except Exception:
-        media = []
+    # Notification writes are not needed to render the overview. Run them after
+    # the response so a backlog of terminal jobs cannot hold the dashboard open.
+    background.add_task(_sync_job_notifications, owner, jobs)
+    media = media_result if not isinstance(media_result, Exception) else []
+    if isinstance(media_result, Exception):
         errors["media"] = "Recent media is unavailable."
-    try:
-        projects = await _recent_rows(projects_coll, owner, "updated_at", 6)
-    except Exception:
-        projects = []
+    projects = projects_result if not isinstance(projects_result, Exception) else []
+    if isinstance(projects_result, Exception):
         errors["projects"] = "Recent projects are unavailable."
-    try:
+    if not isinstance(statuses_result, Exception):
         # The Control Center only consumes provider readiness. The full settings
         # probe scans local models, processes and devices and can stall a cloud
         # request while the dashboard waits for its initial data.
-        statuses = await provider_manager.statuses()
+        statuses = statuses_result
         readiness = {"providers": [
             {"id": item.get("id"), "configured": bool(item.get("configured")),
              "healthy": bool(item.get("healthy"))} for item in statuses
         ]}
-    except Exception:
+    else:
         readiness = {"providers": [], "storage": {"available": False}, "security": {}}
         errors["readiness"] = "System readiness is unavailable."
     # Non-critical optional panels should not dominate Control Center warnings.

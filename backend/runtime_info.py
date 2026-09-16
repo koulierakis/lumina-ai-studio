@@ -397,16 +397,17 @@ def save_runtime_settings(body: dict[str, Any]) -> dict[str, Any]:
 def build_system_status(*, active_jobs: int = 0) -> dict[str, Any]:
     cfg = load_runtime_config()
     state = load_runtime_state()
-    ollama = check_ollama(cfg)
-    frontend = check_frontend(cfg)
+    cloud = bool(os.environ.get("RENDER_SERVICE_ID"))
+    ollama = {"online": False, "installed": False, "model": None, "models": []} if cloud else check_ollama(cfg)
+    frontend = {"reachable": True, "url": os.environ.get("RENDER_EXTERNAL_URL")} if cloud else check_frontend(cfg)
     warnings: list[str] = []
     if isinstance(state.get("warnings"), list):
         warnings.extend(str(item) for item in state["warnings"])
-    if not ollama.get("online"):
+    if not cloud and not ollama.get("online"):
         warnings.append("Local AI (Ollama) is offline.")
-    elif not ollama.get("installed"):
+    elif not cloud and not ollama.get("installed"):
         warnings.append(f"Coding model '{ollama.get('model')}' is not installed in Ollama.")
-    if not frontend.get("reachable"):
+    if not cloud and not frontend.get("reachable"):
         warnings.append("Frontend did not respond on the configured port.")
 
     services = state.get("services") if isinstance(state.get("services"), dict) else {}
@@ -422,6 +423,7 @@ def build_system_status(*, active_jobs: int = 0) -> dict[str, Any]:
 
     return {
         "overall_readiness": readiness,
+        "deployment_mode": "cloud" if cloud else "local",
         "system_ready": readiness == "ready",
         "backend": {
             "status": "ok",

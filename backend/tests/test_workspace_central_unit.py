@@ -5,6 +5,7 @@ import time
 
 import pytest
 import server
+from fastapi import BackgroundTasks
 from persistence import PersistenceCursor
 
 
@@ -14,7 +15,7 @@ async def test_workspace_overview_isolates_a_failed_subsystem(monkeypatch):
         raise RuntimeError("offline")
 
     monkeypatch.setattr(server, "_central_jobs", broken_jobs)
-    overview = await server.workspace_overview("owner@example.com")
+    overview = await server.workspace_overview(BackgroundTasks(), "owner@example.com")
     assert overview["jobs"] == []
     assert "jobs" in overview["panel_errors"]
     assert "readiness" in overview
@@ -37,3 +38,27 @@ async def test_recent_rows_keeps_event_loop_responsive():
     await asyncio.sleep(0.01)
     assert not task.done()
     assert [row["id"] for row in await task] == ["one"]
+
+
+@pytest.mark.anyio
+async def test_overview_returns_before_notification_sync(monkeypatch):
+    async def jobs(_owner):
+        return [{"id": "job-1", "status": "completed"}]
+
+    async def rows(*_args):
+        return []
+
+    async def statuses():
+        return []
+
+    async def notifications(*_args):
+        raise AssertionError("notification sync ran before response")
+
+    monkeypatch.setattr(server, "_central_jobs", jobs)
+    monkeypatch.setattr(server, "_recent_rows", rows)
+    monkeypatch.setattr(server.provider_manager, "statuses", statuses)
+    monkeypatch.setattr(server, "_sync_job_notifications", notifications)
+    background = BackgroundTasks()
+    overview = await server.workspace_overview(background, "owner@example.com")
+    assert len(overview["jobs"]) == 1
+    assert len(background.tasks) == 1

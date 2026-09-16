@@ -96,3 +96,16 @@ def test_build_system_status_ready_without_ollama(monkeypatch):
     assert status["overall_readiness"] == "ready"
     assert status["ollama"]["status"] == "offline"
     assert "Local AI (Ollama) is offline." in status["warnings"]
+
+
+def test_cloud_status_skips_local_runtime_probes(monkeypatch):
+    monkeypatch.setenv("RENDER_SERVICE_ID", "srv-example")
+    monkeypatch.setenv("RENDER_EXTERNAL_URL", "https://example.onrender.com")
+    monkeypatch.setattr(runtime_info, "check_ollama", lambda cfg=None: (_ for _ in ()).throw(AssertionError("local Ollama probe")))
+    monkeypatch.setattr(runtime_info, "check_frontend", lambda cfg=None: (_ for _ in ()).throw(AssertionError("local frontend probe")))
+    monkeypatch.setattr(runtime_info, "load_runtime_state", lambda: {})
+    status = runtime_info.build_system_status()
+    assert status["deployment_mode"] == "cloud"
+    assert status["system_ready"] is True
+    assert status["frontend"]["url"] == "https://example.onrender.com"
+    assert status["warnings"] == []

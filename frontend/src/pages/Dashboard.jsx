@@ -71,8 +71,8 @@ export default function Dashboard() {
   const system = data.system;
   const systemReadyLabel = system?.system_ready ? 'Ready' : system?.overall_readiness === 'degraded' ? 'Degraded' : system ? 'Checking' : '—';
   const backendLabel = system?.backend?.status === 'ok' ? 'Online' : 'Offline';
-  const localAiLabel = system?.ollama?.online ? 'Online' : 'Offline';
-  const codingModelLabel = system?.coding_model?.installed ? (system.coding_model.name || 'Installed') : (system?.coding_model?.name ? 'Missing' : '—');
+  const localAiLabel = system?.deployment_mode === 'cloud' ? 'Local only' : system?.ollama?.online ? 'Online' : 'Offline';
+  const codingModelLabel = system?.deployment_mode === 'cloud' ? 'Local only' : system?.coding_model?.installed ? (system.coding_model.name || 'Installed') : (system?.coding_model?.name ? 'Missing' : '—');
   const activeJobCount = typeof system?.active_jobs === 'number' ? system.active_jobs : running.length;
   const warningCount = Array.isArray(system?.warnings) ? system.warnings.length : Object.keys(data.panelErrors).length;
 
