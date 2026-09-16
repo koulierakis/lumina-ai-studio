@@ -38,6 +38,8 @@ jobs:
         run: ruff check --fix --exit-zero backend launcher
       - run: ruff check --output-format=github backend launcher
       - run: python -m pytest backend/tests launcher/tests -q
+      - name: Fresh local startup and authenticated API smoke
+        run: python scripts/lumina-smoke.py
   frontend:
     runs-on: ubuntu-latest
     defaults:
@@ -51,8 +53,8 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - name: Run focused frontend acceptance tests
-        run: CI=true npm test -- --watchAll=false src/components/documentstudio/DocumentAIAssistantPanel.test.jsx src/pages/VoiceStudio.test.jsx src/pages/IdentityPacks.test.jsx src/pages/CodeBuilder.recovery.test.jsx src/pages/WorkspaceCenter.test.jsx
+      - name: Run full frontend test suite
+        run: CI=true npm test -- --watchAll=false --runInBand
       - run: npm run build
   security:
     runs-on: ubuntu-latest
