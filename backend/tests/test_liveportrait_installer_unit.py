@@ -4,6 +4,7 @@ import time
 from pathlib import Path
 
 import server
+from talking_portrait_providers import liveportrait_installer as installer_module
 from fastapi.testclient import TestClient
 from server import app
 from talking_portrait_providers import get_talking_portrait_provider
@@ -74,4 +75,29 @@ def test_persistent_payload_supports_backend_restart_and_windows_paths(tmp_path)
     assert payload["install_job_id"] == "job with spaces"
     path = Path("runtime") / "talking_portrait" / "installations" / "job with spaces"
     assert "job with spaces" in str(path)
+
+
+def test_windows_preflight_configures_git_long_paths(monkeypatch, tmp_path):
+    installer = LivePortraitInstaller("unit-windows-job", lambda _: None, lambda: False)
+    repository = tmp_path / "liveportrait"
+    (repository / ".git").mkdir(parents=True)
+    installer.root = repository
+    installer.stage = lambda *args, **kwargs: None
+    installer.log = lambda *args, **kwargs: None
+    installer.locate_python = lambda: "python"
+    installer.find_ffmpeg = lambda: "ffmpeg"
+    installer.install_torch = lambda: None
+    installer.download_checkpoints = lambda: None
+    installer.verify_checkpoints = lambda: None
+    installer.verify_runtime = lambda: None
+    installer.smoke_test = lambda: None
+    commands = []
+    installer.run_command = lambda command, **kwargs: commands.append(command) or command
+    monkeypatch.setattr(installer_module.os, "name", "nt")
+    monkeypatch.setattr(installer_module.LivePortraitProvider, "checkpoint_root", lambda: tmp_path / "checkpoints")
+    monkeypatch.setattr(installer_module.LivePortraitProvider, "diagnostics", lambda: {})
+
+    installer.run()
+
+    assert any(command[1:] == ["config", "--global", "core.longpaths", "true"] for command in commands)
 

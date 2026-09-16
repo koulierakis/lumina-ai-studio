@@ -1,5 +1,7 @@
 import asyncio
 import base64
+import io
+import zipfile
 
 import pytest
 from voice_providers import openvoice_v2
@@ -84,3 +86,21 @@ def test_convert_accepts_json_base64(monkeypatch):
     result = asyncio.run(converter.convert(b"base", "audio/mpeg", b"ref", "audio/wav"))
     assert result.audio == b"voice-clone"
     assert result.mime_type == "audio/mpeg"
+
+
+def test_source_archive_rejects_path_traversal(monkeypatch, tmp_path):
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("../escape.py", "unsafe")
+
+    class FakeResponse:
+        content = archive.getvalue()
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(openvoice_v2.httpx, "get", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setenv("OPENVOICE_V2_CACHE_DIR", str(tmp_path / "cache"))
+
+    with pytest.raises(ToneConversionError, match="unsafe path"):
+        OpenVoiceV2ToneConverter._ensure_openvoice_source()
