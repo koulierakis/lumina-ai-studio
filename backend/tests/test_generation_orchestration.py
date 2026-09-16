@@ -108,7 +108,7 @@ def test_groq_configured_and_unconfigured_state_is_lazy(monkeypatch):
         "name": "groq",
         "configured": False,
         "available": False,
-        "model": "llama-3.3-70b-versatile",
+        "model": "openai/gpt-oss-120b",
         "network_checked": False,
         "error": "Groq is not configured",
     }
