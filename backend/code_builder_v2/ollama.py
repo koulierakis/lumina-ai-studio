@@ -73,7 +73,7 @@ class OllamaClient:
             return configured
         if requested and self._is_cloud_model_name(requested) and "/" not in requested:
             return requested
-        return "llama-3.3-70b-versatile"
+        return os.getenv("LUMINA_GROQ_MODEL", "").strip() or "openai/gpt-oss-120b"
 
     def _hf_model(self, requested: str | None) -> str:
         configured = os.getenv("HF_CODE_MODEL", "").strip()
