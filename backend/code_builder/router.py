@@ -2939,7 +2939,7 @@ async def rollback_code_builder_task(
     except Exception as exc:
         logger.exception(
             "Manual rollback failed for task %s.",
-            normalized_task_id,
+            normalized_task_id.replace("\r", "\\r").replace("\n", "\\n"),
         )
 
         raise HTTPException(

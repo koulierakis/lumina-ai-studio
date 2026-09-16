@@ -150,7 +150,7 @@ export default function VideoEditor() {
   const duplicateClip = (id) => setState((s) => {
     const i = s.clips.findIndex((c) => c.id === id);
     if (i < 0) return s;
-    const clone = { ...s.clips[i], id: `c-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` };
+    const clone = { ...s.clips[i], id: `c-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${i}`}` };
     const arr = [...s.clips.slice(0, i + 1), clone, ...s.clips.slice(i + 1)];
     return { ...s, clips: arr };
   });

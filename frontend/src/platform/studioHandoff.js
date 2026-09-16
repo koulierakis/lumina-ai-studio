@@ -46,7 +46,7 @@ export function detectStudioIntent(message) {
   if (!target) return null;
 
   return {
-    id: `mind-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    id: `mind-${globalThis.crypto?.randomUUID?.() || Date.now()}`,
     target,
     route: STUDIO_TARGETS[target].route,
     label: STUDIO_TARGETS[target].label,

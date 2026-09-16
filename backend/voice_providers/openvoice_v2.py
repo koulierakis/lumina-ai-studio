@@ -421,6 +421,7 @@ class OpenVoiceV2ToneConverter:
             return source_root
 
         root.mkdir(parents=True, exist_ok=True)
+        root.chmod(0o700)
         archive_url = "https://github.com/myshell-ai/OpenVoice/archive/refs/heads/main.zip"
         try:
             response = httpx.get(archive_url, timeout=60.0, follow_redirects=True)
@@ -487,7 +488,7 @@ class OpenVoiceV2ToneConverter:
             **hps.model,
         ).to(device)
         model.eval()
-        checkpoint = torch.load(checkpoint_path, map_location=torch.device(device), weights_only=False)
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device(device), weights_only=True)
         model.load_state_dict(checkpoint["model"], strict=False)
         _LOCAL_MODEL = (model, hps, device, spectrogram_torch)
         return _LOCAL_MODEL

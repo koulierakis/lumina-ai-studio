@@ -60,9 +60,14 @@ const normalizeCheck = (value) => {
   const item = asObject(value);
   return { name: text(item.name, 'Local service'), status: text(item.status, 'warning'), detail: text(item.detail, 'No additional details are available.') };
 };
+let generatedIdCounter = 0;
+const generatedId = (prefix) => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `${prefix}-${uuid || `${Date.now()}-${generatedIdCounter++}`}`;
+};
 const normalizeTask = (value) => {
   const item = asObject(value);
-  return { ...item, id: text(item.id, `local-${Math.random().toString(36).slice(2)}`), label: text(item.label, 'Local task'), status: text(item.status, 'warning') };
+  return { ...item, id: text(item.id, generatedId('local')), label: text(item.label, 'Local task'), status: text(item.status, 'warning') };
 };
 const normalizeLog = (value) => {
   const item = asObject(value);
@@ -70,7 +75,7 @@ const normalizeLog = (value) => {
 };
 const normalizeMediaJob = (value) => {
   const item = asObject(value);
-  return { ...item, id: text(item.id, `job-${Math.random().toString(36).slice(2)}`), title: text(item.title, 'Application job'), status: text(item.status, 'unknown') };
+  return { ...item, id: text(item.id, generatedId('job')), title: text(item.title, 'Application job'), status: text(item.status, 'unknown') };
 };
 
 export function normalizeDeveloperOverview(payload) {

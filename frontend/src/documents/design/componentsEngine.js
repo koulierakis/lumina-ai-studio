@@ -19,6 +19,11 @@ export const COMPONENT_TYPE_IDS = Object.freeze({
   EXHIBIT: "exhibit",
   PAGE_BREAK: "page-break",
 });
+let componentIdCounter = 0;
+const generatedComponentId = (prefix) => {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  return `${prefix}-${uuid || `${Date.now()}-${componentIdCounter++}`}`;
+};
 
 export const COMPONENT_VARIANT_IDS = Object.freeze({
   DEFAULT: "default",
@@ -62,9 +67,7 @@ export function createComponent({
   return {
     id:
       id ||
-      `${type || "component"}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`,
+      generatedComponentId(type || "component"),
     type,
     variant,
     title,
@@ -678,9 +681,7 @@ export function cloneComponent(
     ...overrides,
     id:
       overrides.id ||
-      `${component.type}-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`,
+      generatedComponentId(component.type),
   });
 }
 

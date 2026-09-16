@@ -26,6 +26,8 @@ def _check_api_key(authorization: str | None) -> None:
 
 def _checkpoint_paths() -> tuple[str, str]:
     cache_dir = Path(os.environ.get("OPENVOICE_CACHE_DIR", "/tmp/openvoice-v2"))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.chmod(0o700)
     converter_dir = cache_dir / "converter"
     converter_dir.mkdir(parents=True, exist_ok=True)
     converter_dir.chmod(0o700)
@@ -150,12 +152,13 @@ async def convert(
     workdir = Path(tempfile.mkdtemp(prefix="lumina-openvoice-"))
     workdir.chmod(0o700)
     try:
-        source_path = workdir / f"source{_suffix_for_mime(source_audio.content_type, '.mp3')}"
-        reference_path = workdir / f"reference{_suffix_for_mime(reference_audio.content_type, '.wav')}"
+        with tempfile.NamedTemporaryFile(prefix="source-", suffix=_suffix_for_mime(source_audio.content_type, ".mp3"), dir=workdir, delete=False) as source_handle:
+            source_path = Path(source_handle.name)
+            source_handle.write(source_data)
+        with tempfile.NamedTemporaryFile(prefix="reference-", suffix=_suffix_for_mime(reference_audio.content_type, ".wav"), dir=workdir, delete=False) as reference_handle:
+            reference_path = Path(reference_handle.name)
+            reference_handle.write(reference_data)
         output_path = workdir / "converted.wav"
-
-        source_path.write_bytes(source_data)
-        reference_path.write_bytes(reference_data)
 
         # OpenVoice can extract speaker embeddings directly from audio files.
         # This deliberately avoids se_extractor/VAD dependencies so the worker

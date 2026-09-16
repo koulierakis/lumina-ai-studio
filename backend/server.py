@@ -1903,7 +1903,7 @@ async def delete_version(version_id: str, owner: str = Depends(require_owner)) -
     try:
         delete_file(doc["filename"], kind="reference" if doc.get("kind") == "reference" else "generated")
     except Exception:
-        logger.warning("Unable to delete version file %s", version_id)
+        logger.warning("Unable to delete version file %s", str(version_id).replace("\r", "\\r").replace("\n", "\\n"))
     await media_coll.delete_one({"id": version_id, "owner_email": owner})
     await gallery_coll.delete_many({"media_id": version_id, "owner_email": owner})
     return {"ok": True}
@@ -2404,7 +2404,7 @@ async def cancel_video_generation_job(job_id: str, owner: str = Depends(require_
             provider = get_video_provider(doc.get("provider"))
             if provider.capabilities.cancellation: await provider.cancel(provider_job_id)
         except VideoProviderError as exc:
-            logger.warning("Video provider cancellation failed for job %s: %s", job_id, exc.safe_message)
+            logger.warning("Video provider cancellation failed for job %s: %s", str(job_id).replace("\r", "\\r").replace("\n", "\\n"), exc.safe_message)
     doc.update({"status": "cancelled", "cancelled_at": now_iso(), "estimated_seconds_remaining": None, "updated_at": now_iso()})
     await video_generation_jobs_coll.replace_one({"id": job_id, "owner_email": owner}, doc)
     return VideoGenerationJob(**doc)
@@ -3868,8 +3868,9 @@ def _validate_talking_portrait_audio_upload(audio_bytes: bytes, audio_mime: str)
         ffprobe = shutil.which("ffprobe") or ffprobe
     suffix = {"audio/wav": ".wav", "audio/x-wav": ".wav", "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/webm": ".webm", "audio/ogg": ".ogg"}.get(audio_mime, ".audio")
     with tempfile.TemporaryDirectory(prefix="lumina_talking_portrait_audio_probe_") as temp_dir:
-        audio_path = Path(temp_dir) / f"upload{suffix}"
-        audio_path.write_bytes(audio_bytes)
+        with tempfile.NamedTemporaryFile(prefix="upload-", suffix=suffix, dir=temp_dir, delete=False) as handle:
+            audio_path = Path(handle.name)
+            handle.write(audio_bytes)
         result = subprocess.run([ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_type:format=duration", "-of", "json", str(audio_path)], text=True, encoding="utf-8", errors="replace", stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, shell=False)
     if result.returncode != 0:
         raise HTTPException(400, "Audio file could not be probed or decoded as valid audio.")
