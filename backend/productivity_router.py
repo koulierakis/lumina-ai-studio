@@ -484,5 +484,6 @@ async def stop_productivity_scheduler() -> None:
     try:
         await _scheduler_task
     except asyncio.CancelledError:
-        pass
+        _scheduler_task = None
+        raise
     _scheduler_task = None

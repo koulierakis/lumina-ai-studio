@@ -27,6 +27,7 @@ class RuntimeManager:
         self.worker_started = False
         self.max_concurrent = 2
         self._running = 0
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self.jobs_path = root / "jobs.json"
         self._load_jobs()
 
@@ -89,7 +90,12 @@ class RuntimeManager:
     def ensure_worker(self) -> None:
         if not self.worker_started:
             self.worker_started = True
-            asyncio.create_task(self._worker())
+            self._track_background_task(self._worker())
+
+    def _track_background_task(self, coroutine: Any) -> None:
+        task = asyncio.create_task(coroutine)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     async def _worker(self) -> None:
         while True:
@@ -97,7 +103,7 @@ class RuntimeManager:
             while self._running >= self.max_concurrent:
                 await asyncio.sleep(0.05)
             self._running += 1
-            asyncio.create_task(self._run_and_release(job_id))
+            self._track_background_task(self._run_and_release(job_id))
 
     async def _run_and_release(self, job_id: str) -> None:
         try:

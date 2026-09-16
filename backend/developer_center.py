@@ -133,6 +133,7 @@ class DeveloperTaskManager:
         self.lock = asyncio.Lock()
         self.subscribers: set[asyncio.Queue] = set()
         self.processes: dict[str, asyncio.subprocess.Process] = {}
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._load_history()
 
     def _load_history(self) -> None:
@@ -175,7 +176,9 @@ class DeveloperTaskManager:
         task = {"id": uuid4().hex, "task_type": task_type, "label": TASKS[task_type]["label"], "status": "queued", "created_at": utc_now(), "started_at": None, "finished_at": None, "duration_seconds": None, "output_summary": "Queued locally.", "error_summary": None, "exit_code": None}
         self.tasks[task["id"]] = task
         self._persist(); self._emit("task", task); self._log("info", "tasks", f"Queued: {task['label']}")
-        asyncio.create_task(self._run(task["id"]))
+        task_handle = asyncio.create_task(self._run(task["id"]))
+        self._background_tasks.add(task_handle)
+        task_handle.add_done_callback(self._background_tasks.discard)
         return task
 
     async def cancel(self, task_id: str) -> dict[str, Any]:
@@ -217,6 +220,7 @@ class DeveloperTaskManager:
                 self._log("info" if code == 0 else "error", "tasks", f"{task['label']}: {'completed' if code == 0 else 'failed'}")
             except asyncio.CancelledError:
                 task.update({"status": "cancelled", "output_summary": "Cancelled."})
+                raise
             except Exception as exc:
                 task.update({"status": "failed", "exit_code": 1, "error_summary": sanitize_text(str(exc)), "output_summary": "Task could not be completed."})
                 self._log("error", "tasks", f"{task['label']}: {exc}")
