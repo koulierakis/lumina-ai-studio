@@ -143,19 +143,19 @@ function Finance() {
             <input className="lumina-input" required placeholder="Περιγραφή" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             <input className="lumina-input" type="date" required value={form.occurred_on} onChange={(e) => setForm({ ...form, occurred_on: e.target.value })} />
             <textarea className="lumina-input min-h-24" placeholder="Σημειώσεις" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-            <button disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-semibold text-black transition hover:bg-amber-200 disabled:opacity-50">
+            <button type="submit" disabled={saving} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-amber-300 px-4 py-3 text-sm font-semibold text-black transition hover:bg-amber-200 disabled:opacity-50">
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Καταχώρηση
             </button>
           </form>
         </Card>
 
         <Card>
-          <div className="flex items-center justify-between"><h2 className="text-lg font-semibold text-white">Κινήσεις</h2><button onClick={load} className="rounded-lg border border-white/10 p-2 text-zinc-400 hover:text-white" title="Ανανέωση"><RefreshCw size={16} /></button></div>
+          <div className="flex items-center justify-between"><h2 className="text-lg font-semibold text-white">Κινήσεις</h2><button type="button" onClick={load} className="rounded-lg border border-white/10 p-2 text-zinc-400 hover:text-white" title="Ανανέωση"><RefreshCw size={16} /></button></div>
           <div className="mt-4 space-y-2">
             {loading ? <p className="py-8 text-center text-sm text-zinc-500">Φόρτωση…</p> : entries.length === 0 ? <Empty>Δεν υπάρχουν ακόμη οικονομικές κινήσεις.</Empty> : entries.map((entry) => (
               <div key={entry.id} className="flex items-start justify-between gap-4 rounded-xl border border-white/8 bg-black/20 p-4">
                 <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-white">{entry.description}</p><span className={`rounded-full px-2 py-0.5 text-[11px] ${entry.direction === 'income' ? 'bg-emerald-500/15 text-emerald-300' : 'bg-rose-500/15 text-rose-300'}`}>{entry.direction === 'income' ? 'Έσοδο' : 'Έξοδο'}</span></div><p className="mt-1 text-xs text-zinc-500">{entry.occurred_on} · {entry.category}</p></div>
-                <div className="flex shrink-0 items-center gap-3"><p className={`font-semibold tabular-nums ${entry.direction === 'income' ? 'text-emerald-300' : 'text-rose-300'}`}>{entry.direction === 'income' ? '+' : '-'}{money(entry.amount_cents, entry.currency)}</p><button onClick={() => remove(entry.id)} className="text-zinc-600 hover:text-rose-300" title="Διαγραφή"><Trash2 size={15} /></button></div>
+                <div className="flex shrink-0 items-center gap-3"><p className={`font-semibold tabular-nums ${entry.direction === 'income' ? 'text-emerald-300' : 'text-rose-300'}`}>{entry.direction === 'income' ? '+' : '-'}{money(entry.amount_cents, entry.currency)}</p><button type="button" onClick={() => remove(entry.id)} className="text-zinc-600 hover:text-rose-300" title="Διαγραφή"><Trash2 size={15} /></button></div>
               </div>
             ))}
           </div>

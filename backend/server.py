@@ -3309,7 +3309,10 @@ async def save_preferences(body: dict, owner: str = Depends(require_owner)) -> d
     if "identity_lock" in update and update["identity_lock"] not in IMAGE_STUDIO_IDENTITY_LOCKS:
         raise HTTPException(400, "Invalid Identity Lock preference.")
     update["owner_email"], update["updated_at"] = owner, now_iso()
-    await preferences_coll.update_one({"owner_email": owner}, {"$set": update}, upsert=True)
+    if await preferences_coll.find_one({"owner_email": owner}, {"_id": 0}):
+        await preferences_coll.update_one({"owner_email": owner}, {"$set": update})
+    else:
+        await preferences_coll.insert_one(update)
     return await get_preferences(owner)
 
 

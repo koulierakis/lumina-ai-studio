@@ -110,7 +110,7 @@ export default function CodeBuilderV2() {
               <label className="mb-2 block text-sm text-zinc-300">Model</label>
               <input value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-cyan-500/50" />
             </div>
-            <button disabled={busy || prompt.trim().length < 3} className="w-full rounded-xl bg-cyan-500 px-4 py-3 font-medium text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
+            <button type="submit" disabled={busy || prompt.trim().length < 3} className="w-full rounded-xl bg-cyan-500 px-4 py-3 font-medium text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
               {busy ? 'Working…' : 'Create plan'}
             </button>
           </form>
