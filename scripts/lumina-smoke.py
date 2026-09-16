@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import socket
 import subprocess
 import sys
@@ -32,7 +33,7 @@ def main() -> int:
         base = f"http://127.0.0.1:{port}/api"
         env = os.environ.copy()
         env.update({
-            "JWT_SECRET": "isolated-smoke-secret-32-characters-long",
+            "JWT_SECRET": secrets.token_urlsafe(48),
             "OWNER_EMAIL": "smoke@lumina.local",
             "OWNER_PASSWORD": "isolated-smoke-password",
             "OWNER_PASSWORD_HASH": "",
