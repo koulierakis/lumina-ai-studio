@@ -49,8 +49,8 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 ## Κατάσταση repository
 
 - Branch: `work/lumina-production-unified`
-- Remediation commits: `61fcc270f`, `18787bcd5`, and final report commit `5db2dbb9c`.
-- Τελικό local/origin HEAD: `5db2dbb9cf3bf6407a55784c8d19340a7cb1deea`.
+- Remediation commits: `61fcc270f`, `18787bcd5`, `5db2dbb9c`, and coverage commit `aa0643a07`.
+- Τελικό local/origin HEAD: `aa0643a07e631c7eb357eef201e9f891b9e165ed`.
 - Το HEAD συγχρονίστηκε αρχικά με το `origin/work/lumina-production-unified` και το commit ανέβηκε μόνο στο ίδιο branch.
 - Τα υπάρχοντα untracked `BUILDER`, `FUNCTIONAL`, `TEST` και `local_voice_engine/` διατηρήθηκαν ανέγγιχτα.
 
@@ -62,6 +62,7 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 - Αντικαταστάθηκε το `shell=True` στο Code Builder validation executor με argv execution και `shell=False`.
 - Αντικαταστάθηκε το `os.system` στον LivePortrait installer με shell-free command runner.
 - Προστέθηκε regression test για shell metacharacters.
+- Προστέθηκαν meaningful coverage tests για OpenVoice cache/workdir permissions, archive traversal rejection και Windows installer command handling.
 
 ## Επαληθεύσεις
 
@@ -70,19 +71,20 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 - Backend focused security/installer tests: **14 passed**.
 - Backend focused coverage test: **5 passed, 1 skipped**, XML generated.
 - Backend full suite: **661 passed, 4 skipped, 0 failed** (`backend/tests launcher/tests`, serial, coverage XML generated).
+- Coverage-focused tests: **13 passed**; όλες οι 8 προηγουμένως uncovered νέες γραμμές εκτελούνται.
 - Root causes fixed: unconsumed Uvicorn stdout pipe causing server backpressure/timeouts, and Windows CRLF text snapshot normalization.
 - Runtime/auth smoke: **passed** (`startup`, `health`, protected route, login, `auth/me`).
 - Frontend dependency audit: **29 advisories**, μεταξύ αυτών 14 high, κυρίως transitive CRA/webpack dependencies. Το `npm audit fix --force` δεν εφαρμόστηκε επειδή προτείνει breaking downgrade του `react-scripts`.
 - GitHub Actions for the prior commit: quality and Sonar **success**.
-- Final Sonar metrics: Quality Gate **FAILED only on new coverage**, coverage **46.3% overall / 46.7% new code**, duplications **0.7% overall / 0.0% new code**, maintainability **A**, security **41 issues / E**, reliability **109 issues / E**.
-- Final Sonar conditions: new reliability/security/maintainability ratings, duplication and hotspots **OK**; new coverage **ERROR** (`46.7% < 80%`).
+- Final Sonar metrics: Quality Gate **PASSED**, coverage **46.6% overall / 100.0% new code**, duplications **0.7% overall / 0.0% new code**, maintainability **A**, security **41 issues / E**, reliability **109 issues / E**.
+- Final Sonar conditions: new reliability/security/maintainability ratings, coverage, duplication and hotspots **OK**.
 
 ## Metrics πριν -> μετά
 
 - Security: `41 / E` -> `41 / E` overall; new security rating **OK**.
 - Reliability: `113 / E` -> `109 / E` overall; new reliability rating **OK**.
 - Maintainability: `34 / A` -> `A`; new maintainability rating **OK**.
-- Coverage: `0.0%` -> `46.3%` overall, `46.7%` new code; gate remains failed on the 80% new-code threshold.
+- Coverage: `0.0%` -> `46.6%` overall, `100.0%` new code; Quality Gate passed.
 - Sonar warnings: no separate warning count was exposed by the public project API; Actions/Sonar workflows completed successfully.
 
 ## Commit
@@ -90,12 +92,13 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 - `61fcc270f` — `ci: wire Sonar coverage and harden command execution`
 - `18787bcd5` — `test: stabilize backend integration lifecycle`
 - `5db2dbb9c` — `docs: finalize hardening report`
+- `aa0643a07` — `test: cover Sonar new production paths`
 
 ## Εκκρεμότητα Render
 
 - Δεν βρέθηκε `render.yaml`, Render deployment record ή public `RENDER_EXTERNAL_URL` στο repository/environment.
 - Render URL: `https://lumina-ai-studio.onrender.com`
-- Deployed commit from `/api/health`: `5db2dbb9cf3bf6407a55784c8d19340a7cb1deea`.
+- Deployed commit from `/api/health`: `aa0643a07e631c7eb357eef201e9f891b9e165ed`.
 - Render smoke: `/`, `/dashboard`, `/login`, `/api/health` returned `200`; unauthenticated protected endpoints returned `401`; invalid login returned `401`; database PostgreSQL and Supabase storage reported ready/OK.
 - Real authenticated login and authenticated `auth/me` could not be verified because no production credentials were available. The deployed login route itself was verified with an invalid-credential request returning the expected `401`.
 
