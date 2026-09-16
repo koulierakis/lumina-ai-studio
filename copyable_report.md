@@ -42,3 +42,47 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 - Ενέργεια: Απόκριση δοκιμής 'TEST'
 - Κατάσταση: Επιτυχής — ο πράκτορας απάντησε και πρόσθεσε αυτή την εγγραφή αναφοράς.
 
+---
+
+# Αναφορά production hardening - 2026-09-16
+
+## Κατάσταση repository
+
+- Branch: `work/lumina-production-unified`
+- Τελικό local HEAD: `61fcc270f37da9ba1ea762247...`
+- Το HEAD συγχρονίστηκε αρχικά με το `origin/work/lumina-production-unified` και το commit ανέβηκε μόνο στο ίδιο branch.
+- Τα υπάρχοντα untracked `BUILDER`, `FUNCTIONAL`, `TEST` και `local_voice_engine/` διατηρήθηκαν ανέγγιχτα.
+
+## Αλλαγές
+
+- Προστέθηκε πραγματική backend coverage με `pytest-cov` και `coverage.xml`.
+- Ενεργοποιήθηκε frontend LCOV και Sonar ingestion για `frontend/coverage/lcov.info`.
+- Αφαιρέθηκε το Sonar source/test overlap και δηλώθηκαν τα coverage report paths.
+- Αντικαταστάθηκε το `shell=True` στο Code Builder validation executor με argv execution και `shell=False`.
+- Αντικαταστάθηκε το `os.system` στον LivePortrait installer με shell-free command runner.
+- Προστέθηκε regression test για shell metacharacters.
+
+## Επαληθεύσεις
+
+- Frontend tests: **26 suites, 137 tests passed**.
+- Frontend production build: **passed**.
+- Backend focused security/installer tests: **14 passed**.
+- Backend focused coverage test: **5 passed, 1 skipped**, XML generated.
+- Backend full suite: **615 passed, 46 failed, 4 skipped**. Τα failures είναι υπάρχοντα HTTP integration timeouts/shared-server behavior και ένα Windows newline assertion, όχι failures στα touched security files.
+- Runtime/auth smoke: **passed** (`startup`, `health`, protected route, login, `auth/me`).
+- Frontend dependency audit: **29 advisories**, μεταξύ αυτών 14 high, κυρίως transitive CRA/webpack dependencies. Το `npm audit fix --force` δεν εφαρμόστηκε επειδή προτείνει breaking downgrade του `react-scripts`.
+- GitHub Actions: quality και Sonar runs ξεκίνησαν για το `61fcc270f` και ήταν `in_progress` κατά τη σύνταξη της αναφοράς.
+- Sonar Quality Gate και τελικά metrics: αναμένουν την ολοκλήρωση του remote scan και δεν ήταν διαθέσιμα τοπικά.
+
+## Metrics πριν -> μετά
+
+- Security: `41 / E` -> εκκρεμεί νέο Sonar scan.
+- Reliability: `113 / E` -> εκκρεμεί νέο Sonar scan.
+- Maintainability: `34 / A` -> εκκρεμεί νέο Sonar scan.
+- Coverage: `0.0%` -> reports παράγονται και συνδέονται, τελικό ποσοστό εκκρεμεί νέο Sonar scan.
+- Sonar warnings: `2` -> εκκρεμεί νέο Sonar scan.
+
+## Commit
+
+- `61fcc270f` — `ci: wire Sonar coverage and harden command execution`
+
