@@ -1,5 +1,5 @@
 from code_builder_v2.models import TaskRequest
-from code_builder_v2.ollama import OllamaChangeGenerator, OllamaPlanner
+from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner
 
 
 class FakeClient:
@@ -23,3 +23,14 @@ def test_ollama_generator_returns_full_file_changes():
     plan = planner.create_plan(request)
     changes = OllamaChangeGenerator(client).generate(request, plan, {})
     assert changes[0].content == "x = 1\n"
+
+
+def test_cloud_code_model_defaults_to_verified_shared_groq_model(monkeypatch):
+    monkeypatch.delenv("GROQ_CODE_MODEL", raising=False)
+    monkeypatch.setenv("LUMINA_GROQ_MODEL", "openai/gpt-oss-120b")
+    assert OllamaClient()._groq_model("qwen2.5-coder:7b") == "openai/gpt-oss-120b"
+
+
+def test_cloud_code_model_explicit_override_takes_precedence(monkeypatch):
+    monkeypatch.setenv("GROQ_CODE_MODEL", "openai/gpt-oss-20b")
+    assert OllamaClient()._groq_model("qwen2.5-coder:7b") == "openai/gpt-oss-20b"

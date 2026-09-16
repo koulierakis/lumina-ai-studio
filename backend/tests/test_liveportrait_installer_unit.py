@@ -4,10 +4,10 @@ import time
 from pathlib import Path
 
 import server
-from talking_portrait_providers import liveportrait_installer as installer_module
 from fastapi.testclient import TestClient
 from server import app
 from talking_portrait_providers import get_talking_portrait_provider
+from talking_portrait_providers import liveportrait_installer as installer_module
 from talking_portrait_providers.liveportrait_installer import (
     LivePortraitInstaller,
     build_initial_install_payload,

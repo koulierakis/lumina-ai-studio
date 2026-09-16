@@ -64,6 +64,8 @@ export default function DocumentStudio() {
   const saveSequenceRef = useRef(0);
   const autosaveTimerRef = useRef(null);
   const importInputRef = useRef(null);
+  const titleInputRef = useRef(null);
+  const saveInFlightRef = useRef(false);
   const [lexicalEditor, setLexicalEditor] = useState(null);
   const [reviewMode] = useState('editing');
   const normalizedPageLayout = useMemo(() => normalizePageLayout(pageLayout), [pageLayout]);
@@ -129,7 +131,9 @@ export default function DocumentStudio() {
   }
 
   async function saveEditor(autosave = false) {
-    if (!selected || saving) return;
+    if (!selected || saveInFlightRef.current) return;
+    const titleAtSave = titleInputRef.current?.value.trim() || selected.title;
+    saveInFlightRef.current = true;
     const saveSequence = ++saveSequenceRef.current;
     const selectedAtSave = selected;
     const htmlAtSave = currentEditorHtmlRef.current;
@@ -138,10 +142,11 @@ export default function DocumentStudio() {
     setSaving(true);
     setStatusText(autosave ? 'Autosaving…' : 'Saving…');
     try {
-      if (autosave && htmlAtSave === lastSavedHtmlRef.current && !layoutWasDirty) return;
+      if (autosave && htmlAtSave === lastSavedHtmlRef.current && !layoutWasDirty && titleAtSave === selectedAtSave.title) return;
       const contentText = htmlAtSave.replace(/<[^>]+>/g, ' ');
       const exportLayout = buildExportLayoutPayload(layoutAtSave);
       const updated = await documentApi.update(selectedAtSave.id, {
+        title: titleAtSave,
         content_html: htmlAtSave,
         content_text: contentText,
         design: { ...(selectedAtSave.design || {}), pageLayout: layoutAtSave, exportLayout },
@@ -163,6 +168,7 @@ export default function DocumentStudio() {
         toast.error(error.message || 'Save failed.');
       }
     } finally {
+      saveInFlightRef.current = false;
       if (saveSequence === saveSequenceRef.current) {
         setSaving(false);
         setStatusText('Ready');
@@ -205,7 +211,7 @@ export default function DocumentStudio() {
 
   return (
     <div className="doc-studio-shell">
-      <header className="doc-topbar"><div className="doc-brand"><FileText size={22} /><span>Lumina Documents</span></div><div className="doc-title-area"><input className="doc-title-input" aria-label="Document title" key={selected?.id || 'untitled'} defaultValue={selected?.title || 'Untitled Document'} disabled={!selected || operationLocked} onBlur={(e) => { if (selected && e.target.value.trim() !== selected.title) documentApi.update(selected.id, { title: e.target.value.trim(), expected_version: selected.version_number }).then((updated) => { setSelected(updated); refreshDocuments(); toast.success('Renamed.'); }).catch(() => toast.error('Rename failed.')); }} /><span className="doc-save-indicator"><i className={operationLocked ? 'is-busy' : ''} />{operationLocked ? statusText : (editorHtml !== lastSavedHtmlRef.current || layoutDirty ? 'Unsaved' : 'Saved')}</span></div><div className="doc-topbar-actions"><button className="doc-btn doc-btn-import" onClick={() => importInputRef.current?.click()} disabled={operationLocked}><Upload size={18} />Import</button><input ref={importInputRef} type="file" className="hidden" accept=".pdf,.docx,.txt,.md,.html,image/png,image/jpeg,image/webp" onChange={importWord} /><button className="doc-btn doc-btn-export doc-btn-pdf" onClick={() => exportDocument('pdf')} disabled={!selected || operationLocked}><Download size={18} />Export PDF</button><button className="doc-btn doc-btn-export doc-btn-word" onClick={() => exportDocument('docx')} disabled={!selected || operationLocked}><Download size={18} />Export Word</button></div></header>
+      <header className="doc-topbar"><div className="doc-brand"><FileText size={22} /><span>Lumina Documents</span></div><div className="doc-title-area"><input ref={titleInputRef} className="doc-title-input" aria-label="Document title" key={selected?.id || 'untitled'} defaultValue={selected?.title || 'Untitled Document'} disabled={!selected || operationLocked} onBlur={() => { if (selected && titleInputRef.current?.value.trim() !== selected.title) saveEditor(true); }} /><span className="doc-save-indicator"><i className={operationLocked ? 'is-busy' : ''} />{operationLocked ? statusText : (editorHtml !== lastSavedHtmlRef.current || layoutDirty ? 'Unsaved' : 'Saved')}</span></div><div className="doc-topbar-actions"><button className="doc-btn doc-btn-import" onClick={() => importInputRef.current?.click()} disabled={operationLocked}><Upload size={18} />Import</button><input ref={importInputRef} type="file" className="hidden" accept=".pdf,.docx,.txt,.md,.html,image/png,image/jpeg,image/webp" onChange={importWord} /><button className="doc-btn doc-btn-export doc-btn-pdf" onClick={() => exportDocument('pdf')} disabled={!selected || operationLocked}><Download size={18} />Export PDF</button><button className="doc-btn doc-btn-export doc-btn-word" onClick={() => exportDocument('docx')} disabled={!selected || operationLocked}><Download size={18} />Export Word</button></div></header>
       <div className="doc-toolbar"><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={createBlankDocument} disabled={operationLocked}><FileText size={16} /><span>New</span></button><button className="doc-tool-btn" onClick={() => saveEditor(false)} disabled={!selected || operationLocked}><Save size={16} /><span>Save</span></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={undoEditor} disabled={!selected || busy}><Undo2 size={16} /></button><button className="doc-tool-btn" onClick={redoEditor} disabled={!selected || busy}><Redo2 size={16} /></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={() => format('bold')} disabled={!selected || busy}><Bold size={16} /></button><button className="doc-tool-btn" onClick={() => format('italic')} disabled={!selected || busy}><Italic size={16} /></button><button className="doc-tool-btn" onClick={() => format('underline')} disabled={!selected || busy}><Underline size={16} /></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={() => format('insertUnorderedList')} disabled={!selected || busy}><List size={16} /></button><button className="doc-tool-btn" onClick={() => format('insertOrderedList')} disabled={!selected || busy}><ListOrdered size={16} /></button></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><select className="doc-page-size" value={normalizedPageLayout.size} onChange={(e) => updatePageLayout((c) => ({ ...c, size: e.target.value }))} disabled={busy}><option value="A4">A4</option><option value="Letter">Letter</option></select><select className="doc-page-orient" value={normalizedPageLayout.orientation} onChange={(e) => updatePageLayout((c) => ({ ...c, orientation: e.target.value }))} disabled={busy}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></div><div className="doc-toolbar-divider" /><div className="doc-toolbar-group"><button className="doc-tool-btn" onClick={() => setPrintPreview((v) => !v)} disabled={!selected || busy}>{printPreview ? 'Edit' : 'Preview'}</button><button className="doc-tool-btn" onClick={() => setLibraryOpen((v) => !v)} disabled={busy}>Library</button><button className={`doc-tool-btn ${aiPanelOpen ? 'is-active' : ''}`} onClick={() => setAIPanelOpen((value) => !value)} disabled={busy}><Sparkles size={16} />AI Assist</button></div></div>
       <div className="doc-presets-bar"><span className="doc-presets-label">Design:</span>{PRESET_BUTTONS.map((preset) => <button key={preset.id} className="doc-preset-btn" onClick={() => applyPreset(preset.id)} disabled={!selected || operationLocked || presetLoading}><Wand2 size={16} />{preset.label}</button>)}</div>
       {(aiPanelOpen || studioHandoff) && <DocumentAIAssistantPanel profileId={profile?.id} initialRequest={studioHandoff?.prompt || ''} initialOptions={studioHandoff?.options || {}} autoCreate={Boolean(studioHandoff)} handoffId={studioHandoff?.id || ''} onHandoffConsumed={() => navigate(location.pathname, { replace: true, state: null })} onApplyPreview={applyAIPreview} onDocumentSaved={handleAIDocumentSaved} onClose={() => setAIPanelOpen(false)} />}
