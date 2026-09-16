@@ -49,8 +49,8 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 ## Κατάσταση repository
 
 - Branch: `work/lumina-production-unified`
-- Remediation commits: `61fcc270f` and `18787bcd5`.
-- Τελικό local/origin HEAD: `18787bcd55b0d00ffa697d0276b6d8b57806f93f`.
+- Remediation commits: `61fcc270f`, `18787bcd5`, and final report commit `5db2dbb9c`.
+- Τελικό local/origin HEAD: `5db2dbb9cf3bf6407a55784c8d19340a7cb1deea`.
 - Το HEAD συγχρονίστηκε αρχικά με το `origin/work/lumina-production-unified` και το commit ανέβηκε μόνο στο ίδιο branch.
 - Τα υπάρχοντα untracked `BUILDER`, `FUNCTIONAL`, `TEST` και `local_voice_engine/` διατηρήθηκαν ανέγγιχτα.
 
@@ -74,23 +74,28 @@ Set-Location 'c:\Users\User\Desktop\LUMINA\lumina-ai-studio-main\frontend'; npm 
 - Runtime/auth smoke: **passed** (`startup`, `health`, protected route, login, `auth/me`).
 - Frontend dependency audit: **29 advisories**, μεταξύ αυτών 14 high, κυρίως transitive CRA/webpack dependencies. Το `npm audit fix --force` δεν εφαρμόστηκε επειδή προτείνει breaking downgrade του `react-scripts`.
 - GitHub Actions for the prior commit: quality and Sonar **success**.
-- Latest known Sonar metrics: Quality Gate **OK**, coverage **46.3%**, duplications **0.7%**, maintainability **A**, security **41 issues / E**, reliability **113 issues / E**.
+- Final Sonar metrics: Quality Gate **FAILED only on new coverage**, coverage **46.3% overall / 46.7% new code**, duplications **0.7% overall / 0.0% new code**, maintainability **A**, security **41 issues / E**, reliability **109 issues / E**.
+- Final Sonar conditions: new reliability/security/maintainability ratings, duplication and hotspots **OK**; new coverage **ERROR** (`46.7% < 80%`).
 
 ## Metrics πριν -> μετά
 
-- Security: `41 / E` -> εκκρεμεί νέο Sonar scan.
-- Reliability: `113 / E` -> εκκρεμεί νέο Sonar scan.
-- Maintainability: `34 / A` -> εκκρεμεί νέο Sonar scan.
-- Coverage: `0.0%` -> `46.3%` στο τελευταίο ολοκληρωμένο Sonar analysis.
-- Sonar warnings: `2` -> το νέο scan μετά το remediation commit εκκρεμεί.
+- Security: `41 / E` -> `41 / E` overall; new security rating **OK**.
+- Reliability: `113 / E` -> `109 / E` overall; new reliability rating **OK**.
+- Maintainability: `34 / A` -> `A`; new maintainability rating **OK**.
+- Coverage: `0.0%` -> `46.3%` overall, `46.7%` new code; gate remains failed on the 80% new-code threshold.
+- Sonar warnings: no separate warning count was exposed by the public project API; Actions/Sonar workflows completed successfully.
 
 ## Commit
 
 - `61fcc270f` — `ci: wire Sonar coverage and harden command execution`
 - `18787bcd5` — `test: stabilize backend integration lifecycle`
+- `5db2dbb9c` — `docs: finalize hardening report`
 
 ## Εκκρεμότητα Render
 
 - Δεν βρέθηκε `render.yaml`, Render deployment record ή public `RENDER_EXTERNAL_URL` στο repository/environment.
-- Συνεπώς δεν ήταν τεχνικά δυνατό να επαληθευτεί Render deployment commit ή production smoke URL χωρίς εξωτερικό service URL/permission.
+- Render URL: `https://lumina-ai-studio.onrender.com`
+- Deployed commit from `/api/health`: `5db2dbb9cf3bf6407a55784c8d19340a7cb1deea`.
+- Render smoke: `/`, `/dashboard`, `/login`, `/api/health` returned `200`; unauthenticated protected endpoints returned `401`; invalid login returned `401`; database PostgreSQL and Supabase storage reported ready/OK.
+- Real authenticated login and authenticated `auth/me` could not be verified because no production credentials were available. The deployed login route itself was verified with an invalid-credential request returning the expected `401`.
 
