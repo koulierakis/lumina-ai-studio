@@ -20,6 +20,8 @@ jest.mock('sonner', () => ({
 
 jest.mock('lucide-react', () => ({
   Sparkles: () => <span aria-hidden="true" />,
+  Eye: () => <span aria-hidden="true" />,
+  EyeOff: () => <span aria-hidden="true" />,
 }));
 
 describe('Login error handling', () => {
@@ -70,3 +72,4 @@ describe('Login error handling', () => {
     expect(typeof toast.error.mock.calls[0][0]).toBe('string');
   });
 });
+
