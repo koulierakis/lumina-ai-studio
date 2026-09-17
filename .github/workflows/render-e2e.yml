@@ -1,0 +1,68 @@
+name: render-production-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Render URL to test
+        required: false
+        default: https://lumina-ai-studio.onrender.com
+  workflow_run:
+    workflows:
+      - frontend-build
+      - finalize-release
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+jobs:
+  production-e2e:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      LUMINA_E2E_BASE_URL: ${{ github.event.inputs.base_url || 'https://lumina-ai-studio.onrender.com' }}
+      LUMINA_E2E_EMAIL: ${{ secrets.LUMINA_E2E_EMAIL }}
+      LUMINA_E2E_PASSWORD: ${{ secrets.LUMINA_E2E_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Playwright dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Wait for Render app to be reachable
+        shell: bash
+        run: |
+          for attempt in {1..30}; do
+            code="$(curl -k -L -s -o /dev/null -w '%{http_code}' "$LUMINA_E2E_BASE_URL" || true)"
+            if [[ "$code" =~ ^(200|301|302|401|403)$ ]]; then
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "Render app was not reachable at $LUMINA_E2E_BASE_URL"
+          exit 1
+
+      - name: Run production Playwright checks
+        run: npm run e2e:render
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-playwright-artifacts
+          path: |
+            test_reports/playwright-artifacts
+            test_reports/playwright-html
+          if-no-files-found: ignore
+          retention-days: 7

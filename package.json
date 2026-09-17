@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "e2e:render": "playwright test"
+  },
   "devDependencies": {
     "@playwright/test": "^1.62.1"
   }
