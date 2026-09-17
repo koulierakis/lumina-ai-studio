@@ -1,5 +1,18 @@
 
+import asyncio
+
 import pytest
+from botocore.exceptions import ClientError
+
+
+def _client_error(status: int, code: str = "", message: str = "storage failure") -> ClientError:
+    return ClientError(
+        {
+            "Error": {"Code": code, "Message": message},
+            "ResponseMetadata": {"HTTPStatusCode": status},
+        },
+        "GetObject",
+    )
 
 
 def test_local_storage_backend_round_trip(tmp_path, monkeypatch):
@@ -77,6 +90,63 @@ def test_s3_storage_contract_with_fake_compatible_client():
         backend.save("../escape", b"x")
 
 
+def test_s3_read_maps_missing_object_client_error_to_not_found():
+    from storage_backends import S3StorageBackend, StorageObjectNotFound
+
+    class MissingClient:
+        def get_object(self, Bucket, Key):
+            raise _client_error(404, "NoSuchKey")
+
+    backend = object.__new__(S3StorageBackend)
+    backend.bucket = "private-bucket"
+    backend.client = MissingClient()
+
+    with pytest.raises(StorageObjectNotFound) as exc_info:
+        backend.read("generated/private-object.png")
+
+    assert exc_info.value.operation == "GetObject"
+    assert exc_info.value.http_status == 404
+    assert exc_info.value.error_code == "NoSuchKey"
+
+
+def test_s3_read_keeps_permission_failure_distinct_from_missing_object():
+    from storage_backends import S3StorageBackend, StorageBackendError
+
+    class DeniedClient:
+        def get_object(self, Bucket, Key):
+            raise _client_error(403, "AccessDenied")
+
+    backend = object.__new__(S3StorageBackend)
+    backend.bucket = "private-bucket"
+    backend.client = DeniedClient()
+
+    with pytest.raises(StorageBackendError) as exc_info:
+        backend.read("generated/private-object.png")
+
+    assert exc_info.value.operation == "GetObject"
+    assert exc_info.value.http_status == 403
+    assert exc_info.value.error_code == "AccessDenied"
+
+
+def test_s3_read_keeps_missing_bucket_distinct_from_missing_object_even_with_404():
+    from storage_backends import S3StorageBackend, StorageBackendError
+
+    class MissingBucketClient:
+        def get_object(self, Bucket, Key):
+            raise _client_error(404, "NoSuchBucket")
+
+    backend = object.__new__(S3StorageBackend)
+    backend.bucket = "private-bucket"
+    backend.client = MissingBucketClient()
+
+    with pytest.raises(StorageBackendError) as exc_info:
+        backend.read("generated/private-object.png")
+
+    assert exc_info.value.operation == "GetObject"
+    assert exc_info.value.http_status == 404
+    assert exc_info.value.error_code == "NoSuchBucket"
+
+
 def test_legacy_storage_facade_routes_production_to_cloud(monkeypatch):
     import storage
 
@@ -111,3 +181,47 @@ def test_production_rejects_local_user_file_storage(monkeypatch):
     storage._BACKEND_SIGNATURE = None
     with pytest.raises(RuntimeError, match="S3-compatible"):
         storage.save_bytes(b"x", "text/plain", "reference")
+
+
+def test_media_endpoint_logs_sanitized_storage_failure_details(monkeypatch, caplog):
+    import server
+    from fastapi import HTTPException
+    from models import MediaAsset
+    from storage_backends import StorageBackendError
+
+    async def fake_get_media(media_id, owner):
+        return MediaAsset(
+            id=media_id,
+            owner_email=owner,
+            filename="secret-filename-that-must-not-appear.png",
+            mime_type="image/png",
+            kind="generated",
+            source_module="documents",
+        )
+
+    def fake_read_bytes(filename, kind="reference"):
+        raise StorageBackendError(
+            "Storage GetObject failed",
+            operation="GetObject",
+            http_status=403,
+            error_code="AccessDenied",
+        )
+
+    monkeypatch.setattr(server, "_get_media", fake_get_media)
+    monkeypatch.setattr(server, "read_bytes", fake_read_bytes)
+
+    with caplog.at_level("WARNING", logger="lumina"):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(server.get_media_file("media-1", owner="owner@example.com"))
+
+    assert exc_info.value.status_code == 502
+    assert "Media storage read failed" in caplog.text
+    assert "operation=GetObject" in caplog.text
+    assert "http_status=403" in caplog.text
+    assert "error_code=AccessDenied" in caplog.text
+    assert "storage_prefix=generated" in caplog.text
+    assert "media_kind=generated" in caplog.text
+    assert "source_module=documents" in caplog.text
+    assert "secret-filename-that-must-not-appear" not in caplog.text
+    assert "generated/secret-filename-that-must-not-appear.png" not in caplog.text
+    assert "private-bucket" not in caplog.text

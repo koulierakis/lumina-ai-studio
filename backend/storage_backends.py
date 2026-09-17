@@ -11,6 +11,28 @@ import os
 from pathlib import Path
 from typing import Protocol
 
+from botocore.exceptions import ClientError
+
+
+class StorageBackendError(RuntimeError):
+    """Sanitized storage failure without bucket, key, credentials or content."""
+
+    def __init__(self, message: str, *, operation: str, http_status: int | None, error_code: str):
+        super().__init__(message)
+        self.operation = operation
+        self.http_status = http_status
+        self.error_code = error_code
+
+
+class StorageObjectNotFound(FileNotFoundError):
+    """Storage object was not found, with sanitized provider diagnostics."""
+
+    def __init__(self, *, operation: str, http_status: int | None, error_code: str):
+        super().__init__("Storage object not found")
+        self.operation = operation
+        self.http_status = http_status
+        self.error_code = error_code
+
 
 class StorageBackend(Protocol):
     def save(self, key: str, data: bytes) -> None: ...
@@ -27,6 +49,21 @@ def _safe_key(key: str) -> str:
     if not value or value.startswith("/") or any(part in {"", ".", ".."} for part in parts):
         raise ValueError("Invalid storage key")
     return "/".join(parts)
+
+
+def _client_error_details(exc: ClientError) -> tuple[int | None, str]:
+    response = getattr(exc, "response", {}) or {}
+    metadata = response.get("ResponseMetadata") or {}
+    error = response.get("Error") or {}
+    status = metadata.get("HTTPStatusCode")
+    try:
+        status = int(status) if status is not None else None
+    except (TypeError, ValueError):
+        status = None
+    code = str(error.get("Code") or "").strip()
+    if not code:
+        code = f"HTTP{status}" if status is not None else "Unknown"
+    return status, code
 
 
 class LocalStorageBackend:
@@ -91,7 +128,24 @@ class S3StorageBackend:
         self.client.put_object(Bucket=self.bucket, Key=_safe_key(key), Body=data)
 
     def read(self, key: str) -> bytes:
-        return self.client.get_object(Bucket=self.bucket, Key=_safe_key(key))["Body"].read()
+        safe_key = _safe_key(key)
+        try:
+            return self.client.get_object(Bucket=self.bucket, Key=safe_key)["Body"].read()
+        except ClientError as exc:
+            status, code = _client_error_details(exc)
+            normalized_code = code.lower().replace(" ", "")
+            if normalized_code in {"nosuchkey", "notfound"}:
+                raise StorageObjectNotFound(
+                    operation="GetObject",
+                    http_status=status,
+                    error_code=code,
+                ) from exc
+            raise StorageBackendError(
+                "Storage GetObject failed",
+                operation="GetObject",
+                http_status=status,
+                error_code=code,
+            ) from exc
 
     def delete(self, key: str) -> None:
         self.client.delete_object(Bucket=self.bucket, Key=_safe_key(key))

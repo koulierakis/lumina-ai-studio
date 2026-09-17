@@ -191,6 +191,8 @@ from runtime_info import (  # noqa: E402
     validate_runtime_settings,
 )
 from storage import (  # noqa: E402
+    StorageBackendError,
+    StorageObjectNotFound,
     delete_file,
     read_bytes,
     save_bytes,
@@ -1033,10 +1035,33 @@ async def _get_media(media_id: str, owner: str) -> MediaAsset:
 async def get_media_file(media_id: str, owner: str = Depends(require_owner)):
     media = await _get_media(media_id, owner)
     kind = "reference" if media.kind == "reference" else "generated"
+    storage_prefix = "references" if kind == "reference" else "generated"
     try:
         data = read_bytes(media.filename, kind=kind)
+    except StorageObjectNotFound as exc:
+        logger.warning(
+            "Media storage object missing operation=%s http_status=%s error_code=%s storage_prefix=%s media_kind=%s source_module=%s",
+            exc.operation,
+            exc.http_status,
+            exc.error_code,
+            storage_prefix,
+            media.kind,
+            media.source_module,
+        )
+        raise HTTPException(404, "File missing")
     except FileNotFoundError:
         raise HTTPException(404, "File missing")
+    except StorageBackendError as exc:
+        logger.warning(
+            "Media storage read failed operation=%s http_status=%s error_code=%s storage_prefix=%s media_kind=%s source_module=%s",
+            exc.operation,
+            exc.http_status,
+            exc.error_code,
+            storage_prefix,
+            media.kind,
+            media.source_module,
+        )
+        raise HTTPException(502, "Media storage read failed")
     else:
         return Response(content=data, media_type=media.mime_type)
 

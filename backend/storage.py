@@ -11,7 +11,7 @@ import os
 import uuid
 from pathlib import Path
 
-from storage_backends import LocalStorageBackend, create_storage_backend
+from storage_backends import LocalStorageBackend, StorageBackendError, StorageObjectNotFound, create_storage_backend
 
 ROOT_DIR = Path(__file__).resolve().parent
 _BACKEND = None
