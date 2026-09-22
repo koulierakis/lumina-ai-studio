@@ -1,4 +1,5 @@
 import asyncio
+import json
 from pathlib import Path
 
 from ai_runtime.advisor import AdvisorRequest, ExecutiveAdvisorService
@@ -27,6 +28,18 @@ class FakeOllama:
 
     async def check_connection(self, include_models=True):
         return FakeHealth()
+
+
+def test_configured_advisor_storage_is_isolated_and_persistent(tmp_path, monkeypatch):
+    storage = tmp_path / "isolated-advisor"
+    monkeypatch.setenv("LUMINA_ADVISOR_STATE_DIR", str(storage))
+    service = ExecutiveAdvisorService(ollama=FakeOllama())
+    assert service.root == storage
+    memory = service.remember("test@example.com", "Isolated test memory")
+    reloaded = ExecutiveAdvisorService(ollama=FakeOllama())
+    assert reloaded.memories("test@example.com")[0]["id"] == memory["id"]
+    explicit = ExecutiveAdvisorService(root=tmp_path / "explicit", ollama=FakeOllama())
+    assert explicit.memories("test@example.com") == []
 
 
 def test_role_routing_and_persistent_memory(tmp_path: Path) -> None:
@@ -125,3 +138,92 @@ def test_document_context_is_grounded_into_model_request(tmp_path: Path) -> None
     assert "Additional structured context" in user_message
     assert "Commission Agreement" in user_message
     assert "payable within 24 hours" in user_message
+
+
+def test_sambanova_status_exposes_configured_state(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SAMBANOVA_API_KEY", "sn-status-key")
+    monkeypatch.setenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1")
+    monkeypatch.setenv("SAMBANOVA_MODEL", "status-sn-model")
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+    status = asyncio.run(service.status())
+    assert status["sambanova_configured"] is True
+    assert status["sambanova_model"] == "status-sn-model"
+    assert "optional_sambanova" in status["capabilities"]
+    assert "sn-status-key" not in json.dumps(status)
+
+
+def test_sambanova_unconfigured_status_is_false(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv("SAMBANOVA_API_KEY", raising=False)
+    monkeypatch.delenv("SAMBANOVA_BASE_URL", raising=False)
+    monkeypatch.delenv("SAMBANOVA_MODEL", raising=False)
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+    status = asyncio.run(service.status())
+    assert status["sambanova_configured"] is False
+
+
+def test_auto_routing_uses_configured_sambanova_cloud_provider(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SAMBANOVA_API_KEY", "detective-wonka-sn")
+    monkeypatch.setenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1")
+    monkeypatch.setenv("SAMBANOVA_MODEL", "custom-sn-model")
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+    captured = {}
+
+    async def fake_sambanova(**kwargs):
+        captured["messages"] = kwargs["messages"]
+        return ("Cloud readiness is verified.", [], "custom-sn-model")
+
+    service._ask_sambanova = fake_sambanova
+    result = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(message="Is the platform production-ready for corporate use?"),
+        )
+    )
+    assert result["provider"] == "sambanova"
+    assert result["model"] == "custom-sn-model"
+    assert result["provider_status"] == "ok"
+    assert captured["messages"][-1]["role"] == "user"
+    session = service.get_session("owner@example.com", result["session_id"])
+    assert session["messages"][-1]["provider"] == "sambanova"
+    assert session["messages"][-1]["model"] == "custom-sn-model"
+    assert "detective-wonka-sn" not in json.dumps(result)
+
+
+def test_explicit_sambanova_provider_is_recorded(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SAMBANOVA_API_KEY", "sn-key")
+    monkeypatch.setenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1")
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+
+    async def fake_sambanova(**kwargs):
+        return ("Confirmed.", [], "custom-sn-model")
+
+    service._ask_sambanova = fake_sambanova
+    result = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(message="Confirm provider selection.", provider="sambanova"),
+        )
+    )
+    assert result["provider"] == "sambanova"
+    assert result["provider_status"] == "ok"
+
+
+def test_sambanova_failure_is_sanitized_and_unavailable(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SAMBANOVA_API_KEY", "secret-failure-sn")
+    monkeypatch.setenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1")
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+
+    async def failing(**kwargs):
+        raise RuntimeError("HTTP 503 transient failure")
+
+    service._ask_sambanova = failing
+    result = asyncio.run(
+        service.ask(
+            "owner@example.com",
+            AdvisorRequest(message="Are we ready?"),
+        )
+    )
+    assert result["provider"] == "sambanova"
+    assert result["provider_status"] == "unavailable"
+    assert "SambaNova cloud mode is currently unavailable" in result["answer"]
+    assert "secret-failure-sn" not in json.dumps(result)

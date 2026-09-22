@@ -117,6 +117,7 @@ from code_creator import run_safe_check as code_run_safe_check
 from developer_center import TASKS as DEVELOPER_TASKS  # noqa: E402
 from developer_center import local_system_metrics, repository_status
 from developer_center import manager as developer_manager
+from developer_center import scrub_serialization_safe
 from document_studio.router import configure_document_studio_router  # noqa: E402
 from document_studio.router import router as document_studio_router
 from driver_assistance_services import (  # noqa: E402
@@ -756,7 +757,7 @@ async def developer_overview(owner: str = Depends(require_owner)) -> dict:
         {"id": job.id, "kind": "talking-portrait", "title": job.title or "Talking portrait", "status": job.status, "progress": job.progress, "created_at": job.created_at}
         for job in portrait_jobs if job.status in TALKING_PORTRAIT_ACTIVE
     ]
-    return {"health": health, "runtime": health.get("runtime", {}), "repository": repository, "talking_portrait": {"providers": talking_portrait_catalog(), "active": auto_detect_talking_portrait_provider()}, "tasks": developer_manager.list_tasks(), "logs": developer_manager.list_logs(), "media_jobs": active_media_jobs[:20], "runtime_jobs": runtime_manager.list_jobs(owner)[:30], "panel_errors": panel_errors, "refreshed_at": now_iso(), "scope": "Local LUMINA Runtime and application activity on this computer."}
+    return scrub_serialization_safe({"health": health, "runtime": health.get("runtime", {}), "repository": repository, "talking_portrait": {"providers": talking_portrait_catalog(), "active": auto_detect_talking_portrait_provider()}, "tasks": developer_manager.list_tasks(), "logs": developer_manager.list_logs(), "media_jobs": active_media_jobs[:20], "runtime_jobs": runtime_manager.list_jobs(owner)[:30], "panel_errors": panel_errors, "refreshed_at": now_iso(), "scope": "Local LUMINA Runtime and application activity on this computer."})
 
 
 @api.get("/developer/tasks")

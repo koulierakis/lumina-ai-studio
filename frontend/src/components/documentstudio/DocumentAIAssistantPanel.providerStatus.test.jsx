@@ -4,7 +4,7 @@ import DocumentAIAssistantPanel from './DocumentAIAssistantPanel';
 import { apiGet } from '../../lib/api';
 
 jest.mock('../../documents/model', () => ({
-  DOCUMENT_AI_PROVIDERS: ['ollama', 'groq'],
+  DOCUMENT_AI_PROVIDERS: ['ollama', 'groq', 'sambanova'],
   documentApi: {
     packAdvisor: jest.fn(),
     naturalCreatePreview: jest.fn(),

@@ -1,11 +1,17 @@
-"""Strict, mockable Groq transport for Document Studio generation."""
+"""Strict, mockable SambaNova Cloud transport for Document Studio generation.
+
+SambaNova is consumed through its OpenAI-compatible Chat Completions API. The
+base URL is never invented: ``SAMBANOVA_BASE_URL`` is required and defines the
+API root exactly as the operator supplies it (e.g. ``https://api.sambanova.ai/v1``);
+the documented ``/chat/completions`` path is appended. Credentials (``SAMBANOVA_API_KEY``)
+and the model (``SAMBANOVA_MODEL``) are read lazily from the environment.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
-import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -21,57 +27,19 @@ from .document_ai_provider import (
 )
 from .natural_creation import NaturalProviderOutput
 
-DEFAULT_GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"
-
-
-def _groq_chat_endpoint(value: str) -> str:
-    """Allow a base URL such as ``https://api.groq.com/openai/v1`` in config."""
-    endpoint = value.strip().rstrip("/")
-    if not endpoint.endswith("/chat/completions"):
-        endpoint = f"{endpoint}/chat/completions"
-    return endpoint
+DEFAULT_SAMBANOVA_MODEL = "Qwen2.5-Coder-32B-Instruct"
+CHAT_COMPLETIONS_PATH = "/chat/completions"
 DEFAULT_OVERALL_TIMEOUT_SECONDS = 45.0
 MAX_OVERALL_TIMEOUT_SECONDS = 180.0
 DEFAULT_MAX_ATTEMPTS = 2
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 
 
-def _strict_json_schema(schema: dict[str, Any]) -> dict[str, Any]:
-    """Make a Pydantic JSON schema acceptable to strict structured-output mode.
-
-    OpenAI-compatible strict ``json_schema`` providers require every property in
-    an object schema to appear in ``required`` and forbid unknown keys. Pydantic
-    keeps fields with defaults optional (so ``claims`` and ``unresolved_fields``
-    are missing from ``required``); tightening here keeps the transport valid
-    while the validated model still accepts the strict provider output.
-    """
-
-    def tighten(value: Any) -> Any:
-        if isinstance(value, dict):
-            if value.get("type") == "object" and isinstance(value.get("properties"), dict):
-                value = {
-                    **value,
-                    "required": sorted(value["properties"].keys()),
-                    "additionalProperties": False,
-                }
-            return {key: tighten(item) for key, item in value.items()}
-        if isinstance(value, list):
-            return [tighten(item) for item in value]
-        return value
-
-    return tighten(schema)
+class SambaNovaProviderUnavailable(DocumentAIProviderError):
+    """Raised when SambaNova is not configured or cannot be reached."""
 
 
-def _strict_schema() -> dict[str, Any]:
-    return _strict_json_schema(NaturalProviderOutput.model_json_schema())
-
-
-class GroqProviderUnavailable(DocumentAIProviderError):
-    """Raised when Groq is not configured or cannot be reached."""
-
-
-class GroqProviderHTTPError(DocumentAIProviderError):
+class SambaNovaProviderHTTPError(DocumentAIProviderError):
     """Sanitized HTTP failure without request or credential material."""
 
     def __init__(self, status_code: int, message: str, *, retryable: bool) -> None:
@@ -84,26 +52,28 @@ async def _default_sleep(delay: float) -> None:
     await asyncio.sleep(delay)
 
 
-class GroqDocumentProvider(DocumentAIProvider):
-    """OpenAI-compatible Groq provider returning strict natural-document output."""
+class SambaNovaDocumentProvider(DocumentAIProvider):
+    """OpenAI-compatible SambaNova provider returning strict natural-document output."""
 
-    name = "groq"
+    name = "sambanova"
 
     def __init__(
         self,
         *,
         api_key: str | None = None,
         model: str | None = None,
-        api_url: str | None = None,
+        base_url: str | None = None,
         client: httpx.AsyncClient | None = None,
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
         overall_timeout_seconds: float = DEFAULT_OVERALL_TIMEOUT_SECONDS,
         sleeper: Callable[[float], Awaitable[None]] = _default_sleep,
     ) -> None:
         self._injected_api_key = api_key
-        self.model = model or os.getenv("GROQ_DOCUMENT_MODEL", DEFAULT_GROQ_MODEL)
-        self.api_url = _groq_chat_endpoint(
-            api_url or os.getenv("GROQ_API_URL", DEFAULT_GROQ_API_URL)
+        self._injected_base_url = (base_url or "").strip().rstrip("/")
+        self.model = (
+            model
+            or os.getenv("SAMBANOVA_MODEL", DEFAULT_SAMBANOVA_MODEL).strip()
+            or DEFAULT_SAMBANOVA_MODEL
         )
         self._client = client
         self.max_attempts = min(max(int(max_attempts), 1), 4)
@@ -111,43 +81,64 @@ class GroqDocumentProvider(DocumentAIProvider):
             max(float(overall_timeout_seconds), 0.1), MAX_OVERALL_TIMEOUT_SECONDS
         )
         self._sleep = sleeper
-        self._validate_api_url(self.api_url)
+
+    @property
+    def base_url(self) -> str:
+        """Required endpoint root; never a hard-coded default."""
+        configured_base = self._injected_base_url or os.getenv(
+            "SAMBANOVA_BASE_URL", ""
+        ).strip().rstrip("/")
+        if configured_base:
+            self._validate_base_url(configured_base)
+        return configured_base
+
+    @property
+    def chat_completions_url(self) -> str:
+        return self.base_url + CHAT_COMPLETIONS_PATH
 
     @property
     def api_key(self) -> str:
-        """Read environment credentials only when provider state or generation is requested."""
+        """Read environment credentials only when state or generation is requested."""
         if self._injected_api_key is not None:
             return self._injected_api_key.strip()
-        return os.getenv("GROQ_API_KEY", "").strip()
+        return os.getenv("SAMBANOVA_API_KEY", "").strip()
 
     @property
     def configured(self) -> bool:
-        return bool(self.api_key)
+        return bool(self.api_key) and bool(self.base_url)
 
     @staticmethod
-    def _validate_api_url(value: str) -> None:
+    def _validate_base_url(value: str) -> None:
         parsed = urlparse(value)
         if parsed.scheme != "https" or not parsed.hostname:
-            raise ValueError("Groq API URL must be an absolute HTTPS URL")
+            raise ValueError("SambaNova base URL must be an absolute HTTPS URL")
 
     async def status(self) -> dict[str, Any]:
+        base_url = self.base_url
         return {
             "name": self.name,
             "configured": self.configured,
             "available": self.configured,
             "model": self.model,
+            "endpoint": (base_url + CHAT_COMPLETIONS_PATH) if base_url else "",
             "network_checked": False,
-            "error": None if self.configured else "Groq is not configured",
+            "error": None if self.configured else "SambaNova is not configured",
         }
 
     @staticmethod
     def _system_prompt() -> str:
+        schema = json.dumps(
+            NaturalProviderOutput.model_json_schema(),
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         return (
-            "Return exactly one JSON object matching the supplied schema. Use only verified facts "
-            "and explicit user facts supplied in context. Every factual claim must declare origin "
-            "as verified, user, or generated. Never label unsupported content verified or user. "
-            "Unknown identity, legal, regulatory, banking, ownership, address, or financial values "
-            "must remain contextual square-bracket placeholders. Return no Markdown or commentary."
+            "Return exactly one JSON object (no Markdown, no commentary) conforming to this JSON "
+            f"JSON Schema: {schema}. Use only verified facts and explicit user facts supplied in "
+            "context. Every factual claim must declare origin as verified, user, or generated. "
+            "Never label unsupported content verified or user. Unknown identity, legal, "
+            "regulatory, banking, ownership, address, or financial values must remain contextual "
+            "square-bracket placeholders."
         )
 
     def _payload(self, request: str, context: dict[str, Any]) -> dict[str, Any]:
@@ -176,14 +167,7 @@ class GroqDocumentProvider(DocumentAIProvider):
                     ),
                 },
             ],
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "lumina_natural_document",
-                    "strict": True,
-                    "schema": _strict_schema(),
-                },
-            },
+            "response_format": {"type": "json_object"},
             "temperature": 0.2,
         }
 
@@ -207,19 +191,21 @@ class GroqDocumentProvider(DocumentAIProvider):
         }
         if self._client is not None:
             return await self._client.post(
-                self.api_url,
+                self.chat_completions_url,
                 json=payload,
                 headers=headers,
                 timeout=httpx.Timeout(timeout),
             )
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout)) as client:
-            return await client.post(self.api_url, json=payload, headers=headers)
+            return await client.post(
+                self.chat_completions_url, json=payload, headers=headers
+            )
 
     async def generate_document(
         self, request: str, context: dict[str, Any]
     ) -> NaturalProviderOutput:
         if not self.configured:
-            raise GroqProviderUnavailable("Groq is not configured")
+            raise SambaNovaProviderUnavailable("SambaNova is not configured")
         payload = self._payload(request, context)
         requested_timeout = context.get("timeout_seconds", self.overall_timeout_seconds)
         overall_timeout = min(
@@ -233,22 +219,28 @@ class GroqDocumentProvider(DocumentAIProvider):
         for attempt in range(1, self.max_attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise DocumentAIProviderTimeout("Groq generation exceeded its overall deadline")
+                raise DocumentAIProviderTimeout(
+                    "SambaNova generation exceeded its overall deadline"
+                )
             response: httpx.Response | None = None
             try:
-                response = await asyncio.wait_for(self._post(payload, remaining), timeout=remaining)
+                response = await asyncio.wait_for(
+                    self._post(payload, remaining), timeout=remaining
+                )
             except (TimeoutError, httpx.TimeoutException) as exc:
                 last_failure = exc
                 if attempt >= self.max_attempts:
-                    raise DocumentAIProviderTimeout("Groq generation timed out") from exc
+                    raise DocumentAIProviderTimeout(
+                        "SambaNova generation timed out"
+                    ) from exc
             except (httpx.ConnectError, httpx.NetworkError) as exc:
                 last_failure = exc
                 if attempt >= self.max_attempts:
-                    raise GroqProviderUnavailable("Groq is unavailable") from exc
+                    raise SambaNovaProviderUnavailable("SambaNova is unavailable") from exc
             else:
                 if response.status_code >= 400:
                     retryable = response.status_code in TRANSIENT_STATUS_CODES
-                    error = GroqProviderHTTPError(
+                    error = SambaNovaProviderHTTPError(
                         response.status_code,
                         self._safe_http_message(response.status_code),
                         retryable=retryable,
@@ -264,68 +256,50 @@ class GroqDocumentProvider(DocumentAIProvider):
                 remaining = deadline - time.monotonic()
                 if remaining <= delay:
                     raise DocumentAIProviderTimeout(
-                        "Groq generation exceeded its overall deadline"
+                        "SambaNova generation exceeded its overall deadline"
                     ) from last_failure
                 await self._sleep(delay)
 
-        raise GroqProviderUnavailable("Groq generation failed") from last_failure
+        raise SambaNovaProviderUnavailable("SambaNova generation failed") from last_failure
 
     @staticmethod
     def _safe_http_message(status_code: int) -> str:
         return {
-            400: "Groq rejected the generation request",
-            401: "Groq authentication failed",
-            403: "Groq access was denied",
-            404: "Groq endpoint or model was not found",
-            429: "Groq rate limit was reached",
+            400: "SambaNova rejected the generation request",
+            401: "SambaNova authentication failed",
+            403: "SambaNova access was denied",
+            404: "SambaNova endpoint or model was not found",
+            429: "SambaNova rate limit was reached",
         }.get(
             status_code,
-            "Groq service failed" if status_code >= 500 else "Groq request failed",
+            "SambaNova service failed" if status_code >= 500 else "SambaNova request failed",
         )
-
-    @staticmethod
-    def _extract_structured_json(content: str) -> dict:
-        """Recover the canonical document object from model output defensively."""
-        candidate = content.strip()
-        fence = re.search(r"```(?:json)?\s*(.*?)```", candidate, re.DOTALL | re.IGNORECASE)
-        if fence:
-            candidate = fence.group(1).strip()
-        try:
-            payload = json.loads(candidate)
-            if isinstance(payload, dict):
-                return payload
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-        start = candidate.find("{")
-        end = candidate.rfind("}")
-        if start != -1 and end > start:
-            try:
-                payload = json.loads(candidate[start:end + 1])
-                if isinstance(payload, dict):
-                    return payload
-            except (TypeError, ValueError, json.JSONDecodeError):
-                pass
-        raise MalformedDocumentAIResponse("Groq returned malformed structured content")
 
     @staticmethod
     def _parse_response(response: httpx.Response) -> NaturalProviderOutput:
         try:
             envelope = response.json()
         except (ValueError, json.JSONDecodeError) as exc:
-            raise MalformedDocumentAIResponse("Groq returned malformed JSON") from exc
+            raise MalformedDocumentAIResponse("SambaNova returned malformed JSON") from exc
         try:
             content = envelope["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise MalformedDocumentAIResponse("Groq returned an invalid response envelope") from exc
+            raise MalformedDocumentAIResponse(
+                "SambaNova returned an invalid response envelope"
+            ) from exc
         if not isinstance(content, str) or not content.strip():
-            raise MalformedDocumentAIResponse("Groq returned empty structured content")
+            raise MalformedDocumentAIResponse("SambaNova returned empty structured content")
         try:
-            document_payload = GroqDocumentProvider._extract_structured_json(content)
-        except MalformedDocumentAIResponse:
-            raise
+            document_payload = json.loads(content)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise MalformedDocumentAIResponse(
+                "SambaNova returned malformed structured content"
+            ) from exc
+        if not isinstance(document_payload, dict):
+            raise MalformedDocumentAIResponse("SambaNova structured content must be an object")
         try:
             return NaturalProviderOutput.model_validate(document_payload, strict=True)
         except ValueError as exc:
             raise MalformedDocumentAIResponse(
-                "Groq returned invalid typed document output"
+                "SambaNova returned invalid typed document output"
             ) from exc

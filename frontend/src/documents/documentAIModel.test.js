@@ -74,7 +74,7 @@ describe('Document Studio AI API client', () => {
   });
 
   test('allows only canonical provider identities before making a request', async () => {
-    expect(DOCUMENT_AI_PROVIDERS).toEqual(['ollama', 'groq']);
+    expect(DOCUMENT_AI_PROVIDERS).toEqual(['ollama', 'groq', 'sambanova']);
     expect(() => generateAIPreview({ objective: 'Draft', document_type: 'nda', provider: 'plugin.path' }))
       .toThrow('Unsupported document AI provider.');
     expect(apiPost).not.toHaveBeenCalled();

@@ -15,6 +15,9 @@ describe('Executive Advisor workspace', () => {
     expect(page).toContain('Βαθιά ανάλυση');
     expect(page).toContain('Να το θυμάσαι');
     expect(page).toContain('Cloud ανάλυση');
+    expect(page).toContain('setProvider(\'sambanova\')');
+    expect(page).toContain('sambanova_configured');
+    expect(page).toContain('SambaNova requires SAMBANOVA_API_KEY and SAMBANOVA_BASE_URL');
     expect(page).toContain('Έρευνα διαδικτύου');
     expect(page).toContain('SpeechRecognition');
     expect(page).toContain('SpeechSynthesisUtterance');

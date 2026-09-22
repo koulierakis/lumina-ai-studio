@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import io
+import logging
 import re
 import zipfile
 from collections.abc import Iterable
@@ -28,7 +29,7 @@ from reportlab.platypus import (
     Image as RLImage,
 )
 
-from .document_ai_provider import DocumentAIProvider
+from .document_ai_provider import DocumentAIProvider, MalformedDocumentAIResponse
 from .generation_orchestrator import (
     DocumentAIProviderRegistry,
     OrchestratedGenerationResult,
@@ -45,6 +46,8 @@ from .models import (
     PackGenerationRequest,
 )
 from .natural_creation import NaturalCreationResult
+
+logger = logging.getLogger("lumina.documents")
 
 TEMPLATES: list[CorporateTemplate] = [
     CorporateTemplate(
@@ -3313,14 +3316,34 @@ async def create_natural_document_preview(
     from .generation_orchestrator import validate_generation
     from .natural_creation import create_natural_document
 
-    try:
-        result = await create_natural_document(
-            request, profile, provider, timeout_seconds=timeout_seconds
-        )
-        validate_generation(result)
-        return result
-    except Exception as exc:
-        raise _translate_ai_service_error(exc) from exc
+    def _retryable(exc: Exception) -> bool:
+        from .document_ai_provider import MalformedDocumentAIResponse
+        from .natural_creation import NaturalCreationProviderError
+
+        if isinstance(exc, MalformedDocumentAIResponse):
+            return True
+        if isinstance(exc, NaturalCreationProviderError):
+            return isinstance(exc.__cause__, MalformedDocumentAIResponse)
+        return False
+
+    attempts = 0
+    while True:
+        try:
+            result = await create_natural_document(
+                request, profile, provider, timeout_seconds=timeout_seconds
+            )
+            validate_generation(result)
+            return result
+        except Exception as exc:
+            if _retryable(exc) and attempts < 1:
+                attempts += 1
+                logger.warning(
+                    "Natural document draft returned malformed provider output; retrying once (%s: %s)",
+                    type(exc).__name__,
+                    exc,
+                )
+                continue
+            raise _translate_ai_service_error(exc) from exc
 
 
 def _canonical_document_html(title: str, content: str) -> str:

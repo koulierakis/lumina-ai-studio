@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 
 import developer_center
@@ -10,6 +11,7 @@ from developer_center import (
     DeveloperTaskManager,
     repository_status,
     sanitize_text,
+    scrub_serialization_safe,
     task_command,
 )
 
@@ -91,3 +93,25 @@ def test_local_system_metrics_handles_unavailable_disk(monkeypatch):
     monkeypatch.setattr(developer_center.shutil, "disk_usage", lambda _path: (_ for _ in ()).throw(OSError("offline")))
     metrics = developer_center.local_system_metrics()
     assert metrics["disk"]["available"] is False
+
+
+def test_scrub_serialization_safe_removes_lone_surrogates():
+    payload = {
+        "health": {"checks": [{"detail": "GPU\xaa"}], "metrics": {"disk": {"free_bytes": 0}}},
+        "repository": {"branch": "work/main", "changed_files": [{"status": "M", "path": "файл"}]},
+        "tasks": [{"label": "ok", "output": "B\xaa2"}],
+        "plain": "ascii only",
+        "count": 3,
+        "nested": {"list": ["\udcff buffer", "f\xe9"]},
+    }
+    result = scrub_serialization_safe(payload)
+    # Valid text is preserved byte-for-byte and valid JSON survives.
+    assert result["health"]["checks"][0]["detail"] == "GPU\xaa"
+    assert result["repository"]["changed_files"][0]["path"] == "файл"
+    assert result["tasks"][0]["output"] == "B\xaa2"
+    assert result["count"] == 3
+    # Lone surrogates are replaced so serialization cannot fail.
+    assert "\ufffd" in result["nested"]["list"][0]
+    rendered = json.dumps(result, ensure_ascii=True)
+    assert "\\udc" not in rendered
+    assert json.loads(rendered)["nested"]["list"][0] == "\ufffd buffer"

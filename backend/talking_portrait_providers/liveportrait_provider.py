@@ -336,6 +336,9 @@ class _LocalLipSyncEngine:
         raise TalkingPortraitProviderError(LivePortraitProvider.name, "Lip-sync engine produced no MP4", "The local lip-sync engine finished but did not produce a final MP4.", stage="collect_lip_sync_output", technical_details={"output_path": str(output_path), "cwd": str(cwd)})
 
 
+_TAIL_READ_CHUNK_BYTES = 2 * 1024 * 1024
+
+
 def _runtime_log_path() -> Path:
     path = Path(__file__).resolve().parents[2] / "runtime" / "logs" / "talking_portrait.log"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -356,7 +359,16 @@ def latest_log_lines(limit: int = 80) -> list[str]:
     path = _runtime_log_path()
     if not path.exists():
         return []
-    return path.read_text(encoding="utf-8", errors="replace").splitlines()[-max(1, min(limit, 500)):]
+    tail = max(1, min(limit, 500))
+    size = path.stat().st_size
+    if size == 0:
+        return []
+    read_size = min(size, _TAIL_READ_CHUNK_BYTES)
+    with path.open("rb") as handle:
+        handle.seek(size - read_size)
+        data = handle.read().decode("utf-8", errors="replace")
+    lines = data.splitlines()
+    return lines[-tail:] if lines else []
 
 
 def _relevant_env(env: dict[str, str]) -> dict[str, str]:

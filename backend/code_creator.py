@@ -213,7 +213,7 @@ def run_safe_check(project_id: str) -> dict[str, Any]:
     checks = []
     for command in commands:
         try:
-            result = subprocess.run(command, cwd=project, capture_output=True, text=True, timeout=180, shell=False)
+            result = subprocess.run(command, cwd=project, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180, shell=False)
             checks.append({"command": " ".join(command), "code": result.returncode, "output": (result.stdout + result.stderr)[-8000:]})
         except Exception as exc:
             checks.append({"command": " ".join(command), "code": -1, "output": str(exc)})

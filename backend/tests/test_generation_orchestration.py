@@ -20,12 +20,18 @@ from document_studio.generation_orchestrator import (
     GenerationValidationError,
     OllamaNaturalDocumentProvider,
     UnknownDocumentAIProvider,
+    _resolve_default_provider,
     generate_document,
 )
 from document_studio.groq_provider import (
     GroqDocumentProvider,
     GroqProviderHTTPError,
     GroqProviderUnavailable,
+)
+from document_studio.sambanova_provider import (
+    SambaNovaDocumentProvider,
+    SambaNovaProviderHTTPError,
+    SambaNovaProviderUnavailable,
 )
 from document_studio.models import CompanyProfile, NaturalDocumentCreationRequest
 from document_studio.natural_creation import NaturalCreationProviderError
@@ -215,6 +221,29 @@ def test_groq_http_failures_are_explicit_and_sanitized(status_code, message, ret
     run(client.aclose())
 
 
+def test_groq_strict_schema_accepts_only_required_typed_objects():
+    from document_studio.groq_provider import _strict_schema
+
+    schema = _strict_schema()
+    assert set(schema["required"]) == set(schema["properties"].keys())
+    assert schema["additionalProperties"] is False
+
+    def walk(value):
+        if isinstance(value, dict):
+            if value.get("type") == "object" and isinstance(value.get("properties"), dict):
+                assert set(value["required"]) == set(value["properties"].keys())
+                assert value["additionalProperties"] is False
+            for child in value.values():
+                walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+
+    walk(schema)
+    assert "claims" in schema["required"]
+    assert "unresolved_fields" in schema["required"]
+
+
 def test_groq_transient_retry_is_bounded_and_can_succeed():
     calls = 0
 
@@ -319,8 +348,8 @@ def test_provider_registry_is_allowlisted_and_default_is_deterministic():
     groq = StubProvider("groq")
     registry = DocumentAIProviderRegistry({"ollama": ollama, "groq": groq})
 
-    assert DEFAULT_PROVIDER == "groq"
-    assert registry.get() is groq
+    assert DEFAULT_PROVIDER == "ollama"
+    assert registry.get() is ollama
     assert registry.get("ollama") is ollama
     assert registry.get("groq") is groq
     assert isinstance(DocumentAIProviderRegistry().get("ollama"), OllamaNaturalDocumentProvider)
@@ -484,11 +513,248 @@ def test_placeholder_invention_or_omission_is_rejected():
 
 
 def test_orchestrator_has_no_route_or_persistence_imports():
-    source = Path("backend/document_studio/generation_orchestrator.py").read_text(encoding="utf-8")
+    source = Path(__file__).resolve().parents[1] / "document_studio" / "generation_orchestrator.py"
+    source_text = source.read_text(encoding="utf-8")
     imports = {
         node.module
-        for node in ast.walk(ast.parse(source))
+        for node in ast.walk(ast.parse(source_text))
         if isinstance(node, ast.ImportFrom) and node.module
     }
     assert not any("router" in value for value in imports)
     assert not any("persistence" in value for value in imports)
+
+
+def test_sambanova_unconfigured_state_is_lazy(monkeypatch):
+    monkeypatch.delenv("SAMBANOVA_API_KEY", raising=False)
+    monkeypatch.delenv("SAMBANOVA_BASE_URL", raising=False)
+    monkeypatch.delenv("SAMBANOVA_MODEL", raising=False)
+    unconfigured = SambaNovaDocumentProvider()
+    status = run(unconfigured.status())
+    assert status == {
+        "name": "sambanova",
+        "configured": False,
+        "available": False,
+        "model": "Qwen2.5-Coder-32B-Instruct",
+        "endpoint": "",
+        "network_checked": False,
+        "error": "SambaNova is not configured",
+    }
+    with pytest.raises(SambaNovaProviderUnavailable, match="not configured"):
+        run(unconfigured.generate_document("Create", {}))
+
+    configured = SambaNovaDocumentProvider(
+        api_key="server-only-key", base_url="https://api.sambanova.ai/v1"
+    )
+    configured_status = run(configured.status())
+    assert configured_status["configured"] is True
+    assert configured_status["model"] == "Qwen2.5-Coder-32B-Instruct"
+    assert "server-only-key" not in str(configured_status)
+
+
+def test_sambanova_import_and_construction_make_no_network_request():
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json=groq_envelope())
+
+    client = mock_client(handler)
+    SambaNovaDocumentProvider(
+        api_key="key", base_url="https://api.sambanova.ai/v1", client=client
+    )
+    assert calls == []
+    run(client.aclose())
+
+
+def test_sambanova_successful_mocked_request_is_strict_and_credential_safe():
+    captured = {}
+
+    async def handler(request):
+        captured["authorization"] = request.headers.get("Authorization")
+        captured["url"] = str(request.url)
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(200, json=groq_envelope())
+
+    client = mock_client(handler)
+    provider = SambaNovaDocumentProvider(
+        api_key="sn-private-key",
+        base_url="https://api.sambanova.ai/v1",
+        client=client,
+        max_attempts=1,
+    )
+    result = run(provider.generate_document("Create a service agreement", {}))
+
+    assert result.document_type == "service_agreement"
+    assert captured["authorization"] == "Bearer sn-private-key"
+    assert captured["url"] == "https://api.sambanova.ai/v1/chat/completions"
+    assert captured["payload"]["model"] == "Qwen2.5-Coder-32B-Instruct"
+    assert captured["payload"]["response_format"] == {"type": "json_object"}
+    assert "sn-private-key" not in str(result.model_dump())
+    run(client.aclose())
+
+
+def test_sambanova_requires_explicit_https_base_url():
+    with pytest.raises(ValueError, match="HTTPS"):
+        SambaNovaDocumentProvider(base_url="http://insecure.local").chat_completions_url
+
+
+@pytest.mark.parametrize(
+    ("status_code", "message", "retryable"),
+    [
+        (400, "rejected", False),
+        (401, "authentication failed", False),
+        (404, "endpoint or model was not found", False),
+        (429, "rate limit", True),
+        (503, "service failed", True),
+    ],
+)
+def test_sambanova_http_failures_are_explicit_and_sanitized(status_code, message, retryable):
+    async def handler(request):
+        return httpx.Response(
+            status_code,
+            json={"error": {"message": "raw private provider details"}},
+            headers={"Retry-After": "0"},
+        )
+
+    client = mock_client(handler)
+    provider = SambaNovaDocumentProvider(
+        api_key="secret-sn",
+        base_url="https://api.sambanova.ai/v1",
+        client=client,
+        max_attempts=1,
+    )
+    with pytest.raises(SambaNovaProviderHTTPError) as captured:
+        run(provider.generate_document("Create", {}))
+
+    assert captured.value.status_code == status_code
+    assert captured.value.retryable is retryable
+    assert message in str(captured.value)
+    assert "secret-sn" not in str(captured.value)
+    assert "raw private" not in str(captured.value)
+    run(client.aclose())
+
+
+def test_sambanova_connection_and_timeout_failures_are_sanitized():
+    async def connection_handler(request):
+        raise httpx.ConnectError("internal sambanova host secret", request=request)
+
+    connection_client = mock_client(connection_handler)
+    connection_provider = SambaNovaDocumentProvider(
+        api_key="secret-connect-sn",
+        base_url="https://api.sambanova.ai/v1",
+        client=connection_client,
+        max_attempts=1,
+    )
+    with pytest.raises(SambaNovaProviderUnavailable, match="unavailable") as connection_error:
+        run(connection_provider.generate_document("Create", {}))
+    assert "secret-connect-sn" not in str(connection_error.value)
+    assert "internal sambanova host" not in str(connection_error.value)
+    run(connection_client.aclose())
+
+    async def slow_handler(request):
+        await asyncio.sleep(1)
+        return httpx.Response(200, json=groq_envelope())
+
+    slow_client = mock_client(slow_handler)
+    timeout_provider = SambaNovaDocumentProvider(
+        api_key="secret-timeout-sn",
+        base_url="https://api.sambanova.ai/v1",
+        client=slow_client,
+        max_attempts=1,
+        overall_timeout_seconds=0.1,
+    )
+    with pytest.raises(DocumentAIProviderTimeout) as timeout_error:
+        run(timeout_provider.generate_document("Create", {}))
+    assert "secret-timeout-sn" not in str(timeout_error.value)
+    run(slow_client.aclose())
+
+
+def test_default_provider_prefers_configured_cloud_over_ollama(monkeypatch):
+    monkeypatch.delenv("LUMINA_DOCUMENT_AI_PROVIDER", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("SAMBANOVA_API_KEY", raising=False)
+    monkeypatch.delenv("SAMBANOVA_BASE_URL", raising=False)
+
+    assert _resolve_default_provider() == "ollama"
+
+    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
+    assert _resolve_default_provider() == "groq"
+
+    monkeypatch.setenv("SAMBANOVA_API_KEY", "sn-key")
+    monkeypatch.setenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1")
+    assert _resolve_default_provider() == "sambanova"
+
+
+def test_explicit_provider_env_wins_over_cloud_detection(monkeypatch):
+    monkeypatch.setenv("LUMINA_DOCUMENT_AI_PROVIDER", "ollama")
+    monkeypatch.setenv("SAMBANOVA_API_KEY", "sn-key")
+    monkeypatch.setenv("SAMBANOVA_BASE_URL", "https://api.sambanova.ai/v1")
+    monkeypatch.setenv("GROQ_API_KEY", "groq-key")
+    assert _resolve_default_provider() == "ollama"
+
+
+def test_registry_allowlists_sambanova(monkeypatch):
+    monkeypatch.delenv("SAMBANOVA_API_KEY", raising=False)
+    monkeypatch.delenv("SAMBANOVA_BASE_URL", raising=False)
+    registry = DocumentAIProviderRegistry()
+    assert isinstance(registry.get("sambanova"), SambaNovaDocumentProvider)
+
+
+def test_sambanova_unavailable_is_eligible_for_explicit_fallback():
+    primary = StubProvider("sambanova", error=SambaNovaProviderUnavailable("unavailable"))
+    fallback = StubProvider("ollama")
+    registry = DocumentAIProviderRegistry({"sambanova": primary, "ollama": fallback})
+
+    result = run(
+        generate_document(
+            request(),
+            profile(),
+            provider_name="sambanova",
+            fallback_provider_name="ollama",
+            registry=registry,
+        )
+    )
+    assert result.metadata.fallback_used is True
+    assert result.metadata.fallback_from == "sambanova"
+    assert result.metadata.provider_used == "ollama"
+    assert result.metadata.attempt_count == 2
+
+
+def test_sambanova_non_retryable_failure_does_not_silently_fall_back():
+    primary = StubProvider(
+        "sambanova",
+        error=SambaNovaProviderHTTPError(401, "SambaNova authentication failed", retryable=False),
+    )
+    fallback = StubProvider("ollama")
+    registry = DocumentAIProviderRegistry({"sambanova": primary, "ollama": fallback})
+
+    with pytest.raises(NaturalCreationProviderError, match="authentication failed"):
+        run(
+            generate_document(
+                request(),
+                profile(),
+                provider_name="sambanova",
+                fallback_provider_name="ollama",
+                registry=registry,
+            )
+        )
+    assert fallback.calls == 0
+
+
+def test_fallback_to_sambanova_is_successful():
+    primary = StubProvider("groq", error=GroqProviderUnavailable("unavailable"))
+    fallback = StubProvider("sambanova")
+    registry = DocumentAIProviderRegistry({"groq": primary, "sambanova": fallback})
+
+    result = run(
+        generate_document(
+            request(),
+            profile(),
+            provider_name="groq",
+            fallback_provider_name="sambanova",
+            registry=registry,
+        )
+    )
+    assert result.metadata.fallback_used is True
+    assert result.metadata.fallback_from == "groq"
+    assert result.metadata.provider_used == "sambanova"

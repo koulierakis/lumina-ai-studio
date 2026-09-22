@@ -9,7 +9,11 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from code_builder.ollama_service import OllamaService, OllamaServiceError
+from code_builder.ollama_service import (
+    OllamaClientConfiguration,
+    OllamaService,
+    OllamaServiceError,
+)
 from pydantic import BaseModel, ConfigDict, Field
 from runtime_info import load_runtime_config
 
@@ -63,10 +67,18 @@ class AdvisorProfileRequest(BaseModel):
 class ExecutiveAdvisorService:
     def __init__(self, root: Path | None = None, ollama: OllamaService | None = None) -> None:
         repository_root = Path(__file__).resolve().parents[2]
-        self.root = root or repository_root / ".lumina" / "advisor"
+        configured_root = os.environ.get("LUMINA_ADVISOR_STATE_DIR", "").strip()
+        self.root = root or (Path(configured_root) if configured_root else repository_root / ".lumina" / "advisor")
         self.root.mkdir(parents=True, exist_ok=True)
         self.state_path = self.root / "state.json"
-        self.ollama = ollama or OllamaService()
+        if ollama is None:
+            configured_url = os.environ.get("OLLAMA_URL", "").strip().rstrip("/")
+            ollama = OllamaService(
+                configuration=OllamaClientConfiguration(
+                    base_url=configured_url or "http://127.0.0.1:11434"
+                )
+            )
+        self.ollama = ollama
         self._state = self._load()
 
     def _load(self) -> dict[str, Any]:
@@ -112,6 +124,20 @@ class ExecutiveAdvisorService:
 
     def groq_configured(self) -> bool:
         return bool(os.environ.get("GROQ_API_KEY", "").strip())
+
+    def sambanova_model_name(self) -> str:
+        return (
+            os.environ.get("SAMBANOVA_MODEL", "Qwen2.5-Coder-32B-Instruct").strip()
+            or "Qwen2.5-Coder-32B-Instruct"
+        )
+
+    def sambanova_base_url(self) -> str:
+        return os.environ.get("SAMBANOVA_BASE_URL", "").strip().rstrip("/")
+
+    def sambanova_configured(self) -> bool:
+        return bool(os.environ.get("SAMBANOVA_API_KEY", "").strip()) and bool(
+            self.sambanova_base_url()
+        )
 
     def route_role(self, message: str, requested: str) -> str:
         normalized = requested.strip().casefold()
@@ -294,11 +320,16 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
         if not api_key:
             raise RuntimeError("GROQ_API_KEY is not configured")
         model = self.groq_model_name()
+        api_url = os.environ.get(
+            "GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions"
+        ).strip().rstrip("/") or "https://api.groq.com/openai/v1/chat/completions"
+        if not api_url.endswith("/chat/completions"):
+            api_url = f"{api_url}/chat/completions"
         payload = {"model": model, "messages": messages, "temperature": 0.2}
         timeout = httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=10.0)
         async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                api_url,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                 json=payload,
             )
@@ -311,6 +342,36 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             raise RuntimeError("Groq API returned no output text") from exc
         if not answer:
             raise RuntimeError("Groq API returned no output text")
+        return answer, [], model
+
+    async def _ask_sambanova(
+        self, *, messages: list[dict[str, str]]
+    ) -> tuple[str, list[dict[str, str]], str]:
+        api_key = os.environ.get("SAMBANOVA_API_KEY", "").strip()
+        base_url = self.sambanova_base_url()
+        if not api_key or not base_url:
+            raise RuntimeError("SAMBANOVA_API_KEY and SAMBANOVA_BASE_URL are not configured")
+        if not base_url.startswith("https://"):
+            raise RuntimeError("SAMBANOVA_BASE_URL must be an HTTPS URL")
+        model = self.sambanova_model_name()
+        endpoint = f"{base_url}/chat/completions"
+        payload = {"model": model, "messages": messages, "temperature": 0.2}
+        timeout = httpx.Timeout(connect=10.0, read=180.0, write=60.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            response = await client.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+            )
+        if response.status_code < 200 or response.status_code >= 300:
+            raise RuntimeError(f"SambaNova API returned HTTP {response.status_code}")
+        data = response.json()
+        try:
+            answer = str(data["choices"][0]["message"]["content"]).strip()
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError("SambaNova API returned no output text") from exc
+        if not answer:
+            raise RuntimeError("SambaNova API returned no output text")
         return answer, [], model
 
     async def ask(self, owner: str, request: AdvisorRequest) -> dict[str, Any]:
@@ -332,15 +393,36 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
         messages.append({"role": "user", "content": request.message + context_text})
 
         requested_provider = request.provider.strip().casefold()
-        if requested_provider not in {"auto", "local", "groq", "openai"}:
+        if requested_provider not in {"auto", "local", "groq", "openai", "sambanova"}:
             requested_provider = "auto"
         use_openai = requested_provider == "openai" or request.web_research
-        use_groq = requested_provider == "groq" or (requested_provider == "auto" and not request.web_research and self.groq_configured())
+        use_sambanova = requested_provider == "sambanova" or (
+            requested_provider == "auto"
+            and not request.web_research
+            and self.sambanova_configured()
+        )
+        use_groq = requested_provider == "groq" or (
+            requested_provider == "auto"
+            and not request.web_research
+            and not self.sambanova_configured()
+            and self.groq_configured()
+        )
 
         started = time.monotonic()
         sources: list[dict[str, str]] = []
         error = None
-        if use_groq:
+        if use_sambanova:
+            try:
+                answer, sources, model = await self._ask_sambanova(messages=messages)
+                provider = "sambanova"
+                provider_status = "ok"
+            except Exception as exc:
+                answer = "SambaNova cloud mode is currently unavailable. Check SAMBANOVA_API_KEY, SAMBANOVA_BASE_URL, rate limits, network access, and the configured model, then retry or switch provider."
+                model = self.sambanova_model_name()
+                provider = "sambanova"
+                provider_status = "unavailable"
+                error = str(exc)
+        elif use_groq:
             try:
                 answer, sources, model = await self._ask_groq(messages=messages)
                 provider = "groq"
@@ -370,14 +452,7 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             model = self.model_name()
             provider = "local"
             try:
-                result = await self.ollama.chat(
-                    model=model,
-                    messages=messages,
-                    think="high" if request.deep_reasoning else False,
-                    timeout_seconds=300,
-                    verify_model=False,
-                )
-                answer = result.content.strip()
+                answer = await self._local_chat(messages)
                 provider_status = "ok"
             except OllamaServiceError as exc:
                 answer = "The local advisor model is currently unavailable. Check Ollama and the configured advisor model, then retry."
@@ -408,22 +483,41 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             "web_research": request.web_research,
         }
 
+    async def _local_chat(self, messages: list[dict[str, str]]) -> str:
+        """Query the local advisor model, degrading deep reasoning when the model lacks thinking support."""
+        for think in ("high", False):
+            try:
+                result = await self.ollama.chat(
+                    model=self.model_name(),
+                    messages=messages,
+                    think=think,
+                    timeout_seconds=300,
+                    verify_model=False,
+                )
+                return result.content.strip()
+            except OllamaServiceError as exc:
+                message = str(exc).casefold()
+                if think is False or "think" not in message or "not support" not in message:
+                    raise
+
     async def status(self) -> dict[str, Any]:
         health = await self.ollama.check_connection(include_models=True)
         model = self.model_name()
         installed = [item.name for item in health.installed_models]
         return {
-            "available": health.available or self.groq_configured() or self.openai_configured(),
+            "available": health.available or self.groq_configured() or self.openai_configured() or self.sambanova_configured(),
             "local_available": health.available,
             "groq_configured": self.groq_configured(),
             "openai_configured": self.openai_configured(),
+            "sambanova_configured": self.sambanova_configured(),
             "model": model,
             "groq_model": self.groq_model_name(),
             "openai_model": self.openai_model_name(),
+            "sambanova_model": self.sambanova_model_name(),
             "model_installed": any(name.casefold() == model.casefold() or name.casefold().startswith(model.casefold() + ":") for name in installed),
             "ollama": health.to_dict(),
             "roles": ADVISOR_ROLES,
-            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first", "optional_openai", "optional_web_research"],
+            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first", "optional_openai", "optional_web_research", "optional_sambanova"],
         }
 
 

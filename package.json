@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "e2e:render": "playwright test"
+    "e2e:render": "playwright test",
+    "e2e:local": "python scripts/run_local_e2e.py"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1"

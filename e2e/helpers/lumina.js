@@ -45,6 +45,12 @@ async function attachDiagnostics(testInfo, diagnostics) {
       status: item.status,
       method: item.method,
     })),
+    badResponseBodies: (diagnostics.badResponseBodies || []).map((item) => ({
+      url: safeUrl(item.url),
+      status: item.status,
+      method: item.method,
+      body: redact(String(item.body || '').slice(0, 3000)),
+    })),
   };
   const file = path.join(testInfo.outputDir, 'browser-network-diagnostics.json');
   await fs.mkdir(testInfo.outputDir, { recursive: true });
@@ -63,21 +69,42 @@ async function signIn(page) {
   }
 
   await page.goto('/login');
-  await expect(page.getByTestId('login-form')).toBeVisible();
+  await expect(page.getByTestId('login-form').or(page.getByTestId('logout-btn'))).toBeVisible();
+  if (await page.getByTestId('logout-btn').isVisible()) {
+    throw new Error('Sign-in E2E requires a fresh context and a frontend started with REACT_APP_LOCAL_DEV_AUTH=false.');
+  }
+  await expect(page.getByTestId('login-form')).toBeVisible({ timeout: 30000 });
   await page.getByTestId('login-email').fill(email);
   await page.getByTestId('login-password').fill(password);
+  const loginResponse = page.waitForResponse((response) => (
+    new URL(response.url()).pathname === '/api/auth/login' && response.request().method() === 'POST'
+  ));
   await page.getByTestId('login-submit').click();
-  await expect(page).toHaveURL(/\/studio\/(generate|dashboard|mind|documents)/);
+  expect((await loginResponse).status()).toBe(200);
+  await expect(page).toHaveURL(/\/studio\/(generate|dashboard|mind|documents)/, { timeout: 30000 });
   await expect(page.getByTestId('login-form')).toHaveCount(0);
 }
 
 async function ensureSignedIn(page) {
   await page.goto('/studio/dashboard');
-  if (page.url().includes('/login')) {
+  // React redirects after document load; the URL alone can still be /dashboard.
+  await expect(page.getByTestId('login-form').or(page.getByTestId('logout-btn'))).toBeVisible();
+  if (await page.getByTestId('login-form').isVisible()) {
     await signIn(page);
   }
   await page.goto('/studio/dashboard');
   await expect(page).toHaveURL(/\/studio\/dashboard/);
+}
+
+async function authenticatedGet(page, endpoint) {
+  const apiURL = process.env.LUMINA_E2E_API_URL || `${new URL(page.url()).origin}/api`;
+  return page.evaluate(async ({ apiURL, endpoint }) => {
+    const token = localStorage.getItem('lumina_token');
+    const response = await fetch(`${apiURL}${endpoint}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    return { status: response.status, data: await response.json() };
+  }, { apiURL, endpoint });
 }
 
 async function openMind(page) {
@@ -96,6 +123,7 @@ function mindSendButton(page) {
 
 module.exports = {
   attachDiagnostics,
+  authenticatedGet,
   ensureSignedIn,
   mindComposer,
   mindSendButton,

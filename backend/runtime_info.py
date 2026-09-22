@@ -102,12 +102,14 @@ def detect_node_version() -> str | None:
             [path, "--version"],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=5,
             check=False,
         )
         text = (completed.stdout or completed.stderr or "").strip()
         return text.lstrip("v") or None
-    except (OSError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError):
         return None
 
 
@@ -119,15 +121,22 @@ def _powershell_json(script: str, timeout: float = 8.0) -> Any:
     powershell = shutil.which("powershell") or shutil.which("powershell.exe")
     if not powershell:
         return None
+    # PowerShell writes redirected output using the console code page, which on
+    # many Windows locales is not UTF-8. Decoding those bytes with the locale
+    # codec and surrogateescape produced lone surrogates that later broke JSON
+    # serialization of API responses. Force UTF-8 output and decode with
+    # replacement so no invalid code points can reach application data.
+    script = f"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; {script}"
     try:
         completed = subprocess.run(
             [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-            capture_output=True, text=True, timeout=timeout, check=False,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=timeout, check=False,
         )
         if completed.returncode != 0 or not completed.stdout.strip():
             return None
         return json.loads(completed.stdout)
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, ValueError):
+    except (OSError, subprocess.SubprocessError, UnicodeDecodeError, json.JSONDecodeError, ValueError):
         return None
 
 
@@ -228,12 +237,31 @@ def detect_local_model_directories() -> list[dict[str, Any]]:
     return rows
 
 
+def _ollama_probe_target(cfg: dict[str, Any] | None = None) -> tuple[str, int]:
+    """Resolve the Ollama presence-probe target from the configured runtime.
+
+    Cloud deployments (Groq/SambaNova) point OLLAMA_URL away from the local
+    daemon; the readiness probe must never hard-code a local port that a
+    co-installed daemon happens to listen on.
+    """
+    cfg = cfg or {}
+    configured_url = os.environ.get("OLLAMA_URL", "").strip().rstrip("/")
+    if configured_url:
+        try:
+            host, _, port = configured_url.split("//", 1)[1].partition(":")
+            return host, int(port) if port else 80
+        except (IndexError, ValueError):
+            pass
+    return cfg.get("ollama_host", "127.0.0.1"), int(cfg.get("ollama_port", 11434))
+
+
 def detect_ports(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = cfg or load_runtime_config()
+    ollama_host, ollama_port = _ollama_probe_target(cfg)
     required = [
         {"name": "backend", "host": cfg.get("backend_host", "127.0.0.1"), "port": int(cfg.get("backend_port", 8000))},
         {"name": "frontend", "host": cfg.get("frontend_host", "localhost"), "port": int(cfg.get("frontend_port", 3000))},
-        {"name": "ollama", "host": cfg.get("ollama_host", "127.0.0.1"), "port": int(cfg.get("ollama_port", 11434))},
+        {"name": "ollama", "host": ollama_host, "port": ollama_port},
     ]
     for item in required:
         item["listening"] = port_listening(item["host"], item["port"])
@@ -290,9 +318,13 @@ def build_installation_center(active_jobs: int = 0) -> dict[str, Any]:
 def check_ollama(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = cfg or load_runtime_config()
     model = str(cfg.get("preferred_ollama_model") or "qwen2.5-coder:1.5b")
-    host = cfg.get("ollama_host", "127.0.0.1")
-    port = int(cfg.get("ollama_port", 11434))
-    url = f"http://{host}:{port}/api/tags"
+    configured_url = os.environ.get("OLLAMA_URL", "").strip().rstrip("/")
+    if configured_url:
+        url = configured_url + "/api/tags"
+    else:
+        host = cfg.get("ollama_host", "127.0.0.1")
+        port = int(cfg.get("ollama_port", 11434))
+        url = f"http://{host}:{port}/api/tags"
     ok, payload = _http_json(url)
     models = []
     if isinstance(payload, dict):

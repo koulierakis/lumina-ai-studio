@@ -17,6 +17,25 @@ from .document_ai_provider import (
 from .models import CompanyProfile, NaturalDocumentCreationRequest
 
 
+def _extract_explicit_title(request: str) -> str | None:
+    """Keep an explicitly named title separate from following generation instructions."""
+    marker = re.search(r"\b(?:titled|named|called|title(?:\s+is)?)\s*:?\s+", request, re.I)
+    if not marker:
+        return None
+    remainder = request[marker.end():].strip()
+    # Quoted titles may themselves contain punctuation or words such as 'with'.
+    quoted = re.match(r'''["“]([^"”]+)["”]|['‘]([^'’]+)['’]''', remainder)
+    if quoted:
+        return (quoted.group(1) or quoted.group(2)).strip() or None
+    title = re.split(
+        r"\s+(?:with|containing|consisting\s+of)\s+|[\n.;!?]",
+        remainder,
+        maxsplit=1,
+        flags=re.I,
+    )[0].strip().rstrip(",")
+    return title or None
+
+
 class NaturalCreationError(RuntimeError):
     """Base failure for route-independent natural document creation."""
 
@@ -141,7 +160,12 @@ def _classify_request(request: str, requested_type: str | None = None) -> dict[s
     for pattern, key, title, category in DOCUMENT_TYPES:
         if re.search(pattern, request, re.IGNORECASE):
             return {"key": key, "title": title, "category": category}
-    return {"key": "custom_document", "title": "Custom Document", "category": "General"}
+    explicit_title = _extract_explicit_title(request)
+    return {
+        "key": "custom_document",
+        "title": explicit_title or "Custom Document",
+        "category": "General",
+    }
 
 
 def _requested_blanks(request: str) -> list[str]:

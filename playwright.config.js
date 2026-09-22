@@ -9,14 +9,15 @@ module.exports = defineConfig({
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: [['list'], ['html', { outputFolder: 'test_reports/playwright-html', open: 'never' }]],
-  outputDir: 'test_reports/playwright-artifacts',
+  reporter: [['list'], ['html', { outputFolder: process.env.LUMINA_E2E_HTML_DIR || 'test_reports/playwright-html', open: 'never' }]],
+  outputDir: process.env.LUMINA_E2E_OUTPUT_DIR || 'test_reports/playwright-artifacts',
   use: {
     baseURL,
     actionTimeout: 30000,
     navigationTimeout: 60000,
     screenshot: 'only-on-failure',
-    trace: 'retain-on-failure',
+    // Local isolated credentials must not be embedded in trace network snapshots.
+    trace: process.env.LUMINA_E2E_ISOLATED === '1' ? 'off' : 'retain-on-failure',
     video: 'off',
   },
   projects: [

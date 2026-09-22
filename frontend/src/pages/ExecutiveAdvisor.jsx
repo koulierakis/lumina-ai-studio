@@ -242,6 +242,10 @@ export default function ExecutiveAdvisor() {
       setError('Groq requires GROQ_API_KEY in the backend environment.');
       return;
     }
+    if (provider === 'sambanova' && !status?.sambanova_configured) {
+      setError('SambaNova requires SAMBANOVA_API_KEY and SAMBANOVA_BASE_URL in the backend environment.');
+      return;
+    }
     if ((provider === 'openai' || webResearch) && !status?.openai_configured) {
       setError('Cloud/Web Research requires OPENAI_API_KEY in the backend environment.');
       return;
@@ -382,7 +386,7 @@ export default function ExecutiveAdvisor() {
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-white/45">
             <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.local_available ? 'bg-emerald-400' : 'bg-amber-300'}`} />Τοπικό</span>
-            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.openai_configured ? 'bg-emerald-400' : 'bg-white/20'}`} />Cloud</span>
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/10 px-3 py-1.5"><span className={`h-2 w-2 rounded-full ${status?.openai_configured || status?.groq_configured || status?.sambanova_configured ? 'bg-emerald-400' : 'bg-white/20'}`} />Cloud</span>
           </div>
         </header>
 
@@ -420,6 +424,7 @@ export default function ExecutiveAdvisor() {
               <div className="mt-3 flex flex-wrap gap-2">
                 <button onClick={() => { setProvider('groq'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'groq' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Groq</button>
                 <button onClick={() => { setProvider('local'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'local' && !webResearch ? 'border-emerald-400/30 bg-emerald-400/5 text-emerald-200' : 'border-white/10 text-white/35'}`}><HardDrive className="h-3.5 w-3.5" />Τοπικό</button>
+                <button onClick={() => { setProvider('sambanova'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'sambanova' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />SambaNova</button>
                 <button onClick={() => { setProvider('openai'); setWebResearch(false); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${provider === 'openai' && !webResearch ? 'border-sky-400/30 bg-sky-400/5 text-sky-200' : 'border-white/10 text-white/35'}`}><Cloud className="h-3.5 w-3.5" />Cloud ανάλυση</button>
                 <button onClick={() => { setProvider('openai'); setWebResearch(true); }} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] ${webResearch ? 'border-gold/35 bg-gold/10 text-gold' : 'border-white/10 text-white/35'}`}><Globe2 className="h-3.5 w-3.5" />Έρευνα διαδικτύου</button>
                 <button type="button" onClick={exportConversation} disabled={!messages.length} className="ml-auto inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[11px] text-white/35 disabled:opacity-30"><Download className="h-3.5 w-3.5" />Εξαγωγή</button>

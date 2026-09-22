@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
+import pytest
 import server
 from fastapi.testclient import TestClient
 from server import app
@@ -12,6 +14,14 @@ from talking_portrait_providers.liveportrait_installer import (
     LivePortraitInstaller,
     build_initial_install_payload,
 )
+
+# Set test password hash for "password123" so auth works in tests
+TEST_PASSWORD_HASH = "$2b$12$4kw2zFS0aLqjSbcG3kfFhO6.pVDazXgGKPYcFwd3NZJcsko52O0U2"
+
+@pytest.fixture(autouse=True)
+def _set_test_password_hash(monkeypatch):
+    monkeypatch.setenv("OWNER_PASSWORD_HASH", TEST_PASSWORD_HASH)
+    monkeypatch.setenv("OWNER_PASSWORD", "password123")
 
 client = TestClient(app, base_url="http://127.0.0.1")
 

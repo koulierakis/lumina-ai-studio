@@ -12,10 +12,14 @@ import pytest
 _SERVER_PROCESS: subprocess.Popen | None = None
 _SKIP_SERVER_ENV = "LUMINA_SKIP_TEST_SERVER"
 
+# Test password hash for "password123" (bcrypt, 12 rounds)
+TEST_PASSWORD_HASH = "$2b$12$4kw2zFS0aLqjSbcG3kfFhO6.pVDazXgGKPYcFwd3NZJcsko52O0U2"
+
 os.environ.setdefault("PYTHONPATH", str(Path(__file__).resolve().parents[1]))
 os.environ.setdefault("REACT_APP_BACKEND_URL", "http://127.0.0.1:8000")
 os.environ.setdefault("OWNER_EMAIL", "owner@lumina.local")
 os.environ.setdefault("OWNER_PASSWORD", "password123")
+os.environ.setdefault("OWNER_PASSWORD_HASH", TEST_PASSWORD_HASH)
 os.environ.setdefault("LUMINA_TEST_OWNER_PASSWORD", "password123")
 os.environ.setdefault("JWT_SECRET", "test-secret-for-local-validation-only-32b")
 os.environ.setdefault("GEMINI_API_KEY", "test-key")
@@ -23,6 +27,15 @@ os.environ.setdefault("LUMINA_TEST_PROVIDER", "1")
 os.environ.setdefault("LUMINA_LOCAL_PASSWORDLESS", "0")
 os.environ.setdefault("MONGO_URL", "mongomock://localhost")
 os.environ.setdefault("DB_NAME", "lumina_test")
+# Hermetic document-AI defaults: isolate unit tests from any developer .env
+# (e.g. a local GROQ_API_KEY / LUMINA_DOCUMENT_AI_PROVIDER=groq). load_dotenv
+# uses override=False, so these values win when modules are imported later.
+os.environ["LUMINA_DOCUMENT_AI_PROVIDER"] = "ollama"
+os.environ["GROQ_DOCUMENT_MODEL"] = "openai/gpt-oss-120b"
+os.environ["GROQ_API_KEY"] = ""
+os.environ["SAMBANOVA_API_KEY"] = ""
+os.environ["SAMBANOVA_BASE_URL"] = ""
+os.environ["SAMBANOVA_MODEL"] = ""
 
 
 def _skip_test_server() -> bool:
@@ -57,6 +70,12 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     env.setdefault("LUMINA_LOCAL_PASSWORDLESS", "0")
     env.setdefault("MONGO_URL", "mongomock://localhost")
     env.setdefault("DB_NAME", "lumina_test")
+    env["LUMINA_DOCUMENT_AI_PROVIDER"] = "ollama"
+    env["GROQ_DOCUMENT_MODEL"] = "openai/gpt-oss-120b"
+    env["GROQ_API_KEY"] = ""
+    env["SAMBANOVA_API_KEY"] = ""
+    env["SAMBANOVA_BASE_URL"] = ""
+    env["SAMBANOVA_MODEL"] = ""
     env["PATH"] = str(repo_root / "tools" / "ffmpeg") + os.pathsep + env.get("PATH", "")
     _SERVER_PROCESS = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "server:app", "--host", "127.0.0.1", "--port", "8000"],

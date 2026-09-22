@@ -112,6 +112,23 @@ async def repository_status() -> dict[str, Any]:
     }
 
 
+def scrub_serialization_safe(value: Any) -> Any:
+    """Replace lone UTF-16 surrogate code points so JSON serialization cannot fail.
+
+    Bytes decoded with a Windows console code page can carry isolated
+    surrogates; scrubbing them to U+FFFD keeps monitoring APIs resilient.
+    """
+    if isinstance(value, str):
+        if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+            return "".join("\ufffd" if 0xD800 <= ord(char) <= 0xDFFF else char for char in value)
+        return value
+    if isinstance(value, dict):
+        return {key: scrub_serialization_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [scrub_serialization_safe(item) for item in value]
+    return value
+
+
 def local_system_metrics() -> dict[str, Any]:
     try:
         usage = shutil.disk_usage(REPO_ROOT)

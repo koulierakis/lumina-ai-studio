@@ -7,7 +7,7 @@ export const DOCUMENT_TYPES = [
 
 export const DOCUMENT_CREATION_MODES = ['prompt', 'template', 'uploaded', 'rewrite', 'merge', 'continue', 'translate', 'improve', 'summarize', 'expand', 'style'];
 export const EXPORT_FORMATS = ['pdf', 'docx', 'html', 'markdown', 'rtf', 'txt'];
-export const DOCUMENT_AI_PROVIDERS = ['ollama', 'groq'];
+export const DOCUMENT_AI_PROVIDERS = ['ollama', 'groq', 'sambanova'];
 
 function normalizedProvider(provider) {
   const value = String(provider || '').trim().toLowerCase();
@@ -36,7 +36,7 @@ export function normalizePackAdvisorResponse(payload = {}) {
 }
 
 export function friendlyDocumentAIError(error = {}) {
-  if (error.code === 'invalid_provider') return 'Choose Ollama or Groq as the AI provider.';
+  if (error.code === 'invalid_provider') return 'Choose Ollama, Groq or SambaNova as the AI provider.';
   if (error.status === 504 || error.code === 'http_504') return 'The AI provider timed out. Try again.';
   if (error.status === 503 || error.code === 'http_503') return 'The selected AI provider is unavailable.';
   if (error.status === 502 || error.code === 'http_502') return 'The AI provider returned an invalid preview.';

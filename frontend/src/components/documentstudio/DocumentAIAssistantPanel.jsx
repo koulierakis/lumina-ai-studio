@@ -25,14 +25,22 @@ const CV_STYLES = [
   ['ats', 'ATS-friendly'],
 ];
 
+const PROVIDER_LABELS = {
+  ollama: 'Ollama',
+  groq: 'Groq',
+  sambanova: 'SambaNova',
+};
+
+const providerLabel = (providerName) => PROVIDER_LABELS[providerName] || providerName;
+
 function ProviderSelect({ value, onChange, label = 'Provider' }) {
   return (
     <label className="doc-ai-field doc-ai-provider-field">
       <span>{label}</span>
       <select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Automatic (Ollama)</option>
+        <option value="">Automatic</option>
         {DOCUMENT_AI_PROVIDERS.map((providerName) => (
-          <option key={providerName} value={providerName}>{providerName === 'groq' ? 'Groq' : 'Ollama'}</option>
+          <option key={providerName} value={providerName}>{providerLabel(providerName)}</option>
         ))}
       </select>
     </label>
@@ -54,7 +62,7 @@ function ProviderReadiness({ payload, loading, onRefresh }) {
         return (
           <div key={name} className={`doc-ai-pack-summary ${ready ? 'complete' : 'failed'}`}>
             {ready ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}
-            <span><strong>{name === 'groq' ? 'Groq' : 'Ollama'}</strong>{model ? ` · ${model}` : ''} · {ready ? 'ready' : (status.error || 'unavailable')}</span>
+            <span><strong>{providerLabel(name)}</strong>{model ? ` · ${model}` : ''} · {ready ? 'ready' : (status.error || 'unavailable')}</span>
           </div>
         );
       })}

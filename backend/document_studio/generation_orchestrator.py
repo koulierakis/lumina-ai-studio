@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from typing import Any, Literal
@@ -28,9 +29,43 @@ from .natural_creation import (
     create_natural_document,
 )
 from .ollama_adapter import OllamaDocumentAdapter, get_ollama_adapter
+from .sambanova_provider import (
+    SambaNovaDocumentProvider,
+    SambaNovaProviderHTTPError,
+    SambaNovaProviderUnavailable,
+)
 
-DEFAULT_PROVIDER = "groq"
-SUPPORTED_PROVIDERS = frozenset({"ollama", "groq"})
+SUPPORTED_PROVIDERS = frozenset({"ollama", "groq", "sambanova"})
+
+
+def _sambanova_configured() -> bool:
+    return bool(os.getenv("SAMBANOVA_API_KEY", "").strip()) and bool(
+        os.getenv("SAMBANOVA_BASE_URL", "").strip()
+    )
+
+
+def _groq_configured() -> bool:
+    return bool(os.getenv("GROQ_API_KEY", "").strip())
+
+
+def _resolve_default_provider() -> str:
+    """Prefer whatever is explicitly configured; otherwise never silently pick Ollama.
+
+    Order: explicit ``LUMINA_DOCUMENT_AI_PROVIDER``, then a configured SambaNova
+    Cloud endpoint, then Groq when a key is present, and only then the optional
+    local Ollama fallback.
+    """
+    configured = os.getenv("LUMINA_DOCUMENT_AI_PROVIDER", "").strip().casefold()
+    if configured in SUPPORTED_PROVIDERS:
+        return configured
+    if _sambanova_configured():
+        return "sambanova"
+    if _groq_configured():
+        return "groq"
+    return "ollama"
+
+
+DEFAULT_PROVIDER = _resolve_default_provider()
 
 
 class UnknownDocumentAIProvider(DocumentAIProviderError):
@@ -131,8 +166,10 @@ class DocumentAIProviderRegistry:
             )
         if selected in self._providers:
             return self._providers[selected]
-        if selected == "groq":
-            provider: DocumentAIProvider = GroqDocumentProvider()
+        if selected == "sambanova":
+            provider: DocumentAIProvider = SambaNovaDocumentProvider()
+        elif selected == "groq":
+            provider = GroqDocumentProvider()
         else:
             provider = OllamaNaturalDocumentProvider()
         self._providers[selected] = provider
@@ -294,8 +331,17 @@ def _eligible_fallback_failure(exc: Exception) -> bool:
     if isinstance(exc, NaturalCreationProviderError):
         cause = exc.__cause__
         return (
-            isinstance(cause, (DocumentAIProviderTimeout, GroqProviderUnavailable))
+            isinstance(
+                cause,
+                (
+                    DocumentAIProviderTimeout,
+                    GroqProviderUnavailable,
+                    SambaNovaProviderUnavailable,
+                ),
+            )
             or isinstance(cause, GroqProviderHTTPError)
+            and cause.retryable
+            or isinstance(cause, SambaNovaProviderHTTPError)
             and cause.retryable
         )
     return False
