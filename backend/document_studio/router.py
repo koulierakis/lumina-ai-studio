@@ -498,54 +498,6 @@ async def update_template_library_item(
     return template
 
 
-@router.post("/template-library/{template_id}/{action}", response_model=EnterpriseDocumentTemplate)
-async def template_action(
-    template_id: str, action: str, owner: str = Depends(require_owner)
-) -> EnterpriseDocumentTemplate:
-    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
-    if not doc:
-        raise HTTPException(404, "Template not found")
-    data = {**doc, "updated_at": now_iso()}
-    if action == "duplicate":
-        data.update(
-            {
-                "id": EnterpriseDocumentTemplate(owner_email=owner, name=data["name"]).id,
-                "name": f"Copy of {data['name']}",
-                "status": "draft",
-                "locked": False,
-                "created_at": now_iso(),
-                "version_number": 1,
-            }
-        )
-        template = EnterpriseDocumentTemplate(**data)
-        await templates_coll.insert_one(template.model_dump())
-        await _save_template_version(template, owner, "Duplicated template")
-        return template
-    status_map = {
-        "publish": "published",
-        "draft": "draft",
-        "archive": "archived",
-        "lock": "draft",
-        "favorite": data.get("status", "draft"),
-        "use": data.get("status", "draft"),
-    }
-    if action not in status_map:
-        raise HTTPException(400, "Unsupported template action")
-    data["status"] = status_map[action]
-    if action == "lock":
-        data["locked"] = True
-    if action == "favorite":
-        data["favorite"] = not bool(data.get("favorite"))
-    if action == "use":
-        data["recently_used_at"] = now_iso()
-    template = EnterpriseDocumentTemplate(**data)
-    await templates_coll.replace_one(
-        {"id": template_id, "owner_email": owner}, template.model_dump()
-    )
-    await _save_template_version(template, owner, f"Template action: {action}")
-    return template
-
-
 @router.delete("/template-library/{template_id}")
 async def delete_template_library_item(
     template_id: str, owner: str = Depends(require_owner)
@@ -795,36 +747,6 @@ async def update_company(
     await _save_company_version(
         updated, owner, str(body.get("change_note") or "Updated company profile")
     )
-    return await _hydrate_profile(owner, updated)
-
-
-@router.post("/companies/{company_id}/{action}", response_model=CompanyProfile)
-async def company_lifecycle(
-    company_id: str, action: str, owner: str = Depends(require_owner)
-) -> CompanyProfile:
-    current = await _profile(owner, company_id)
-    data = current.model_dump()
-    if action == "archive":
-        data["archived"] = True
-    elif action == "restore":
-        data["archived"] = False
-        data["deleted"] = False
-    elif action == "delete":
-        data["deleted"] = True
-        data["archived"] = True
-    elif action == "hard-delete":
-        await profiles_coll.delete_one({"id": company_id, "owner_email": owner})
-        await people_coll.delete_many({"company_profile_id": company_id, "owner_email": owner})
-        await banks_coll.delete_many({"company_profile_id": company_id, "owner_email": owner})
-        return current
-    else:
-        raise HTTPException(400, "Unsupported company lifecycle action")
-    data["updated_at"] = now_iso()
-    updated = CompanyProfile(**data)
-    await profiles_coll.replace_one(
-        {"id": company_id, "owner_email": owner}, updated.model_dump(), upsert=True
-    )
-    await _save_company_version(updated, owner, action)
     return await _hydrate_profile(owner, updated)
 
 
@@ -1691,40 +1613,14 @@ async def create_document(body: dict, owner: str = Depends(require_owner)) -> Co
     return document
 
 
+@router.get("/design-presets")
+async def list_design_presets(_: str = Depends(require_owner)) -> dict:
+    return {"presets": get_design_presets()}
+
+
 @router.get("/{document_id}", response_model=CorporateDocument)
 async def get_document(document_id: str, owner: str = Depends(require_owner)) -> CorporateDocument:
     return await _document(document_id, owner)
-
-
-@router.post("/{document_id}/{action}", response_model=CorporateDocument)
-async def document_lifecycle(
-    document_id: str, action: str, owner: str = Depends(require_owner)
-) -> CorporateDocument:
-    document = await _document(document_id, owner)
-    status_map = {
-        "archive": "archived",
-        "trash": "trashed",
-        "restore": "draft",
-        "approve": "approved",
-        "submit-review": "in_review",
-    }
-    if action not in status_map:
-        raise HTTPException(400, "Unsupported document lifecycle action")
-    data = document.model_dump()
-    data["status"] = status_map[action]
-    data["updated_at"] = now_iso()
-    metadata = {**(data.get("metadata") or {})}
-    metadata.setdefault("activity", [])
-    metadata["activity"] = [
-        {"at": data["updated_at"], "type": "lifecycle", "action": action, "actor": owner},
-        *metadata["activity"],
-    ][:100]
-    data["metadata"] = metadata
-    updated = CorporateDocument(**data)
-    await documents_coll.replace_one(
-        {"id": document_id, "owner_email": owner}, updated.model_dump()
-    )
-    return updated
 
 
 @router.post("/batch")
@@ -2396,11 +2292,6 @@ async def design_document(
     return updated
 
 
-@router.get("/design-presets")
-async def list_design_presets(_: str = Depends(require_owner)) -> dict:
-    return {"presets": get_design_presets()}
-
-
 @router.post("/{document_id}/redesign", response_model=CorporateDocument)
 async def redesign_document(
     document_id: str, body: dict | None = None, owner: str = Depends(require_owner)
@@ -2823,3 +2714,112 @@ async def delete_document(document_id: str, owner: str = Depends(require_owner))
         raise HTTPException(404, "Document not found")
     await versions_coll.delete_many({"document_id": document_id, "owner_email": owner})
     return {"ok": True}
+
+
+@router.post("/{document_id}/{action}", response_model=CorporateDocument)
+async def document_lifecycle(
+    document_id: str, action: str, owner: str = Depends(require_owner)
+) -> CorporateDocument:
+    document = await _document(document_id, owner)
+    status_map = {
+        "archive": "archived",
+        "trash": "trashed",
+        "restore": "draft",
+        "approve": "approved",
+        "submit-review": "in_review",
+    }
+    if action not in status_map:
+        raise HTTPException(400, "Unsupported document lifecycle action")
+    data = document.model_dump()
+    data["status"] = status_map[action]
+    data["updated_at"] = now_iso()
+    metadata = {**(data.get("metadata") or {})}
+    metadata.setdefault("activity", [])
+    metadata["activity"] = [
+        {"at": data["updated_at"], "type": "lifecycle", "action": action, "actor": owner},
+        *metadata["activity"],
+    ][:100]
+    data["metadata"] = metadata
+    updated = CorporateDocument(**data)
+    await documents_coll.replace_one(
+        {"id": document_id, "owner_email": owner}, updated.model_dump()
+    )
+    return updated
+
+
+@router.post("/template-library/{template_id}/{action}", response_model=EnterpriseDocumentTemplate)
+async def template_action(
+    template_id: str, action: str, owner: str = Depends(require_owner)
+) -> EnterpriseDocumentTemplate:
+    doc = await templates_coll.find_one({"id": template_id, "owner_email": owner}, {"_id": 0})
+    if not doc:
+        raise HTTPException(404, "Template not found")
+    data = {**doc, "updated_at": now_iso()}
+    if action == "duplicate":
+        data.update(
+            {
+                "id": EnterpriseDocumentTemplate(owner_email=owner, name=data["name"]).id,
+                "name": f"Copy of {data['name']}",
+                "status": "draft",
+                "locked": False,
+                "created_at": now_iso(),
+                "version_number": 1,
+            }
+        )
+        template = EnterpriseDocumentTemplate(**data)
+        await templates_coll.insert_one(template.model_dump())
+        await _save_template_version(template, owner, "Duplicated template")
+        return template
+    status_map = {
+        "publish": "published",
+        "draft": "draft",
+        "archive": "archived",
+        "lock": "draft",
+        "favorite": data.get("status", "draft"),
+        "use": data.get("status", "draft"),
+    }
+    if action not in status_map:
+        raise HTTPException(400, "Unsupported template action")
+    data["status"] = status_map[action]
+    if action == "lock":
+        data["locked"] = True
+    if action == "favorite":
+        data["favorite"] = not bool(data.get("favorite"))
+    if action == "use":
+        data["recently_used_at"] = now_iso()
+    template = EnterpriseDocumentTemplate(**data)
+    await templates_coll.replace_one(
+        {"id": template_id, "owner_email": owner}, template.model_dump()
+    )
+    await _save_template_version(template, owner, f"Template action: {action}")
+    return template
+
+
+@router.post("/companies/{company_id}/{action}", response_model=CompanyProfile)
+async def company_lifecycle(
+    company_id: str, action: str, owner: str = Depends(require_owner)
+) -> CompanyProfile:
+    current = await _profile(owner, company_id)
+    data = current.model_dump()
+    if action == "archive":
+        data["archived"] = True
+    elif action == "restore":
+        data["archived"] = False
+        data["deleted"] = False
+    elif action == "delete":
+        data["deleted"] = True
+        data["archived"] = True
+    elif action == "hard-delete":
+        await profiles_coll.delete_one({"id": company_id, "owner_email": owner})
+        await people_coll.delete_many({"company_profile_id": company_id, "owner_email": owner})
+        await banks_coll.delete_many({"company_profile_id": company_id, "owner_email": owner})
+        return current
+    else:
+        raise HTTPException(400, "Unsupported company lifecycle action")
+    data["updated_at"] = now_iso()
+    updated = CompanyProfile(**data)
+    await profiles_coll.replace_one(
+        {"id": company_id, "owner_email": owner}, updated.model_dump(), upsert=True
+    )
+    await _save_company_version(updated, owner, action)
+    return await _hydrate_profile(owner, updated)

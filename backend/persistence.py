@@ -565,7 +565,24 @@ class PostgresPersistenceProvider(PersistenceProvider):
             replacement.setdefault("id", row.get("id"))
             await self.insert_one(table, replacement)
 
+    async def update_many(self, table: str, query: dict[str, Any], update: dict[str, Any]) -> int:
+        rows = await asyncio.to_thread(self._rows, table, query)
+        updated = 0
+        for row in rows:
+            await self.insert_one(table, SQLitePersistenceProvider._apply_update(self, row, update))
+            updated += 1
+        return updated
+
     async def delete_one(self, table: str, query: dict[str, Any]) -> int:
+        rows = await asyncio.to_thread(self._rows, table, query)
+        if not rows:
+            return 0
+        with self._connect() as conn, conn.cursor() as cur:
+            for row in rows:
+                cur.execute("DELETE FROM lumina_records WHERE namespace = %s AND id = %s", (table, row["id"]))
+        return len(rows)
+
+    async def delete_many(self, table: str, query: dict[str, Any]) -> int:
         rows = await asyncio.to_thread(self._rows, table, query)
         if not rows:
             return 0

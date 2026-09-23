@@ -124,6 +124,76 @@ def counts():
     }
 
 
+def test_design_presets_route_is_not_shadowed_by_document_catchall(api):
+    client, headers = api
+    response = client.get("/api/documents/design-presets", headers=headers)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert isinstance(payload["presets"], list)
+    assert len(payload["presets"]) >= 3
+    assert all("id" in preset and "name" in preset for preset in payload["presets"])
+
+
+def test_document_subaction_routes_registered_before_lifecycle_catchall():
+    """Concrete POST /{document_id}/... routes must precede the generic
+    /{document_id}/{action} lifecycle catch-all, otherwise FastAPI routes
+    redesign/analysis/review/operate/lock into "Unsupported lifecycle action".
+    """
+    paths = []
+    for route in document_router.router.routes:
+        for method in getattr(route, "methods", set()) or set():
+            if method == "POST":
+                paths.append((getattr(route, "path", ""), route))
+    lifecycle_index = next(
+        i for i, (path, _) in enumerate(paths) if path == "/api/documents/{document_id}/{action}"
+    )
+    for subaction in (
+        "/api/documents/{document_id}/lock",
+        "/api/documents/{document_id}/review",
+        "/api/documents/{document_id}/analysis",
+        "/api/documents/{document_id}/redesign",
+        "/api/documents/{document_id}/operate",
+    ):
+        index = next((i for i, (path, _) in enumerate(paths) if path == subaction), None)
+        assert index is not None, f"{subaction} route is missing"
+        assert index < lifecycle_index, f"{subaction} is shadowed by the lifecycle catch-all"
+
+
+def test_resource_subaction_routes_registered_before_catchalls():
+    """Template and company lifecycle catch-alls must stay behind their concrete
+    subresource routes (merge/validate/upload), or FastAPI routes those action
+    endpoints into "Unsupported {resource} action".
+    """
+    paths = []
+    for route in document_router.router.routes:
+        for method in getattr(route, "methods", set()) or set():
+            if method == "POST":
+                paths.append((getattr(route, "path", ""), route))
+    template_index = next(
+        i
+        for i, (path, _) in enumerate(paths)
+        if path == "/api/documents/template-library/{template_id}/{action}"
+    )
+    for subroute in (
+        "/api/documents/template-library/{template_id}/merge",
+        "/api/documents/template-library/{template_id}/validate",
+    ):
+        index = next((i for i, (path, _) in enumerate(paths) if path == subroute), None)
+        assert index is not None, f"{subroute} route is missing"
+        assert index < template_index, f"{subroute} is shadowed by the template action catch-all"
+    company_index = next(
+        i
+        for i, (path, _) in enumerate(paths)
+        if path == "/api/documents/companies/{company_id}/{action}"
+    )
+    for subroute in (
+        "/api/documents/companies/{company_id}/upload",
+    ):
+        index = next((i for i, (path, _) in enumerate(paths) if path == subroute), None)
+        assert index is not None, f"{subroute} route is missing"
+        assert index < company_index, f"{subroute} is shadowed by the company action catch-all"
+
+
 def test_pack_advisor_api_is_authenticated_deterministic_and_non_persistent(api):
     client, headers = api
     before = counts()
