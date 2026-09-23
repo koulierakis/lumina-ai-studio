@@ -2181,32 +2181,58 @@ async def _run_video_generation(job_id: str, owner: str) -> None:
             )
         async def video_executor(runtime_job, progress):
             await progress(runtime_job, RuntimeJobStatus.RUNNING, 35, "Video provider execution started")
-            if getattr(provider, "supports_async_jobs", False):
-                submitted = await provider.submit(spec)
-                await video_generation_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "processing", "progress": 35, "estimated_seconds_remaining": None, "metadata.provider_job_id": submitted.id, "metadata.provider_status": submitted.state, "updated_at": now_iso()}})
-                poll_interval = max(1, int(os.environ.get("VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", "5")))
-                max_wait = max(poll_interval, int(os.environ.get("VIDEO_PROVIDER_MAX_POLL_SECONDS", "600")))
-                elapsed = 0
-                while elapsed < max_wait:
-                    await asyncio.sleep(poll_interval); elapsed += poll_interval
-                    current = await video_generation_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
-                    if not current or current.get("status") == "cancelled": raise VideoProviderError(job.provider, "Cancelled", "Video generation was cancelled.")
-                    remote = await provider.poll(submitted.id)
-                    raw_state = remote.state.lower()
-                    if raw_state in {"failed", "error"}:
-                        raise VideoProviderError(job.provider, "Provider generation failed", "The video provider could not complete this generation.")
-                    if raw_state in {"completed", "complete", "succeeded"}:
-                        await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Downloading video result")
-                        return await provider.download(remote)
-                    runtime_progress = 60 if raw_state in {"dreaming", "processing", "generating"} else 45
-                    await progress(runtime_job, RuntimeJobStatus.WAITING, runtime_progress, f"Provider status: {remote.state}")
-                    await video_generation_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "processing", "progress": runtime_progress, "metadata.provider_status": remote.state, "updated_at": now_iso()}})
-                raise VideoProviderError(job.provider, "Provider polling timed out", "The video provider took too long. You can retry this job.", retryable=True)
-            if not await stage("rendering", 82, 1):
-                raise VideoProviderError(job.provider, "Cancelled", "Video generation was cancelled.")
-            result_value = await provider.generate(spec)
-            await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Video provider returned result")
-            return result_value
+            try:
+                if getattr(provider, "supports_async_jobs", False):
+                    submitted = await provider.submit(spec)
+                    await video_generation_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "processing", "progress": 35, "estimated_seconds_remaining": None, "metadata.provider_job_id": submitted.id, "metadata.provider_status": submitted.state, "updated_at": now_iso()}})
+                    poll_interval = max(1, int(os.environ.get("VIDEO_PROVIDER_POLL_INTERVAL_SECONDS", "5")))
+                    max_wait = max(poll_interval, int(os.environ.get("VIDEO_PROVIDER_MAX_POLL_SECONDS", "600")))
+                    elapsed = 0
+                    while elapsed < max_wait:
+                        await asyncio.sleep(poll_interval); elapsed += poll_interval
+                        current = await video_generation_jobs_coll.find_one({"id": job_id, "owner_email": owner}, {"_id": 0})
+                        if not current or current.get("status") == "cancelled": raise VideoProviderError(job.provider, "Cancelled", "Video generation was cancelled.")
+                        remote = await provider.poll(submitted.id)
+                        raw_state = remote.state.lower()
+                        if raw_state in {"failed", "error"}:
+                            raise VideoProviderError(job.provider, "Provider generation failed", "The video provider could not complete this generation.")
+                        if raw_state in {"completed", "complete", "succeeded"}:
+                            await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Downloading video result")
+                            return await provider.download(remote)
+                        runtime_progress = 60 if raw_state in {"dreaming", "processing", "generating"} else 45
+                        await progress(runtime_job, RuntimeJobStatus.WAITING, runtime_progress, f"Provider status: {remote.state}")
+                        await video_generation_jobs_coll.update_one({"id": job_id, "owner_email": owner}, {"$set": {"status": "processing", "progress": runtime_progress, "metadata.provider_status": remote.state, "updated_at": now_iso()}})
+                    raise VideoProviderError(job.provider, "Provider polling timed out", "The video provider took too long. You can retry this job.", retryable=True)
+                if not await stage("rendering", 82, 1):
+                    raise VideoProviderError(job.provider, "Cancelled", "Video generation was cancelled.")
+                result_value = await provider.generate(spec)
+                await progress(runtime_job, RuntimeJobStatus.RUNNING, 90, "Video provider returned result")
+                return result_value
+            except Exception as exc:
+                if isinstance(exc, VideoProviderError):
+                    lowered = str(exc).lower()
+                    if "cancel" in lowered:
+                        kind_value = ErrorKind.UNKNOWN.value
+                    elif any(marker in lowered for marker in ("timeout", "timed out", "too long", "polling")):
+                        kind_value = ErrorKind.TIMEOUT.value
+                    elif any(marker in lowered for marker in ("quota", "credit", "billing")):
+                        kind_value = ErrorKind.QUOTA.value
+                    elif any(marker in lowered for marker in ("rate limit", "429")):
+                        kind_value = ErrorKind.RATE_LIMIT.value
+                    elif any(marker in lowered for marker in ("missing", "not configured", "credential", "token")):
+                        kind_value = ErrorKind.AUTH.value
+                    else:
+                        kind_value = ErrorKind.UNAVAILABLE.value
+                    runtime_job.metadata["provider_error"] = {
+                        "provider": exc.provider or job.provider,
+                        "message": exc.safe_message,
+                        "http_status": None,
+                        "retryable": exc.retryable,
+                        "kind": kind_value,
+                    }
+                else:
+                    runtime_job.metadata["provider_error"] = _safe_provider_failure(exc, provider=job.provider)
+                raise
 
         result, runtime_job = await _runtime_execute(owner, "video", "video", job.provider, {"mode": job.mode, "prompt": job.prompt, "duration_seconds": job.duration_seconds}, video_executor)
         validation = _probe_video_bytes(result.data, result.mime_type)
@@ -2275,7 +2301,7 @@ async def _run_video_generation_guarded(job_id: str, owner: str) -> None:
 
 @api.get("/video/providers")
 async def list_video_providers(_: str = Depends(require_owner)) -> dict:
-    return {"active": os.environ.get("VIDEO_PROVIDER", "mock"), "available": available_video_providers(), "providers": video_provider_catalog()}
+    return {"active": (os.environ.get("VIDEO_PROVIDER") or "mock").strip(), "available": available_video_providers(), "providers": video_provider_catalog()}
 
 
 @api.post("/video/generate", response_model=VideoGenerationJob)
@@ -3313,7 +3339,7 @@ async def settings_readiness(_: str = Depends(require_owner)) -> dict:
     statuses = await provider_manager.statuses()
     env = detect_local_environment()
     installation = build_installation_center()
-    return {"security": {"owner_configured": bool(os.environ.get("OWNER_EMAIL")), "jwt_configured": bool(os.environ.get("JWT_SECRET")), "secrets_exposed": False}, "storage": local_system_metrics().get("disk", {"available": False}), "providers": [{"id": item.get("id"), "configured": bool(item.get("configured")), "healthy": bool(item.get("healthy")), "state": "Ready" if item.get("configured") and item.get("healthy") else "Requires API key" if not item.get("configured") else "Failed"} for item in statuses], "defaults": {"image_provider": os.environ.get("IMAGE_PROVIDER", "mock"), "video_provider": os.environ.get("VIDEO_PROVIDER", "mock"), "voice_provider": os.environ.get("VOICE_PROVIDER", "edge-tts")}, "environment": env, "installation_center": installation, "first_run": {"works_now": ["Dashboard", "Developer Center", "Document Studio local text extraction", "Photo Studio non-generative editing", "Code Builder safety workflows"], "needs_installation": [item for item in installation["dependencies"] if item["status"] in {"missing", "optional_missing"}], "needs_configuration": [item for item in statuses if not item.get("configured")], "optional": ["Cloud image/video/voice providers", "Ollama coding model"], "unavailable": [cap for cap, state in env.get("capabilities", {}).items() if state not in {"ready"}]}}
+    return {"security": {"owner_configured": bool(os.environ.get("OWNER_EMAIL")), "jwt_configured": bool(os.environ.get("JWT_SECRET")), "secrets_exposed": False}, "storage": local_system_metrics().get("disk", {"available": False}), "providers": [{"id": item.get("id"), "configured": bool(item.get("configured")), "healthy": bool(item.get("healthy")), "state": "Ready" if item.get("configured") and item.get("healthy") else "Requires API key" if not item.get("configured") else "Failed"} for item in statuses], "defaults": {"image_provider": (os.environ.get("IMAGE_PROVIDER") or "mock").strip(), "video_provider": (os.environ.get("VIDEO_PROVIDER") or "mock").strip(), "voice_provider": (os.environ.get("VOICE_PROVIDER") or "edge-tts").strip()}, "environment": env, "installation_center": installation, "first_run": {"works_now": ["Dashboard", "Developer Center", "Document Studio local text extraction", "Photo Studio non-generative editing", "Code Builder safety workflows"], "needs_installation": [item for item in installation["dependencies"] if item["status"] in {"missing", "optional_missing"}], "needs_configuration": [item for item in statuses if not item.get("configured")], "optional": ["Cloud image/video/voice providers", "Ollama coding model"], "unavailable": [cap for cap, state in env.get("capabilities", {}).items() if state not in {"ready"}]}}
 
 
 @api.get("/settings/preferences")

@@ -80,7 +80,7 @@ class FluxHFProvider(ImageProvider):
             raise ProviderError(
                 self.name,
                 "REPLICATE_API_TOKEN is not configured.",
-                kind=ErrorKind.AUTHENTICATION,
+                kind=ErrorKind.AUTH,
                 retryable=False,
                 status_code=401,
                 safe_message="Replicate API credentials are not configured.",
@@ -128,7 +128,7 @@ class FluxHFProvider(ImageProvider):
             message = str(exc)
             lowered = message.lower()
             if any(marker in lowered for marker in ("401", "unauthorized", "authentication", "api token")):
-                kind = ErrorKind.AUTHENTICATION
+                kind = ErrorKind.AUTH
                 retryable = False
                 safe = "Replicate rejected the API credentials."
             elif any(marker in lowered for marker in ("402", "payment", "billing", "credit", "quota")):
