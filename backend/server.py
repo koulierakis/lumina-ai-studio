@@ -127,6 +127,8 @@ from driver_assistance_services import (  # noqa: E402
     traffic_provider_status,
 )
 from fastapi import Depends  # noqa: E402
+from exercise_factory.router import configure as configure_exercise_factory_router  # noqa: E402
+from exercise_factory.router import router as exercise_factory_router  # noqa: E402
 from local_tools import resolve_executable  # noqa: E402
 from login_limiter import login_limiter  # noqa: E402
 from models import (  # noqa: E402
@@ -244,6 +246,7 @@ media_coll = LocalPersistenceCollection(persistence_provider, "media")
 packs_coll = LocalPersistenceCollection(persistence_provider, "identity_packs")
 jobs_coll = LocalPersistenceCollection(persistence_provider, "jobs")
 gallery_coll = LocalPersistenceCollection(persistence_provider, "gallery")
+exercise_factory_jobs_coll = LocalPersistenceCollection(persistence_provider, "exercise_factory_jobs")
 video_generation_jobs_coll = LocalPersistenceCollection(persistence_provider, "video_generation_jobs")
 video_library_orgs_coll = LocalPersistenceCollection(persistence_provider, "video_library_organizations")
 video_templates_coll = LocalPersistenceCollection(persistence_provider, "video_templates")
@@ -4294,8 +4297,11 @@ async def code_creator_check(project_id: str, _: str = Depends(require_owner)) -
     except (FileNotFoundError, ValueError):
         raise HTTPException(404, "Code project not found.")
 
+configure_exercise_factory_router(jobs_collection=exercise_factory_jobs_coll, media_collection=media_coll, packs_collection=packs_coll)
+
 # ---------- Boot ----------
 app.include_router(api)
+app.include_router(exercise_factory_router)
 app.include_router(code_builder_router)
 app.include_router(code_builder_v2_router)
 app.include_router(document_studio_router)
