@@ -1,47 +1,24 @@
-import { useEffect, useState } from 'react';
-import { apiGet } from '../lib/api';
+import { useEffect, useMemo, useState } from 'react';
+import { apiGet, apiPost, fetchMediaBlobUrl } from '../lib/api';
 
 const PHASES=['START','EXECUTION','RETURN'];
+function MediaPreview({mediaId,label}){const [url,setUrl]=useState('');useEffect(()=>{let active=true,u='';if(mediaId)fetchMediaBlobUrl(mediaId).then(x=>{u=x;if(active)setUrl(x)}).catch(()=>{});return()=>{active=false;if(u)URL.revokeObjectURL(u)}},[mediaId]);return mediaId&&url?<img src={url} alt={label} className="w-full h-full object-contain rounded-lg"/>:<div className="h-full flex items-center justify-center text-center text-white/35 px-4">{label}</div>}
 
 export default function ExerciseFactory(){
-  const [packs,setPacks]=useState([]);
-  const [identity,setIdentity]=useState('');
-  const [providers,setProviders]=useState([]);
-  const [error,setError]=useState('');
-  useEffect(()=>{(async()=>{
-    try{
-      const [p,pr]=await Promise.all([apiGet('/identity-packs'),apiGet('/providers')]);
-      const packList=Array.isArray(p)?p:(p?.items||p?.packs||[]);
-      setPacks(packList);
-      if(packList.length) setIdentity(packList[0].id);
-      setProviders(pr?.providers||pr?.statuses||[]);
-    }catch(e){setError(e?.message||'Could not load Factory prerequisites.')}
-  })()},[]);
-  const poseConditioningReady=providers.some(p=>p?.available && (p?.capabilities?.pose_conditioning || p?.supports_pose_conditioning));
-  return <div className="min-h-screen p-8 text-white" data-testid="exercise-factory">
-    <div className="max-w-6xl mx-auto">
-      <div className="text-xs uppercase tracking-[0.25em] text-white/45">Athletico · Lumina Motion Engine</div>
-      <h1 className="font-display text-4xl mt-2">ATHLETICO EXERCISE FACTORY</h1>
-      <div className="mt-8 grid gap-4 md:grid-cols-3">
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><div className="text-white/50 text-xs uppercase">Exercise</div><div className="mt-2 text-xl">Bodyweight Squat</div></div>
-        <div className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><div className="text-white/50 text-xs uppercase">Movement Family</div><div className="mt-2 text-xl">SQUAT_PATTERN</div></div>
-        <label className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><span className="text-white/50 text-xs uppercase">Identity Pack</span>
-          <select value={identity} onChange={e=>setIdentity(e.target.value)} className="mt-2 w-full bg-black/40 border border-white/10 rounded p-2">
-            <option value="">Select existing Identity Pack</option>{packs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-        </label>
-      </div>
-      {error && <div className="mt-5 rounded border border-red-500/30 p-3 text-red-200">{error}</div>}
-      <div className="mt-8 grid gap-5 md:grid-cols-3">
-        {PHASES.map(phase=><section key={phase} className="rounded-xl border border-white/10 bg-white/[0.03] p-5" data-testid={'factory-phase-'+phase.toLowerCase()}>
-          <div className="flex justify-between"><h2 className="text-xl">{phase}</h2><span className="text-xs text-white/45">PENDING</span></div>
-          <div className="mt-4 aspect-square rounded-lg border border-dashed border-white/15 flex items-center justify-center text-center text-white/35 px-4">Canonical pose preview will be served by the Factory API.</div>
-          <div className="mt-4 text-sm text-white/50">No generated image yet.</div>
-          <div className="mt-3 flex gap-2"><button disabled className="px-3 py-2 rounded bg-white/5 text-white/30">RETRY PHASE</button><button disabled className="px-3 py-2 rounded bg-white/5 text-white/30">APPROVE</button></div>
-        </section>)}
-      </div>
-      <button disabled={!identity || !poseConditioningReady} title={!poseConditioningReady?'No configured image provider currently advertises verified pose-conditioning support.':''} className="mt-8 px-5 py-3 rounded-lg bg-white/10 disabled:opacity-40">GENERATE TEST</button>
-      {!poseConditioningReady && <p className="mt-3 text-sm text-amber-200/80">Real generation is intentionally blocked: no configured Lumina image provider currently advertises verified pose-conditioning capability. No output is being faked.</p>}
-    </div>
-  </div>
+ const [packs,setPacks]=useState([]),[identity,setIdentity]=useState(''),[caps,setCaps]=useState(null),[job,setJob]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState('');
+ const load=async()=>{try{const [p,c]=await Promise.all([apiGet('/identity-packs'),apiGet('/exercise-factory/capabilities')]);const list=Array.isArray(p)?p:(p?.items||p?.packs||[]);setPacks(list);const master=list.find(x=>x.name==='ATHLETICO_MASTER_WOMAN');setIdentity(master?.id||list[0]?.id||'');setCaps(c)}catch(e){setError(e?.message||'Could not load Factory prerequisites.')}};
+ useEffect(()=>{load()},[]);
+ const ready=!!identity&&!!caps?.real_generation_enabled;
+ const createJob=async()=>{if(job)return job;const j=await apiPost('/exercise-factory/jobs',{identity_pack_id:identity,image_provider:'fal',output_resolution:'1024'});setJob(j);return j};
+ const generate=async phase=>{setBusy(phase);setError('');try{const j=await createJob();const next=await apiPost(`/exercise-factory/jobs/${j.id}/phases/${phase}/generate`,{seed:1856});setJob(next)}catch(e){setError(e?.message||'Generation failed.')}finally{setBusy('')}};
+ const action=async(phase,verb)=>{setBusy(phase+verb);setError('');try{const next=await apiPost(`/exercise-factory/jobs/${job.id}/phases/${phase}/${verb}`,{});setJob(next)}catch(e){setError(e?.message||'Action failed.')}finally{setBusy('')}};
+ const phases=useMemo(()=>job?.phases||{},[job]);
+ return <div className="min-h-screen p-8 text-white" data-testid="exercise-factory"><div className="max-w-6xl mx-auto">
+  <div className="text-xs uppercase tracking-[0.25em] text-white/45">Athletico · Lumina Motion Engine</div><h1 className="font-display text-4xl mt-2">ATHLETICO EXERCISE FACTORY</h1>
+  <div className="mt-8 grid gap-4 md:grid-cols-3"><div className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><div className="text-white/50 text-xs uppercase">Exercise</div><div className="mt-2 text-xl">{caps?.exercise_name||'Air Squat'}</div><div className="text-sm text-white/45">{caps?.greek_name}</div></div><div className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><div className="text-white/50 text-xs uppercase">Movement Family</div><div className="mt-2 text-xl">SQUAT_PATTERN</div><div className="text-xs text-white/40 mt-1">master:1856:air-squat</div></div><label className="rounded-xl border border-white/10 bg-white/[0.03] p-5"><span className="text-white/50 text-xs uppercase">Identity Pack</span><select disabled={!!job} value={identity} onChange={e=>setIdentity(e.target.value)} className="mt-2 w-full bg-black/40 border border-white/10 rounded p-2"><option value="">Select existing Identity Pack</option>{packs.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></label></div>
+  {error&&<div className="mt-5 rounded border border-red-500/30 p-3 text-red-200">{error}</div>}
+  <div className="mt-8 grid gap-5 md:grid-cols-3">{PHASES.map(phase=>{const s=phases[phase]||{};return <section key={phase} className="rounded-xl border border-white/10 bg-white/[0.03] p-5" data-testid={'factory-phase-'+phase.toLowerCase()}><div className="flex justify-between"><h2 className="text-xl">{phase}</h2><span className="text-xs text-white/45">{s.status||'PENDING'}</span></div><div className="mt-4 aspect-square rounded-lg border border-white/10"><MediaPreview mediaId={s.output_media_id||s.pose_media_id} label={job?'POSE CONDITIONING IMAGE':'Create test job to render pose'}/></div><div className="mt-2 text-[11px] text-white/40">{s.output_media_id?'FINAL GENERATED IMAGE':'POSE CONDITIONING IMAGE'}</div>{s.error&&<div className="mt-2 text-xs text-red-300">{s.error}</div>}<div className="mt-4 flex flex-wrap gap-2"><button disabled={!ready||busy||s.status==='APPROVED'} onClick={()=>generate(phase)} className="px-3 py-2 rounded bg-white/10 disabled:opacity-30">{s.status==='FAILED'||s.status==='RETRY'?'REGENERATE':'GENERATE'}</button><button disabled={!job||busy||s.status!=='GENERATED'} onClick={()=>action(phase,'approve')} className="px-3 py-2 rounded bg-white/10 disabled:opacity-30">APPROVE</button><button disabled={!job||busy||!['GENERATED','APPROVED'].includes(s.status)} onClick={()=>action(phase,'reject')} className="px-3 py-2 rounded bg-white/10 disabled:opacity-30">REJECT</button></div></section>})}</div>
+  {!job&&<button disabled={!identity||busy} onClick={createJob} className="mt-8 px-5 py-3 rounded-lg bg-white/10 disabled:opacity-40">PREPARE TEST</button>}
+  <p className="mt-3 text-sm text-amber-200/80">{ready?'Qwen pose-conditioned generation is configured. Generate START first and approve it before proceeding.':caps?.blocker||'Select an Identity Pack.'}</p>
+ </div></div>
 }
