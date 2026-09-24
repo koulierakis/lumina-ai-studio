@@ -184,7 +184,8 @@ test.describe('TEST 2 — Mind message persistence across reload', () => {
       await page.reload();
       await openMind(page);
 
-      const sessionRow = page.locator('aside').first()
+      const sessionRow = page.getByRole('complementary')
+        .filter({ has: page.getByRole('heading', { name: 'Συνομιλίες' }) })
         .locator('div.space-y-1 > div.group')
         .filter({ hasText: code })
         .first();
