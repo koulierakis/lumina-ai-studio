@@ -22,6 +22,7 @@ import CodeBuilder from './pages/CodeBuilder';
 import CodeBuilderV2 from './pages/CodeBuilderV2';
 import DocumentStudio from './pages/DocumentStudio';
 import ExecutiveAdvisor from './pages/ExecutiveAdvisor';
+import ExerciseFactory from './pages/ExerciseFactory';
 
 export default function App() {
   return (
@@ -59,6 +60,7 @@ export default function App() {
               <Route path="code-builder" element={<CodeBuilder />} />
               <Route path="code-builder-v2" element={<CodeBuilderV2 />} />
               <Route path="generate" element={<Generate />} />
+              <Route path="exercise-factory" element={<ExerciseFactory />} />
               <Route path="identity" element={<IdentityPacks />} />
               <Route path="gallery" element={<Gallery />} />
               <Route path="media-library" element={<PlatformHub mode="media" />} />
