@@ -125,6 +125,9 @@ class ProviderCapabilities:
     models: tuple[str, ...] = ()
     maximum_reference_images: int = 0
     maximum_outputs: int = 1
+    pose_conditioning: bool = False
+    deterministic_seed: bool = False
+    resolution_control: bool = False
 
 
 @dataclass
@@ -157,6 +160,9 @@ class ProviderStatus:
             "supported_aspect_ratios": list(self.capabilities.aspect_ratios),
             "maximum_reference_images": self.capabilities.maximum_reference_images,
             "maximum_outputs": self.capabilities.maximum_outputs,
+            "supports_pose_conditioning": self.capabilities.pose_conditioning,
+            "supports_seed": self.capabilities.deterministic_seed,
+            "supports_resolution_control": self.capabilities.resolution_control,
             "capabilities": {
                 "generation": self.capabilities.generation,
                 "editing": self.capabilities.editing,
@@ -167,6 +173,9 @@ class ProviderStatus:
                 "models": list(self.capabilities.models),
                 "maximum_reference_images": self.capabilities.maximum_reference_images,
                 "maximum_outputs": self.capabilities.maximum_outputs,
+                "pose_conditioning": self.capabilities.pose_conditioning,
+                "deterministic_seed": self.capabilities.deterministic_seed,
+                "resolution_control": self.capabilities.resolution_control,
             },
         }
 
