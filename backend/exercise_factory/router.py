@@ -42,7 +42,7 @@ async def create_job(body:CreateJob,owner:str=Depends(require_owner)):
     for phase,pose in poc["phases"].items():
         png=render_pose_png(pose,(512,512))
         filename,_,size=save_bytes(png,"image/png",kind="generated")
-        media=MediaAsset(owner_email=owner,filename=filename,mime_type="image/png",kind="generated",size_bytes=size,source_module="exercise-factory",identity_pack_id=body.identity_pack_id,metadata={"exercise_id":job.exercise_id,"exercise_name":job.exercise_name,"movement_family":job.movement_family,"phase":phase.value,"pose_source":pose.provenance.source_type,"pose_confidence":pose.provenance.confidence,"conditioning_asset":True,"not_final_generation":True})
+        media=MediaAsset(owner_email=owner,filename=filename,mime_type="image/png",kind="generated",size_bytes=size,source_module="exercise-factory",identity_pack_id=body.identity_pack_id,metadata={"exercise_id":job.exercise_id,"exercise_name":job.exercise_name,"greek_name":job.greek_name,"source_number":job.source_number,"equipment_or_subgroup":job.equipment_or_subgroup,"movement_type":job.movement_type,"movement_family":job.movement_family,"phase":phase.value,"pose_source":pose.provenance.source_type,"pose_confidence":pose.provenance.confidence,"conditioning_asset":True,"not_final_generation":True})
         await _media.insert_one(media.model_dump())
         job.phases[FactoryPhase(phase.value)].pose_media_id=media.id
         job.phases[FactoryPhase(phase.value)].metadata=media.metadata
@@ -72,4 +72,4 @@ async def reject_phase(job_id:str,phase:FactoryPhase,owner:str=Depends(require_o
 
 @router.get("/capabilities")
 async def capabilities(owner:str=Depends(require_owner)):
-    return {"exercise_id":"bodyweight_squat","movement_family":"SQUAT_PATTERN","phases":[p.value for p in FactoryPhase],"real_generation_enabled":False,"blocker":"No existing Lumina provider has been verified to accept both identity reference and pose/keypoint conditioning. Conditioning poses are real assets; final exercise images are not fabricated."}
+    return {"exercise_id":"master:1856:air-squat","exercise_name":"Air Squat","greek_name":"Κάθισμα με το βάρος του σώματος","source_number":"1856","equipment_or_subgroup":"Bodyweight","movement_type":"DYNAMIC","movement_family":"SQUAT_PATTERN","phases":[p.value for p in FactoryPhase],"real_generation_enabled":False,"blocker":"No existing Lumina provider has been verified to accept both identity reference and pose/keypoint conditioning. Conditioning poses are real assets; final exercise images are not fabricated."}
