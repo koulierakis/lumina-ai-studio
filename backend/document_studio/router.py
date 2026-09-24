@@ -2423,7 +2423,9 @@ async def compare(
 @router.get("/{document_id}/preview")
 async def preview_document(document_id: str, owner: str = Depends(require_owner)) -> Response:
     document = await _document(document_id, owner)
-    return Response(content=document.content_html, media_type="text/html")
+    body = document.content_html or f"<p>{html.escape(str(document.content_text or ''))}</p>"
+    preview_html = f"<article><h1>{html.escape(str(document.title or ''))}</h1>{body}</article>"
+    return Response(content=preview_html, media_type="text/html")
 
 
 @router.post("/{document_id}/operate", response_model=CorporateDocument)

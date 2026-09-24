@@ -205,7 +205,7 @@ async function openMind(page) {
   await expect(page.getByRole('heading', { name: /LUMINA Mind/i })).toBeVisible();
 }
 
-async function mindComposer(page) {
+function mindComposer(page) {
   return page.locator('main[data-testid="lumina-mind-page"] textarea').first();
 }
 

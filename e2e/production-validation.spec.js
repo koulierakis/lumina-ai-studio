@@ -278,7 +278,7 @@ test.describe('TEST 4 — Code Builder V2 safe approval gate', () => {
         expect(String(terminal.plan.summary || '').trim().length).toBeGreaterThan(0);
         expect(Array.isArray(terminal.plan.changes)).toBe(true);
 
-        await expect(page.getByText(/awaiting approval/i)).toBeVisible({ timeout: 60000 });
+        await expect(page.getByText(/awaiting approval/i).first()).toBeVisible({ timeout: 60000 });
         await expect(page.getByRole('button', { name: 'Execute' })).toBeEnabled();
         await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
 

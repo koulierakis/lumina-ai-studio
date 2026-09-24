@@ -468,3 +468,20 @@ def test_legacy_templates_route_contract_is_unchanged(api):
     response = client.get("/api/documents/templates", headers=headers)
     assert response.status_code == 200
     assert {"templates", "document_types", "export_formats"}.issubset(response.json())
+
+
+def test_document_preview_renders_title_and_content(api):
+    client, headers = api
+    created = client.post(
+        "/api/documents",
+        json={"title": "GATE-DOC-123", "content_html": "<p>unique preview body</p>"},
+        headers=headers,
+    )
+    assert created.status_code == 200, created.text
+    document_id = created.json()["id"]
+    preview = client.get(f"/api/documents/{document_id}/preview", headers=headers)
+    assert preview.status_code == 200
+    assert preview.headers["content-type"].startswith("text/html")
+    body = preview.text
+    assert "GATE-DOC-123" in body
+    assert "unique preview body" in body
