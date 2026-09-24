@@ -1,4 +1,5 @@
 import {
+  Activity,
   Bell,
   BrainCircuit,
   BriefcaseBusiness,
@@ -78,6 +79,16 @@ export const MODULE_REGISTRY = [
     navigationOrder: 4,
   },
   {
+    id: 'exercise-factory',
+    name: 'Exercise Factory',
+    route: '/studio/exercise-factory',
+    icon: Activity,
+    status: 'poc',
+    completion: 20,
+    visible: true,
+    navigationOrder: 5,
+  },
+  {
     id: 'editor',
     name: 'AI Image Editor',
     route: '/studio/editor',
@@ -85,7 +96,7 @@ export const MODULE_REGISTRY = [
     status: 'ready',
     completion: 85,
     visible: true,
-    navigationOrder: 5,
+    navigationOrder: 6,
   },
   {
     id: 'video',
