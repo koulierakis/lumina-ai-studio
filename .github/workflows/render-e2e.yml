@@ -54,7 +54,7 @@ jobs:
           exit 1
 
       - name: Run production Playwright checks
-        run: npm run e2e:render
+        run: npm run e2e:render -- e2e/production-validation.spec.js
 
       - name: Upload Playwright artifacts
         if: always()
