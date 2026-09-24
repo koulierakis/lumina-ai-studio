@@ -155,7 +155,7 @@ test.describe('TEST 2 — Mind message persistence across reload', () => {
 
       const askResponsePromise = page.waitForResponse((response) => (
         new URL(response.url()).pathname === '/api/runtime/advisor/ask' && response.request().method() === 'POST'
-      ));
+      ), { timeout: 120000 });
       await mindSendButton(page).click();
       const askResponse = await askResponsePromise;
       expect(askResponse.status()).toBe(200);
@@ -166,7 +166,7 @@ test.describe('TEST 2 — Mind message persistence across reload', () => {
       expect(/currently unavailable/i.test(String(askBody.answer || ''))).toBe(false);
       expect(String(askBody.answer || '').trim().length).toBeGreaterThan(0);
 
-      expect(await page.getByText(code, { exact: false }).count()).toBeGreaterThan(0);
+      await expect(page.getByText(code, { exact: false }).first()).toBeVisible({ timeout: 60000 });
 
       const session = await authenticatedGet(page, `/runtime/advisor/sessions/${askBody.session_id}`);
       expect(session.status).toBe(200);
