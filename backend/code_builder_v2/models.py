@@ -24,7 +24,7 @@ class TaskRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=20_000)
     model: str | None = None
     auto_apply: bool = False
-    autonomous: bool = True
+    autonomous: bool = False
     max_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: int = Field(default=300, ge=30, le=3600)
 
