@@ -99,6 +99,7 @@ from code_builder.task_service import create_task_service  # noqa: E402
 from code_builder_v2.applier import AtomicChangeApplier  # noqa: E402
 from code_builder_v2.backup import BackupService as BackupServiceV2  # noqa: E402
 from code_builder_v2.executor import CommandExecutor as CommandExecutorV2  # noqa: E402
+from code_builder_v2.factory import create_autonomous_loop  # noqa: E402
 from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner  # noqa: E402
 from code_builder_v2.pipeline import ExecutionPipeline  # noqa: E402
 from code_builder_v2.repository import Repository as RepositoryV2  # noqa: E402
