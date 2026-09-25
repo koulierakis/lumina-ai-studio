@@ -1,6 +1,7 @@
 """Concrete autonomous Code Builder runtime adapters."""
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
