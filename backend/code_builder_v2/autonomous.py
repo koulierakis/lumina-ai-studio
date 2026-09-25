@@ -22,7 +22,8 @@ class AutonomousPhase(str, Enum):
     TESTING = "testing"
     DIAGNOSING = "diagnosing"
     REPAIRING = "repairing"
-    PUBLISHING = "publishing"\n    COMPLETED = "completed"
+    PUBLISHING = "publishing"
+    COMPLETED = "completed"
     FAILED = "failed"
 
 
@@ -78,7 +79,8 @@ class AutonomousBuildResult:
     changed_paths: tuple[str, ...]
     events: tuple[AutonomousEvent, ...]
     final_evidence: FailureEvidence | None = None
-    stop_reason: str | None = None\n    backup_id: str | None = None
+    stop_reason: str | None = None
+    backup_id: str | None = None
 
 
 class BuildAttemptRunner(Protocol):
@@ -119,7 +121,8 @@ class AutonomousBuildLoop:
     workspace_service: DisposableWorkspaceService = field(
         default_factory=DisposableWorkspaceService
     )
-    publisher: VerifiedChangePublisher | None = None\n    max_attempts: int = 3
+    publisher: VerifiedChangePublisher | None = None
+    max_attempts: int = 3
     max_repeated_failure_fingerprints: int = 2
 
     def __post_init__(self) -> None:
