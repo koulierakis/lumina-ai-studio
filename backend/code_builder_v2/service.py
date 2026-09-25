@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from threading import RLock
+from typing import Callable
 
 from .autonomous import AutonomousBuildLoop
 from .models import BuildTask, ExecutionReport, TaskRequest, TaskStatus
