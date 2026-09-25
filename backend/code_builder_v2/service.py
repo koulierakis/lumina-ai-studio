@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from threading import RLock
 
+from .autonomous import AutonomousBuildLoop
 from .models import BuildTask, ExecutionReport, TaskRequest, TaskStatus
 from .pipeline import ExecutionPipeline
 from .planner import Planner
@@ -22,6 +23,8 @@ class CodeBuilderService:
     planner: Planner
     store: JsonTaskStore | None = None
     pipeline: ExecutionPipeline | None = None
+    autonomous_factory: Callable[[BuildTask], AutonomousBuildLoop] | None = None
+    repository_root: Path | None = None
     _tasks: dict[str, BuildTask] = field(default_factory=dict)
     _lock: RLock = field(default_factory=RLock)
 
@@ -78,13 +81,36 @@ class CodeBuilderService:
         with self._lock:
             self._persist()
         try:
-            result = self.pipeline.execute(task.request, task.plan)
-            task.transition(TaskStatus.validating, "Validation completed successfully")
-            task.execution = ExecutionReport(
-                backup_id=result.backup_id,
-                changed_paths=list(result.changed_paths),
-                validation_commands=list(result.validation_commands),
-            )
+            if task.request.autonomous:
+                if self.autonomous_factory is None or self.repository_root is None:
+                    raise InvalidTaskState("Autonomous execution is not configured")
+                autonomous = self.autonomous_factory(task)
+                autonomous_result = autonomous.execute(
+                    repository_root=self.repository_root,
+                    instruction=task.request.prompt,
+                )
+                if not autonomous_result.successful:
+                    reason = autonomous_result.stop_reason or "Autonomous execution failed"
+                    raise RuntimeError(reason)
+                task.transition(
+                    TaskStatus.validating,
+                    f"Acceptance criteria passed after {autonomous_result.attempts} attempt(s)",
+                )
+                task.execution = ExecutionReport(
+                    backup_id=autonomous_result.backup_id or "",
+                    changed_paths=list(autonomous_result.changed_paths),
+                    validation_commands=list(task.plan.validation_commands),
+                    attempts=autonomous_result.attempts,
+                    autonomous=True,
+                )
+            else:
+                result = self.pipeline.execute(task.request, task.plan)
+                task.transition(TaskStatus.validating, "Validation completed successfully")
+                task.execution = ExecutionReport(
+                    backup_id=result.backup_id,
+                    changed_paths=list(result.changed_paths),
+                    validation_commands=list(result.validation_commands),
+                )
             task.transition(TaskStatus.completed, "Task completed")
         except Exception as exc:
             task.error = str(exc)
