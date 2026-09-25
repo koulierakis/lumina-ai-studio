@@ -9,6 +9,7 @@ from .advisor import (
     AdvisorRequest,
     executive_advisor,
 )
+from .capabilities import CapabilityExecutionError
 from .manager import runtime_manager
 from .schemas import RuntimeJob, RuntimeJobStatus
 
@@ -299,3 +300,68 @@ async def advisor_profile(owner: str = Depends(require_owner)) -> dict:
 @router.put("/advisor/profile")
 async def update_advisor_profile(body: AdvisorProfileRequest, owner: str = Depends(require_owner)) -> dict:
     return {"profile": executive_advisor.update_profile(owner, body.profile)}
+
+
+# ---------- LUMINA Mind orchestration ----------
+@router.get("/mind/capabilities")
+async def mind_capabilities(_: str = Depends(require_owner)) -> dict:
+    return {"capabilities": executive_advisor.mind.catalog()}
+
+
+@router.post("/mind/execute")
+async def mind_execute(body: dict, owner: str = Depends(require_owner)) -> dict:
+    capability = str(body.get("capability") or "")
+    action = str(body.get("action") or "")
+    params = body.get("params") or {}
+    if not isinstance(params, dict):
+        params = {}
+    try:
+        result = await executive_advisor.mind.execute(
+            owner,
+            capability,
+            action,
+            params,
+            confirmed=bool(body.get("confirmed")),
+            session_id=body.get("session_id"),
+        )
+    except CapabilityExecutionError as exc:
+        raise HTTPException(400, exc.message) from exc
+    return result
+
+
+@router.post("/mind/decide")
+async def mind_decide(body: dict, owner: str = Depends(require_owner)) -> dict:
+    decision = str(body.get("decision") or "").lower()
+    message = (
+        "ναι"
+        if decision in ("approve", "yes", "execute", "ναι", "approved")
+        else "όχι"
+        if decision in ("decline", "no", "cancel", "όχι", "declined")
+        else ""
+    )
+    if not message:
+        raise HTTPException(400, "Must provide decision: approve or decline")
+    result = await executive_advisor.mind.handle_decision(
+        owner, body.get("session_id"), message
+    )
+    if result is None:
+        raise HTTPException(400, "No pending action for this session")
+    return result
+
+
+@router.get("/mind/actions")
+async def mind_actions(owner: str = Depends(require_owner)) -> dict:
+    return {"actions": executive_advisor.mind.list_actions(owner)}
+
+
+@router.get("/mind/pending")
+async def mind_pending(owner: str = Depends(require_owner), session_id: str | None = None) -> dict:
+    pending = executive_advisor.mind.pending(owner, session_id)
+    if not pending:
+        return {"pending": None}
+    return {
+        "pending": {
+            key: pending.get(key)
+            for key in ("id", "capability", "action", "params", "created_at")
+        }
+    }

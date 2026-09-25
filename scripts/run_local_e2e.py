@@ -171,10 +171,12 @@ def main() -> int:
         "LUMINA_DATABASE_PROVIDER": "sqlite",
         "LUMINA_SQLITE_PATH": str(run_dir / "lumina.db"),
         "LUMINA_ADVISOR_STATE_DIR": str(run_dir / "advisor"),
+        "LUMINA_MIND_STATE_DIR": str(run_dir / "mind"),
         "STORAGE_BACKEND": "local", "STORAGE_DIR": str(run_dir / "media"),
         "OPENAI_API_KEY": "", "GROQ_API_KEY": "",
         "REACT_APP_LOCAL_DEV_AUTH": "false", "REACT_APP_BACKEND_URL": backend_url,
         "LUMINA_BACKEND_PROXY": backend_url, "BROWSER": "none", "HOST": "127.0.0.1", "PORT": "3000",
+        "LUMINA_MIND_BASE_URL": backend_url,
         "LUMINA_E2E_EMAIL": email, "LUMINA_E2E_PASSWORD": password,
         "LUMINA_E2E_BASE_URL": base_url,
         "LUMINA_E2E_API_URL": backend_url + "/api",
@@ -261,7 +263,7 @@ def main() -> int:
         print(f"Running all five workflows with real authentication and {label}.", flush=True)
         print("Evidence:", run_dir.relative_to(ROOT), flush=True)
         with (run_dir / "playwright.log").open("w", encoding="utf-8") as output:
-            test = subprocess.Popen([node, str(ROOT / "node_modules/@playwright/test/cli.js"), "test", "e2e/lumina-render.spec.js", "--workers=1", "--reporter=list"],
+            test = subprocess.Popen([node, str(ROOT / "node_modules/@playwright/test/cli.js"), "test", "e2e/lumina-render.spec.js", "e2e/mind-orchestration.spec.js", "--workers=1", "--reporter=list"],
                                     cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                     text=True, encoding="utf-8", errors="replace")
             try:

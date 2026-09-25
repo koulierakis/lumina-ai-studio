@@ -64,7 +64,83 @@ function storedAttachmentIds(sessionId) {
   }
 }
 
-function Message({ item, onSpeak }) {
+function resultSummary(result) {
+  if (!result || typeof result !== 'object') return '';
+  const parts = [];
+  if (result.count !== undefined) parts.push(`${result.count} αποτελέσματα`);
+  if (result.id) parts.push(`id: ${result.id}`);
+  if (result.title) parts.push(result.title);
+  if (result.name) parts.push(result.name);
+  if (result.status) parts.push(`status: ${result.status}`);
+  if (result.document_type) parts.push(result.document_type);
+  if (result.output_media_ids?.length) parts.push(`media: ${result.output_media_ids.length}`);
+  return parts.join(' · ').slice(0, 240);
+}
+
+function pendingDescriptor(orchestration) {
+  if (!orchestration) return null;
+  if (orchestration.status === 'needs_approval') {
+    return { capability: orchestration.capability, action: orchestration.action, params: orchestration.params || {} };
+  }
+  if (orchestration.next === 'approval_required' && orchestration.pending) {
+    return orchestration.pending;
+  }
+  return null;
+}
+
+function OrchestrationPanel({ orchestration, deciding, onApprove, onDecline }) {
+  if (!orchestration) return null;
+  const status = orchestration.status;
+  const pending = pendingDescriptor(orchestration);
+  const summary = resultSummary(orchestration.result);
+  const tone =
+    status === 'executed' ? 'border-emerald-400/25 bg-emerald-400/5 text-emerald-100'
+    : status === 'declined' ? 'border-white/10 bg-white/[0.02] text-white/55'
+    : status === 'failed' || status === 'error' ? 'border-red-400/25 bg-red-400/5 text-red-100'
+    : 'border-gold/25 bg-gold/[0.06] text-gold/90';
+  const label =
+    status === 'executed' && pending ? 'Αναμένει έγκριση για το επόμενο βήμα'
+    : status === 'executed' ? 'Εκτελέστηκε μέσω LUMINA'
+    : status === 'needs_approval' ? 'Χρειάζεται την έγκρισή σου'
+    : status === 'declined' ? 'Ακυρώθηκε (δεν εκτελέστηκε)'
+    : status === 'failed' || status === 'error' ? 'Η ενέργεια απέτυχε'
+    : 'Ενέργεια LUMINA';
+
+  return (
+    <div className={`mt-3 rounded-xl border ${tone} px-3 py-2.5`} data-testid="mind-orchestration-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0 text-[11px] leading-5">
+          {pending
+            ? <span className="font-medium uppercase tracking-[0.14em]">{pending.capability} / {pending.action}</span>
+            : <span className="font-medium uppercase tracking-[0.14em]">{orchestration.capability || 'LUMINA'} / {orchestration.action || 'ενέργεια'}</span>}
+          <br />
+          <span className="text-current/70">{label}</span>
+          {status === 'executed' && summary && <div className="mt-1 break-words text-[10px] opacity-80">{summary}</div>}
+          {status === 'executed' && orchestration.result?.items?.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {orchestration.result.items.slice(0, 5).map((item, index) => (
+                <li key={item.id || index} className="truncate text-[10px] opacity-80">{item.title || item.name || item.id}</li>
+              ))}
+            </ul>
+          )}
+          {(status === 'failed' || status === 'error') && <div className="mt-1 break-words text-[10px] opacity-80">{orchestration.error || orchestration.result?.detail || 'άγνωστο σφάλμα'}</div>}
+        </div>
+        {pending && (
+          <div className="flex shrink-0 gap-2">
+            <button type="button" disabled={deciding} onClick={onApprove} className="rounded-lg bg-gold px-3 py-1.5 text-[11px] font-medium text-black disabled:opacity-40" data-testid="mind-approve-action">
+              {deciding ? '…' : 'Εκτέλεσε'}
+            </button>
+            <button type="button" disabled={deciding} onClick={onDecline} className="rounded-lg border border-white/15 px-3 py-1.5 text-[11px] text-white/70 disabled:opacity-40" data-testid="mind-decline-action">
+              {deciding ? '…' : 'Ακύρωσε'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Message({ item, onSpeak, onDecide, deciding }) {
   const assistant = item.role === 'assistant';
   const sources = Array.isArray(item.sources) ? item.sources : [];
   return (
@@ -76,6 +152,14 @@ function Message({ item, onSpeak }) {
           {item.provider && <span className="rounded-full border border-white/10 px-2 py-0.5">{item.provider}</span>}
         </div>
         <div className="whitespace-pre-wrap text-sm leading-7 text-white/80">{item.content}</div>
+        {assistant && item.orchestration && (
+          <OrchestrationPanel
+            orchestration={item.orchestration}
+            deciding={deciding}
+            onApprove={() => onDecide?.(item, 'approve')}
+            onDecline={() => onDecide?.(item, 'decline')}
+          />
+        )}
         {assistant && onSpeak && (
           <button type="button" onClick={() => onSpeak(item.content)} className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-white/35 hover:text-gold" title="Ανάγνωση απάντησης">
             <Volume2 className="h-3.5 w-3.5" /> Ακρόαση
@@ -116,6 +200,7 @@ export default function ExecutiveAdvisor() {
   const [attachedDocuments, setAttachedDocuments] = useState([]);
   const [importingDocument, setImportingDocument] = useState(false);
   const [listening, setListening] = useState(false);
+  const [decidingId, setDecidingId] = useState(null);
   const documentInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -232,12 +317,6 @@ export default function ExecutiveAdvisor() {
     const value = message.trim();
     if (!value || busy) return;
     const studioHandoff = detectStudioIntent(value);
-    if (studioHandoff) {
-      recognitionRef.current?.stop?.();
-      setMessage('');
-      navigate(studioHandoff.route, { state: { studioHandoff } });
-      return;
-    }
     if (provider === 'groq' && !status?.groq_configured) {
       setError('Groq requires GROQ_API_KEY in the backend environment.');
       return;
@@ -267,6 +346,7 @@ export default function ExecutiveAdvisor() {
         remember_message: rememberMessage,
         provider: webResearch ? 'openai' : provider,
         web_research: webResearch,
+        orchestrate: true,
         context: documentContext.length ? { documents: documentContext } : {},
       }, { timeout: 320000 });
       setMessage('');
@@ -276,9 +356,64 @@ export default function ExecutiveAdvisor() {
       setSession(detail);
       await loadSidebar();
     } catch (err) {
+      if (studioHandoff) {
+        recognitionRef.current?.stop?.();
+        setMessage('');
+        navigate(studioHandoff.route, { state: { studioHandoff } });
+        return;
+      }
       setError(err?.responseData?.detail || err?.message || 'Advisor request failed.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const markResolved = (messageId, result) => {
+    setSession((current) => {
+      if (!current) return current;
+      const messages = (current.messages || []).map((item) => {
+        if (item.id !== messageId) return item;
+        return {
+          ...item,
+          orchestration: {
+            ...(item.orchestration || {}),
+            status: result?.status || item.orchestration?.status,
+            result: result?.result ?? item.orchestration?.result,
+            error: result?.error || undefined,
+          },
+        };
+      });
+      return { ...current, messages };
+    });
+  };
+
+  const decidePending = async (item, decision) => {
+    if (!item?.orchestration || busy) return;
+    setDecidingId(item.id);
+    setError('');
+    try {
+      const orchestration = item.orchestration;
+      let result;
+      if (decision === 'approve') {
+        const descriptor = pendingDescriptor(orchestration);
+        result = await apiPost('/runtime/mind/execute', {
+          capability: descriptor.capability,
+          action: descriptor.action,
+          params: descriptor.params || {},
+          confirmed: true,
+          session_id: session?.id || null,
+        }, { timeout: 320000 });
+      } else {
+        result = await apiPost('/runtime/mind/decide', {
+          decision: 'decline',
+          session_id: session?.id || null,
+        });
+      }
+      markResolved(item.id, result);
+    } catch (err) {
+      setError(err?.responseData?.detail || err?.message || 'Could not resolve pending action.');
+    } finally {
+      setDecidingId(null);
     }
   };
 
@@ -438,7 +573,7 @@ export default function ExecutiveAdvisor() {
                   <h2 className="mt-5 font-display text-3xl text-white">Τι θέλεις να σκεφτούμε;</h2>
                   <p className="mt-3 text-sm leading-7 text-white/40">Γράψε ή μίλησε φυσικά στα ελληνικά. Το Mind μπορεί να θυμάται όσα επιλέγεις και να χρησιμοποιεί αρχεία από τα Documents.</p>
                 </div>
-              ) : messages.map((item) => <Message key={item.id} item={item} onSpeak={speak} />)}
+              ) : messages.map((item) => <Message key={item.id} item={item} onSpeak={speak} onDecide={decidePending} deciding={decidingId === item.id} />)}
               {busy && <div className="flex items-center gap-2 text-xs text-white/35"><Loader2 className="h-4 w-4 animate-spin" />{webResearch ? 'Ερευνώ και αναλύω…' : deep ? 'Κάνω βαθιά ανάλυση…' : 'Ετοιμάζω απάντηση…'}</div>}
               <div ref={messagesEndRef} />
             </div>

@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from ai_runtime.capabilities import MindOrchestrator, orchestration_context  # noqa: E402
 from code_builder.ollama_service import (
     OllamaClientConfiguration,
     OllamaService,
@@ -51,6 +52,7 @@ class AdvisorRequest(BaseModel):
     provider: str = "auto"
     web_research: bool = False
     context: dict[str, Any] = Field(default_factory=dict)
+    orchestrate: bool = False
 
 
 class AdvisorMemoryRequest(BaseModel):
@@ -65,7 +67,7 @@ class AdvisorProfileRequest(BaseModel):
 
 
 class ExecutiveAdvisorService:
-    def __init__(self, root: Path | None = None, ollama: OllamaService | None = None) -> None:
+    def __init__(self, root: Path | None = None, ollama: OllamaService | None = None, mind: MindOrchestrator | None = None) -> None:
         repository_root = Path(__file__).resolve().parents[2]
         configured_root = os.environ.get("LUMINA_ADVISOR_STATE_DIR", "").strip()
         self.root = root or (Path(configured_root) if configured_root else repository_root / ".lumina" / "advisor")
@@ -79,6 +81,7 @@ class ExecutiveAdvisorService:
                 )
             )
         self.ollama = ollama
+        self.mind = mind or MindOrchestrator()
         self._state = self._load()
 
     def _load(self) -> dict[str, Any]:
@@ -221,6 +224,16 @@ class ExecutiveAdvisorService:
         profile = owner_state.get("profile", {})
         memories = owner_state.get("memories", [])[-30:]
         memory_text = "\n".join(f"- [{m.get('category','general')}] {m.get('text','')}" for m in memories)
+        recent_actions = [
+            entry
+            for entry in self.mind.recent_actions(owner, limit=6)
+            if entry.get("status") in {"completed", "failed", "declined"}
+        ]
+        actions_text = "\n".join(
+            f"- [{entry.get('created_at') or ''}] {entry.get('capability')}/{entry.get('action')} -> {entry.get('status')} "
+            f"({str(entry.get('result') or entry.get('error') or '')[:240]})"
+            for entry in recent_actions
+        ) or "- none"
         role_name = ADVISOR_ROLES.get(role, ADVISOR_ROLES["ceo"])
         board_instruction = ""
         if role == "board":
@@ -237,11 +250,15 @@ For financial, legal, medical, tax, compliance, or investment matters, explicitl
 {depth}
 {board_instruction}
 
+You are also the orchestrator of the LUMINA capabilities (documents, image, video, voice, media/projects, code builder). When a capability was executed in the latest turn, its real outcome is provided as 'LUMINA capability results'. Ground your answer in those real results: reference actual ids, statuses, counts and outputs. If an action requires owner approval and was NOT executed, say clearly what will happen if approved and ask for explicit confirmation. Never claim a capability ran unless the provided results show it.
 Persistent owner profile (treat as user-provided context, not independently verified):
 {json.dumps(profile, ensure_ascii=False, indent=2)}
 
 Persistent memories (user-provided context):
 {memory_text or '- none'}
+
+Recent real LUMINA orchestration actions by the owner:
+{actions_text}
 
 Response format: lead with the decision/recommendation, then reasoning, risks, and concrete next actions when useful. Avoid filler."""
 
@@ -390,7 +407,16 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
         context_text = ""
         if request.context:
             context_text = "\n\nAdditional structured context:\n" + json.dumps(request.context, ensure_ascii=False, indent=2)
-        messages.append({"role": "user", "content": request.message + context_text})
+        user_content = request.message + context_text
+
+        # --- LUMINA Mind orchestration (real capability execution) ---------
+        orchestration: dict[str, Any] = {"status": "none"}
+        if request.orchestrate:
+            orchestration = await self._orchestrate(owner, request, session_id, session, user_content)
+            note = orchestration.get("note")
+            if note:
+                user_content = f"{user_content}\n\n{note}"
+        messages.append({"role": "user", "content": user_content})
 
         requested_provider = request.provider.strip().casefold()
         if requested_provider not in {"auto", "local", "groq", "openai", "sambanova"}:
@@ -461,7 +487,7 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
 
         now = time.time()
         session["messages"].append({"id": uuid4().hex, "role": "user", "content": request.message, "created_at": now, "role_mode": role})
-        session["messages"].append({"id": uuid4().hex, "role": "assistant", "content": answer, "created_at": time.time(), "role_mode": role, "model": model, "provider": provider, "sources": sources})
+        session["messages"].append({"id": uuid4().hex, "role": "assistant", "content": answer, "created_at": time.time(), "role_mode": role, "model": model, "provider": provider, "sources": sources, "orchestration": orchestration if orchestration.get("status") != "none" else None})
         session["messages"] = session["messages"][-100:]
         if len(session["messages"]) == 2:
             session["title"] = re.sub(r"\s+", " ", request.message).strip()[:72] or "Executive Advisory Session"
@@ -477,11 +503,108 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             "model": model,
             "provider_status": provider_status,
             "sources": sources,
+            "orchestration": orchestration if orchestration.get("status") != "none" else None,
             "error": error,
             "elapsed_seconds": round(time.monotonic() - started, 3),
             "deep_reasoning": request.deep_reasoning,
             "web_research": request.web_research,
         }
+
+    async def _orchestrate(
+        self,
+        owner: str,
+        request: AdvisorRequest,
+        session_id: str | None,
+        session: dict[str, Any],
+        user_content: str,
+    ) -> dict[str, Any]:
+        """Run LUMINA Mind orchestration for the current request in a single turn.
+
+        Order of operations:
+        1. If a pending action (awaiting approval) exists, first check whether the
+           message is an explicit confirmation/denial and resolve it resident.
+        2. Otherwise resolve the message to an intent; if none, this is a chat turn.
+        3. Execute the resolved real capability and return a grounded context note
+           plus a compact machine-readable record for the response/session.
+        """
+        try:
+            pending = self.mind.pending(owner, session_id)
+            decision = self.mind.confirm_decision(request.message) if pending is not None else None
+            if decision is not None and not self._mentions_capability(request.message):
+                handled = await self.mind.handle_decision(owner, session_id, request.message)
+                if handled is not None:
+                    return self._decision_note(handled)
+
+            intent = self.mind.resolve(request.message, request.context)
+            if intent is None:
+                return {"status": "none"}
+
+            entry = await self.mind.execute(
+                owner,
+                intent.capability,
+                intent.action,
+                intent.params,
+                session_id=session_id,
+            )
+            entry = {**entry, "capability": intent.capability, "action": intent.action}
+            status = entry.get("status")
+            return {
+                "status": status,
+                "capability": intent.capability,
+                "action": intent.action,
+                "result": entry.get("result"),
+                "error": entry.get("error"),
+                "next": entry.get("next"),
+                "pending": entry.get("pending_id") or entry.get("pending"),
+                "params": entry.get("params"),
+                "note": orchestration_context(entry),
+            }
+        except Exception as exc:  # noqa: BLE001 - never break the advisory chat
+            return {
+                "status": "error",
+                "error": str(exc)[:300],
+                "note": f"LUMINA orchestration failed: {str(exc)[:300]}",
+            }
+
+    @staticmethod
+    def _mentions_capability(message: str) -> bool:
+        from ai_runtime.capabilities.intent import _mentions_capability
+
+        return _mentions_capability(message or "")
+
+    def _decision_note(self, decision: dict[str, Any]) -> dict[str, Any]:
+        status = decision.get("status")
+        if status == "executed":
+            result = decision.get("result")
+            detail = ", ".join(f"{key}={value}" for key, value in (result or {}).items())
+            note = (
+                f"LUMINA capability results:\n- Capability: {decision.get('capability')} / {decision.get('action')}\n"
+                f"  Status: approved and executed. Result: {detail or 'ok'}"
+            )
+            return {
+                "status": "executed",
+                "capability": decision.get("capability"),
+                "action": decision.get("action"),
+                "result": result,
+                "note": note,
+            }
+        if status == "declined":
+            note = (
+                f"LUMINA capability status:\n- Capability: {decision.get('capability')} / {decision.get('action')}\n"
+                "  Status: declined by owner; nothing was executed."
+            )
+            return {
+                "status": "declined",
+                "capability": decision.get("capability"),
+                "action": decision.get("action"),
+                "note": note,
+            }
+        if status == "no_pending_action":
+            return {
+                "status": "none",
+                "note": "You indicated a decision, but there is no pending action awaiting approval.",
+            }
+        return {"status": "none"}
 
     async def _local_chat(self, messages: list[dict[str, str]]) -> str:
         """Query the local advisor model, degrading deep reasoning when the model lacks thinking support."""
