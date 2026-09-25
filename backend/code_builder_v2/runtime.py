@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Protocol
 
 from .applier import AtomicChangeApplier, ProposedFileChange
 from .autonomous import AttemptResult, FailureEvidence, RepairInstruction
@@ -14,6 +15,53 @@ from .models import ChangePlan, PlannedChange, TaskRequest
 from .repository import Repository
 from .validation import ValidationError, ValidationRunner
 from .executor import CommandExecutor
+
+
+class JsonCodeClient(Protocol):
+    def generate_json(
+        self, prompt: str, model: str | None = None
+    ) -> dict[str, Any]: ...
+
+
+@dataclass(slots=True)
+class EvidenceDiagnoser:
+    """Turn structured runtime evidence into one bounded repair instruction."""
+
+    client: JsonCodeClient
+    model: str | None = None
+
+    def diagnose(
+        self,
+        *,
+        original_instruction: str,
+        attempt: int,
+        evidence: FailureEvidence,
+    ) -> RepairInstruction:
+        prompt = f"""You diagnose a failed autonomous coding attempt.
+Return ONLY JSON matching:
+{{"instruction":"specific repair instruction","relevant_paths":["path"]}}
+Target only the observed failure.
+Original request: {original_instruction}
+Attempt: {attempt}
+Summary: {evidence.summary}
+Command: {evidence.command or "unknown"}
+Stdout: {evidence.stdout[-8000:]}
+Stderr: {evidence.stderr[-8000:]}
+Console errors: {list(evidence.console_errors)}
+Network errors: {list(evidence.network_errors)}
+"""
+        data = self.client.generate_json(prompt, self.model)
+        instruction = str(data.get("instruction", "")).strip()
+        raw_paths = data.get("relevant_paths", [])
+        paths = (
+            tuple(str(path) for path in raw_paths if str(path).strip())
+            if isinstance(raw_paths, list)
+            else ()
+        )
+        return RepairInstruction(
+            instruction=instruction,
+            relevant_paths=paths,
+        )
 
 
 @dataclass(slots=True)
