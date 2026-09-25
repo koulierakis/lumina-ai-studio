@@ -271,7 +271,6 @@ def test_real_project_create_and_list_roundtrip(tmp_path: Path) -> None:
 
     response = asyncio.run(orchestrator.execute(OWNER, "studio", "delete_project", {"project_id": project_id}, confirmed=False))
     assert response["status"] == "needs_approval"
-    client = orchestrator.client
     approvals = orchestrator.pending(OWNER, None)
     assert approvals is not None
 
