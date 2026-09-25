@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .applier import AtomicChangeApplier, ProposedFileChange
-from .autonomous import AttemptResult, FailureEvidence
+from .autonomous import AttemptResult, FailureEvidence, RepairInstruction
 from .backup import BackupService
 from .generator import ChangeGenerator
 from .models import ChangePlan, PlannedChange, TaskRequest
