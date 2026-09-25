@@ -32,7 +32,7 @@ def test_workspace_attempt_runner_preserves_failed_change_for_repair(tmp_path: P
             PlannedChange(path="app.py", operation="create", reason="requested")
         ],
         validation_commands=[
-            "python -c "import app;assert app.VALUE==2""
+            'python -c "import app;assert app.VALUE==2"'
         ],
     )
     runner = WorkspaceAttemptRunner(
@@ -56,7 +56,7 @@ def test_workspace_attempt_runner_preserves_failed_change_for_repair(tmp_path: P
 
     assert first.successful is False
     assert first.evidence is not None
-    assert first.evidence.command == "python -c "import app;assert app.VALUE==2""
+    assert first.evidence.command == 'python -c "import app;assert app.VALUE==2"'
     assert second.successful is True
     assert generator.calls == 2
     assert (workspace / "app.py").read_text(encoding="utf-8") == "VALUE = 2\n"
