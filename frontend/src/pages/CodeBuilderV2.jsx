@@ -56,7 +56,7 @@ export default function CodeBuilderV2() {
     try {
       const created = await api('/tasks', {
         method: 'POST',
-        body: JSON.stringify({ prompt: prompt.trim(), model: model.trim() || null, auto_apply: false, timeout_seconds: 300 }),
+        body: JSON.stringify({ prompt: prompt.trim(), model: model.trim() || null, auto_apply: false, autonomous: true, max_attempts: 3, timeout_seconds: 300 }),
       });
       setTask(created);
     } catch (err) {
@@ -85,7 +85,7 @@ export default function CodeBuilderV2() {
         <div>
           <p className="mb-2 text-xs uppercase tracking-[0.28em] text-cyan-400">Lumina Developer Studio</p>
           <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Code Builder V2</h1>
-          <p className="mt-2 max-w-2xl text-sm text-zinc-400">Plan → approval → atomic changes → validation → rollback.</p>
+          <p className="mt-2 max-w-2xl text-sm text-zinc-400">Plan → approval → isolated build → test → automatic repair → atomic publish.</p>
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={task?.status} />
@@ -111,13 +111,19 @@ export default function CodeBuilderV2() {
               <input value={model} onChange={(e) => setModel(e.target.value)} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm outline-none focus:border-cyan-500/50" />
             </div>
             <button type="submit" disabled={busy || prompt.trim().length < 3} className="w-full rounded-xl bg-cyan-500 px-4 py-3 font-medium text-black transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-40">
-              {busy ? 'Working…' : 'Create plan'}
+              {busy ? 'Working…' : 'Create autonomous plan'}
             </button>
           </form>
 
           {error && <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{error}</div>}
 
           {task?.error && <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200">{task.error}</div>}
+
+          {task?.execution?.autonomous && (
+            <div className="mt-4 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3 text-sm text-cyan-100">
+              Verified autonomous build completed in {task.execution.attempts} attempt(s).
+            </div>
+          )}
 
           {task && (
             <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

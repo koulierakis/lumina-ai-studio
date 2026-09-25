@@ -99,6 +99,7 @@ from code_builder.task_service import create_task_service  # noqa: E402
 from code_builder_v2.applier import AtomicChangeApplier  # noqa: E402
 from code_builder_v2.backup import BackupService as BackupServiceV2  # noqa: E402
 from code_builder_v2.executor import CommandExecutor as CommandExecutorV2  # noqa: E402
+from code_builder_v2.factory import create_autonomous_loop  # noqa: E402
 from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner  # noqa: E402
 from code_builder_v2.pipeline import ExecutionPipeline  # noqa: E402
 from code_builder_v2.repository import Repository as RepositoryV2  # noqa: E402
@@ -467,6 +468,12 @@ code_builder_v2_service = CodeBuilderService(
     OllamaPlanner(code_builder_v2_client),
     store=JsonTaskStore(CODE_BUILDER_V2_RUNTIME_ROOT / "tasks.json"),
     pipeline=code_builder_v2_pipeline,
+    autonomous_factory=lambda task: create_autonomous_loop(
+        task,
+        client=code_builder_v2_client,
+        runtime_root=CODE_BUILDER_V2_RUNTIME_ROOT,
+    ),
+    repository_root=CODE_BUILDER_REPOSITORY_ROOT,
 )
 configure_code_builder_v2_router(code_builder_v2_service)
 configure_document_studio_router(persistence_provider, media_coll, notifications_coll)
