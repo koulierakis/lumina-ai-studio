@@ -14,6 +14,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt
+      - name: Verify backend imports before acceptance tests
+        run: python -c "import sys; sys.path.insert(0, 'backend'); import server"
       - name: Run Code Builder prompt-to-verified-change acceptance gate
         run: python -m pytest backend/tests/test_code_builder_ai_patch_generation.py backend/tests/test_code_builder_prompt_e2e.py backend/tests/test_code_builder_execution_pipeline.py backend/tests/test_code_builder_kilo_adapter.py backend/tests/test_openhands_adapter.py backend/tests/test_openhands_engine.py backend/tests/test_openhands_patch_bridge.py backend/tests/test_openhands_preparation_service.py backend/tests/test_engine_preparation_service.py backend/tests/test_task_engine_integration.py -q
   document-cv-e2e:
@@ -34,12 +36,12 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r backend/requirements.txt ruff
-      - name: Apply safe Python quality fixes in the validation workspace
-        run: ruff check --fix --exit-zero backend launcher
-      - run: ruff check --output-format=github backend launcher
       - run: python -m pytest backend/tests launcher/tests -q
       - name: Fresh local startup and authenticated API smoke
         run: python scripts/lumina-smoke.py
+      - name: Apply safe Python quality fixes in the validation workspace
+        run: ruff check --fix --exit-zero backend launcher
+      - run: ruff check --output-format=github backend launcher
   frontend:
     runs-on: ubuntu-latest
     defaults:

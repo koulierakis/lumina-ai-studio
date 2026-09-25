@@ -31,6 +31,74 @@ function safeUrl(url) {
   }
 }
 
+async function installBrowserDiagnostics(page) {
+  const diagnostics = {
+    pageErrors: [],
+    consoleErrors: [],
+    failedRequests: [],
+    badResponses: [],
+    badResponseBodies: [],
+  };
+  page.on('pageerror', (error) => diagnostics.pageErrors.push(String(error)));
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.consoleErrors.push(message.text());
+  });
+  page.on('requestfailed', (request) => diagnostics.failedRequests.push({
+    url: request.url(),
+    method: request.method(),
+    failure: request.failure()?.errorText || 'unknown',
+  }));
+  page.on('response', (response) => {
+    if (response.status() >= 400) {
+      const item = { url: response.url(), method: response.request().method(), status: response.status() };
+      diagnostics.badResponses.push(item);
+      response.text().then((body) => {
+        diagnostics.badResponseBodies.push({ ...item, body });
+      }).catch(() => undefined);
+    }
+  });
+  return {
+    attach: (testInfo) => attachDiagnostics(testInfo, diagnostics),
+  };
+}
+
+async function authenticatedFetch(page, endpoint, options = {}) {
+  const apiURL = process.env.LUMINA_E2E_API_URL
+    || (() => {
+      try { return `${new URL(page.url()).origin}/api`; } catch { return null; }
+    })()
+    || 'https://lumina-ai-studio.onrender.com/api';
+  return page.evaluate(async ({ apiURL, endpoint, options }) => {
+    const token = localStorage.getItem('lumina_token');
+    const response = await fetch(`${apiURL}${endpoint}`, {
+      method: options.method || 'GET',
+      headers: {
+        ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    });
+    const contentType = String(response.headers.get('content-type') || '');
+    const bodyText = await response.text();
+    return { status: response.status, contentType, bodyText };
+  }, { apiURL, endpoint, options });
+}
+
+async function fetchHealth(page) {
+  const apiURL = process.env.LUMINA_E2E_API_URL
+    || (() => {
+      try { return `${new URL(page.url()).origin}/api`; } catch { return null; }
+    })()
+    || 'https://lumina-ai-studio.onrender.com/api';
+  return page.evaluate(async (apiURL) => {
+    const response = await fetch(`${apiURL}/health`);
+    const text = await response.text();
+    let data = null;
+    try { data = JSON.parse(text); } catch { /* non-json */ }
+    return { status: response.status, data };
+  }, apiURL);
+}
+
 async function attachDiagnostics(testInfo, diagnostics) {
   const payload = {
     pageErrors: diagnostics.pageErrors.map(redact),
@@ -97,7 +165,11 @@ async function ensureSignedIn(page) {
 }
 
 async function authenticatedGet(page, endpoint) {
-  const apiURL = process.env.LUMINA_E2E_API_URL || `${new URL(page.url()).origin}/api`;
+  const apiURL = process.env.LUMINA_E2E_API_URL
+    || (() => {
+      try { return `${new URL(page.url()).origin}/api`; } catch { return null; }
+    })()
+    || 'https://lumina-ai-studio.onrender.com/api';
   return page.evaluate(async ({ apiURL, endpoint }) => {
     const token = localStorage.getItem('lumina_token');
     const response = await fetch(`${apiURL}${endpoint}`, {
@@ -107,13 +179,33 @@ async function authenticatedGet(page, endpoint) {
   }, { apiURL, endpoint });
 }
 
+async function authenticatedPost(page, endpoint, body) {
+  const apiURL = process.env.LUMINA_E2E_API_URL
+    || (() => {
+      try { return `${new URL(page.url()).origin}/api`; } catch { return null; }
+    })()
+    || 'https://lumina-ai-studio.onrender.com/api';
+  return page.evaluate(async ({ apiURL, endpoint, body }) => {
+    const token = localStorage.getItem('lumina_token');
+    const response = await fetch(`${apiURL}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, data: await response.json().catch(() => null) };
+  }, { apiURL, endpoint, body });
+}
+
 async function openMind(page) {
   await page.goto('/studio/mind');
   await expect(page.getByTestId('lumina-mind-page')).toBeVisible();
   await expect(page.getByRole('heading', { name: /LUMINA Mind/i })).toBeVisible();
 }
 
-async function mindComposer(page) {
+function mindComposer(page) {
   return page.locator('main[data-testid="lumina-mind-page"] textarea').first();
 }
 
@@ -123,8 +215,12 @@ function mindSendButton(page) {
 
 module.exports = {
   attachDiagnostics,
+  authenticatedFetch,
   authenticatedGet,
+  authenticatedPost,
   ensureSignedIn,
+  fetchHealth,
+  installBrowserDiagnostics,
   mindComposer,
   mindSendButton,
   openMind,

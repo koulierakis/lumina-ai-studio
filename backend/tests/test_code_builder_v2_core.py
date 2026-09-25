@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from code_builder_v2.autonomous import AutonomousBuildResult
 from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest, TaskStatus
 from code_builder_v2.repository import Repository
 from code_builder_v2.security import UnsafePathError
@@ -47,3 +48,44 @@ def test_repository_round_trip(tmp_path: Path):
     repo.write_text("src/example.py", "answer = 42\n")
 
     assert repo.read_text("src/example.py") == "answer = 42\n"
+
+
+class FakeAutonomousLoop:
+    def execute(self, *, repository_root, instruction):
+        assert Path(repository_root).is_dir()
+        assert instruction == "Create an autonomous example"
+        return AutonomousBuildResult(
+            successful=True,
+            attempts=2,
+            changed_paths=("example.py",),
+            events=(),
+            backup_id="verified-backup",
+        )
+
+
+class PipelinePlaceholder:
+    applier = None
+
+
+def test_service_executes_autonomous_task_and_records_attempts(tmp_path: Path):
+    service = CodeBuilderService(
+        planner=FakePlanner(),
+        pipeline=PipelinePlaceholder(),
+        autonomous_factory=lambda task: FakeAutonomousLoop(),
+        repository_root=tmp_path,
+    )
+    task = service.create_task(
+        TaskRequest(
+            prompt="Create an autonomous example",
+            autonomous=True,
+            max_attempts=3,
+        )
+    )
+
+    completed = service.execute_task(task.id)
+
+    assert completed.status is TaskStatus.completed
+    assert completed.execution is not None
+    assert completed.execution.autonomous is True
+    assert completed.execution.attempts == 2
+    assert completed.execution.backup_id == "verified-backup"

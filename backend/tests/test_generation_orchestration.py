@@ -595,7 +595,7 @@ def test_sambanova_successful_mocked_request_is_strict_and_credential_safe():
 
 def test_sambanova_requires_explicit_https_base_url():
     with pytest.raises(ValueError, match="HTTPS"):
-        SambaNovaDocumentProvider(base_url="http://insecure.local").chat_completions_url
+        _ = SambaNovaDocumentProvider(base_url="http://insecure.local").chat_completions_url
 
 
 @pytest.mark.parametrize(

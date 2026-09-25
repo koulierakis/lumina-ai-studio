@@ -151,36 +151,50 @@ if (process.env.LUMINA_E2E_MIND_PROVIDER === 'local') {
     await expect(page.getByTestId('lumina-mind-page')).toContainText(answer.answer);
   });
 
-  test('hands a document creation request from Mind to Documents and creates the document', async ({ page }) => {
+test('orchestrates a document creation request from Mind and persists it', async ({ page }) => {
     await ensureSignedIn(page);
     await openMind(page);
+    if (process.env.LUMINA_E2E_MIND_PROVIDER === 'local') {
+      await page.getByRole('button', { name: 'Τοπικό', exact: true }).click();
+    }
 
     const uniqueTitle = `Render E2E Smoke ${Date.now()}`;
     const request = `Create a short document titled ${uniqueTitle} with one paragraph only.`;
-    await (await mindComposer(page)).fill(request);
-    const savedPromise = page.waitForResponse((response) => (
-      new URL(response.url()).pathname === '/api/documents' && response.request().method() === 'POST'
+    const askPromise = page.waitForResponse((response) => (
+      new URL(response.url()).pathname === '/api/runtime/advisor/ask' && response.request().method() === 'POST'
     ), { timeout: 150000 });
+
+    await (await mindComposer(page)).fill(request);
     await mindSendButton(page).click();
 
-    await expect(page).toHaveURL(/\/studio\/documents/, { timeout: 30000 });
-    await expect(page.getByText('Lumina Documents')).toBeVisible();
-    await expect(page.locator('.doc-title-input')).toHaveValue(new RegExp(uniqueTitle), { timeout: 150000 });
-    await expect(page.locator('.doc-save-indicator')).toContainText(/Saved|Ready/i, { timeout: 150000 });
-const savedResponse = await savedPromise;
-    expect(savedResponse.status()).toBe(200);
-    const created = await savedResponse.json();
-    expect(created.content_text.trim().length).toBeGreaterThan(0);
-    if (process.env.LUMINA_E2E_MIND_PROVIDER === 'groq') {
-      const providerStatus = await authenticatedGet(page, '/documents/ai/providers/status');
-      expect(providerStatus.status).toBe(200);
-      expect(providerStatus.data.default_provider).toBe('groq');
-      expect(providerStatus.data.providers.groq.configured).toBe(true);
-      expect(providerStatus.data.providers.groq.model).toBe(process.env.LUMINA_E2E_MODEL || 'openai/gpt-oss-120b');
-    }
-    await expect(page.locator('.lumina-document')).toContainText(created.content_text);
+    const ask = await askPromise;
+    expect(ask.status()).toBe(200);
+    const askBody = await ask.json();
+    expect(askBody.session_id).toBeTruthy();
+    expect(askBody.orchestration?.status).toBe('executed');
+    expect(askBody.orchestration?.capability).toBe('documents');
+    expect(askBody.orchestration?.action).toBe('create');
+    expect(askBody.orchestration?.result?.id).toBeTruthy();
+    const documentId = askBody.orchestration.result.id;
+
+    // Mind is the main interface: the orchestration stays in the chat thread.
+    await expect(page).toHaveURL(/\/studio\/mind/, { timeout: 30000 });
+    const panel = page.getByTestId('mind-orchestration-panel').first();
+    await expect(panel).toBeVisible({ timeout: 60000 });
+    await expect(panel).toContainText('documents');
+    await expect(panel).toContainText('create');
+    await expect(panel).toContainText(uniqueTitle);
+
     await page.reload();
-    await expect(page.locator('.doc-title-input')).toHaveValue(new RegExp(uniqueTitle));
-    await expect(page.locator('.lumina-document')).toContainText(created.content_text);
+    const persisted = await authenticatedGet(page, `/runtime/advisor/sessions/${askBody.session_id}`);
+    expect(persisted.status).toBe(200);
+    const orchestrated = persisted.data.messages
+      .filter((message) => message.role === 'assistant')
+      .map((message) => message.orchestration)
+      .find((orchestration) => orchestration && orchestration.status === 'executed');
+    expect(orchestrated).toBeTruthy();
+    expect(orchestrated.capability).toBe('documents');
+    expect(orchestrated.action).toBe('create');
+    expect(orchestrated.result?.id).toBe(documentId);
   });
 });
