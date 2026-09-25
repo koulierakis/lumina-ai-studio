@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
-from code_builder.openhands_workspace_service import OpenHandsWorkspaceService
+from .workspace import DisposableWorkspaceService
 
 
 class AutonomousPhase(str, Enum):
@@ -106,8 +106,8 @@ class FailureDiagnoser(Protocol):
 class AutonomousBuildLoop:
     runner: BuildAttemptRunner
     diagnoser: FailureDiagnoser
-    workspace_service: OpenHandsWorkspaceService = field(
-        default_factory=OpenHandsWorkspaceService
+    workspace_service: DisposableWorkspaceService = field(
+        default_factory=DisposableWorkspaceService
     )
     max_attempts: int = 3
     max_repeated_failure_fingerprints: int = 2
