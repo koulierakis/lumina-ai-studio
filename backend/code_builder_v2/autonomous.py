@@ -22,7 +22,7 @@ class AutonomousPhase(str, Enum):
     TESTING = "testing"
     DIAGNOSING = "diagnosing"
     REPAIRING = "repairing"
-    COMPLETED = "completed"
+    PUBLISHING = "publishing"\n    COMPLETED = "completed"
     FAILED = "failed"
 
 
@@ -78,7 +78,7 @@ class AutonomousBuildResult:
     changed_paths: tuple[str, ...]
     events: tuple[AutonomousEvent, ...]
     final_evidence: FailureEvidence | None = None
-    stop_reason: str | None = None
+    stop_reason: str | None = None\n    backup_id: str | None = None
 
 
 class BuildAttemptRunner(Protocol):
@@ -90,6 +90,16 @@ class BuildAttemptRunner(Protocol):
         attempt: int,
         previous_evidence: FailureEvidence | None,
     ) -> AttemptResult: ...
+
+
+class VerifiedChangePublisher(Protocol):
+    def publish(
+        self,
+        *,
+        source_root: Path,
+        workspace_root: Path,
+        changed_paths: tuple[str, ...],
+    ) -> object: ...
 
 
 class FailureDiagnoser(Protocol):
@@ -109,7 +119,7 @@ class AutonomousBuildLoop:
     workspace_service: DisposableWorkspaceService = field(
         default_factory=DisposableWorkspaceService
     )
-    max_attempts: int = 3
+    publisher: VerifiedChangePublisher | None = None\n    max_attempts: int = 3
     max_repeated_failure_fingerprints: int = 2
 
     def __post_init__(self) -> None:
@@ -154,6 +164,21 @@ class AutonomousBuildLoop:
                 changed_paths.update(result.changed_paths)
 
                 if result.successful:
+                    backup_id: str | None = None
+                    if self.publisher is not None:
+                        events.append(
+                            AutonomousEvent(
+                                AutonomousPhase.PUBLISHING,
+                                attempt,
+                                "Publishing verified changes atomically",
+                            )
+                        )
+                        published = self.publisher.publish(
+                            source_root=workspace.source_root,
+                            workspace_root=workspace.workspace_root,
+                            changed_paths=tuple(sorted(changed_paths)),
+                        )
+                        backup_id = getattr(published, "backup_id", None)
                     events.append(
                         AutonomousEvent(
                             AutonomousPhase.COMPLETED,
@@ -166,6 +191,7 @@ class AutonomousBuildLoop:
                         attempts=attempt,
                         changed_paths=tuple(sorted(changed_paths)),
                         events=tuple(events),
+                        backup_id=backup_id,
                     )
 
                 evidence = result.evidence
