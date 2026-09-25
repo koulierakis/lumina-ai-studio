@@ -55,6 +55,12 @@ class WorkspaceAttemptRunner:
         applied = applier.apply(effective_plan, proposed)
         self._changed_paths.update(applied.changed_paths)
 
+        for cache in workspace_root.rglob("__pycache__"):
+            if cache.is_dir():
+                shutil.rmtree(cache, ignore_errors=True)
+        for bytecode in workspace_root.rglob("*.pyc"):
+            bytecode.unlink(missing_ok=True)
+
         validator = ValidationRunner(CommandExecutor(workspace_root))
         try:
             validator.run(
