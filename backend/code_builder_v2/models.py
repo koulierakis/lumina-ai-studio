@@ -24,6 +24,8 @@ class TaskRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=20_000)
     model: str | None = None
     auto_apply: bool = False
+    autonomous: bool = True
+    max_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: int = Field(default=300, ge=30, le=3600)
 
 
@@ -43,6 +45,8 @@ class ExecutionReport(BaseModel):
     backup_id: str
     changed_paths: list[str] = Field(default_factory=list)
     validation_commands: list[str] = Field(default_factory=list)
+    attempts: int = 1
+    autonomous: bool = False
 
 
 class TaskEvent(BaseModel):
