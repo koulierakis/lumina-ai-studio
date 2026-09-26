@@ -6,11 +6,14 @@ import os
 import tempfile
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .models import BrowserEvidence
+
+
+UTC = timezone.utc
 
 
 @dataclass

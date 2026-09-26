@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +14,9 @@ import requests
 
 from .models import FrameworkType, Project, ProjectStatus
 from .ollama import OllamaClient
+
+
+UTC = timezone.utc
 
 
 ROOT = Path(__file__).resolve().parent.parent.parent

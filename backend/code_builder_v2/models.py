@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
+
+
+UTC = timezone.utc
 
 
 class TaskStatus(str, Enum):
@@ -106,6 +109,7 @@ class DevServerInfo(BaseModel):
     port: int | None = None
     url: str | None = None
     pid: int | None = None
+    project_id: str | None = None
     status: DevServerStatus = DevServerStatus.stopped
     started_at: datetime | None = None
     framework: FrameworkType = FrameworkType.unknown

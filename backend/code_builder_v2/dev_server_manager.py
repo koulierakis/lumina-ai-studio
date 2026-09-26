@@ -6,12 +6,15 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .models import DevServerInfo, DevServerStatus, Project
-from .project_generator import find_free_port, get_dev_server_command
+from .models import DevServerInfo, DevServerStatus, Project, FrameworkType
+from .project_generator import find_free_port, get_dev_server_command, detect_framework
+
+
+UTC = timezone.utc
 
 
 @dataclass
@@ -41,7 +44,7 @@ class DevServerManager:
         self._servers: dict[str, DevServerProcess] = {}
         self._lock = threading.RLock()
 
-    def start_server(self, project: Project) -> DevServerInfo:
+    def start_server(self, project: Project, timeout: int = 60) -> DevServerInfo:
         project_path = Path(project.workspace_root)
         if not project_path.exists():
             raise RuntimeError(f"Project workspace does not exist: {project_path}")
@@ -93,13 +96,14 @@ class DevServerManager:
             port=port,
             url=url,
             pid=process.pid,
+            project_id=project.id,
             status=DevServerStatus.starting,
             command=command,
             started_at=datetime.now(UTC),
             framework=project.framework,
         )
 
-        if self._wait_for_ready(project.id, timeout=60):
+        if self._wait_for_ready(project.id, timeout=timeout):
             project.dev_server.status = DevServerStatus.ready
             return project.dev_server
 
@@ -107,6 +111,29 @@ class DevServerManager:
         project.dev_server.error = "Dev server failed to become ready within timeout"
         self.stop_server(project.id)
         raise RuntimeError("Dev server failed to start")
+
+    def start_server_from_path(self, workspace_root: Path, timeout: int = 60) -> DevServerInfo:
+        """Start a dev server from a workspace path, auto-detecting framework."""
+        if not workspace_root.exists():
+            raise RuntimeError(f"Workspace does not exist: {workspace_root}")
+
+        # Auto-detect framework from files
+        project_path = Path(workspace_root)
+        files = []
+        for f in project_path.rglob("*"):
+            if f.is_file():
+                files.append({"path": f.relative_to(project_path).as_posix()})
+        framework = detect_framework(files)
+
+        # Create a minimal project object
+        project = Project(
+            id=f"temp-{int(time.time() * 1000)}",
+            name="Temp Project",
+            workspace_root=str(workspace_root),
+            framework=framework,
+        )
+
+        return self.start_server(project, timeout=timeout)
 
     def _monitor_process(self, project_id: str, server_process: DevServerProcess, log_fh) -> None:
         process = server_process.process
@@ -178,6 +205,7 @@ class DevServerManager:
             port=server_process.port,
             url=server_process.url,
             pid=server_process.process.pid,
+            project_id=project_id,
             status=DevServerStatus.ready if server_process.process.poll() is None else DevServerStatus.failed,
             command=server_process.command,
         )

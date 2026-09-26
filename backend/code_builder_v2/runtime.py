@@ -10,8 +10,11 @@ from typing import Any, Protocol
 from .applier import AtomicChangeApplier, ProposedFileChange
 from .autonomous import AttemptResult, FailureEvidence, RepairInstruction
 from .backup import BackupService
+from .browser_evidence import BrowserEvidenceCollector, run_browser_check
+from .dev_server_manager import DevServerManager
 from .generator import ChangeGenerator
-from .models import ChangePlan, PlannedChange, TaskRequest
+from .models import BrowserEvidence, ChangePlan, PlannedChange, TaskRequest
+from .project_generator import install_dependencies
 from .repository import Repository
 from .validation import ValidationError, ValidationRunner
 from .executor import CommandExecutor
@@ -140,10 +143,32 @@ class WorkspaceAttemptRunner:
                 ),
             )
 
-        return AttemptResult(
-            successful=True,
-            changed_paths=tuple(sorted(self._changed_paths)),
-        )
+        dev_server = DevServerManager(workspace_root.parent / ".lumina-runtime")
+        server_info = None
+        try:
+            server_info = dev_server.start_server_from_path(workspace_root, timeout=60)
+            browser_evidence = run_browser_check(server_info.url, workspace_root.parent / ".lumina-runtime")
+            if browser_evidence.console_errors or browser_evidence.network_errors or browser_evidence.uncaught_exceptions:
+                return AttemptResult(
+                    successful=False,
+                    changed_paths=tuple(sorted(self._changed_paths)),
+                    evidence=FailureEvidence(
+                        summary="Browser verification failed: console/network errors detected",
+                        command="playwright browser check",
+                        stdout="",
+                        stderr="",
+                        console_errors=tuple(browser_evidence.console_errors),
+                        network_errors=tuple(browser_evidence.network_errors),
+                        screenshot_paths=(browser_evidence.screenshot_path,) if browser_evidence.screenshot_path else (),
+                    ),
+                )
+            return AttemptResult(
+                successful=True,
+                changed_paths=tuple(sorted(self._changed_paths)),
+            )
+        finally:
+            if server_info and server_info.project_id:
+                dev_server.stop_server(server_info.project_id)
 
     def _effective_plan(self, repository: Repository) -> ChangePlan:
         changes: list[PlannedChange] = []

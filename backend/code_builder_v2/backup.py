@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from .security import resolve_inside
+
+
+UTC = timezone.utc
 
 
 @dataclass(slots=True)
