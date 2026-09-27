@@ -284,9 +284,11 @@ class OllamaClient:
 
     def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         """Generate JSON with automatic provider fallback on failure.
-        
-        Provider priority: Groq -> HuggingFace -> Local Ollama
-        Falls back on JSONRecoveryError, OllamaError, and network failures.
+
+        Provider priority for production: Groq -> HuggingFace
+        Local Ollama is ONLY included when explicitly configured via OLLAMA_BASE_URL
+        pointing to a non-localhost endpoint (for production Ollama) or when
+        LUMINA_USE_LOCAL_OLLAMA=true (for local development).
         """
         providers = []
         
@@ -294,10 +296,26 @@ class OllamaClient:
             providers.append(("groq", self._generate_with_groq))
         if os.getenv("HF_TOKEN", "").strip() or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip():
             providers.append(("huggingface", self._generate_with_huggingface))
-        providers.append(("ollama", self._generate_with_local_ollama))
+        
+        # Local Ollama ONLY when explicitly configured for production (non-localhost URL)
+        # or explicitly enabled for local development
+        ollama_base_url = os.getenv("OLLAMA_BASE_URL", "").strip()
+        use_local_ollama = os.getenv("LUMINA_USE_LOCAL_OLLAMA", "").strip().lower() in {"1", "true", "yes", "on"}
+        
+        if ollama_base_url and not ollama_base_url.startswith(("http://127.0.0.1", "http://localhost", "http://::1")):
+            # Explicitly configured production Ollama endpoint
+            self.base_url = ollama_base_url
+            providers.append(("ollama", self._generate_with_local_ollama))
+        elif use_local_ollama:
+            # Local development with Ollama
+            providers.append(("ollama", self._generate_with_local_ollama))
         
         if not providers:
-            raise OllamaError("No model providers configured. Set GROQ_API_KEY, HF_TOKEN, or run local Ollama.")
+            raise OllamaError(
+                "No model providers configured. Set GROQ_API_KEY, HF_TOKEN, "
+                "or configure OLLAMA_BASE_URL for production Ollama / "
+                "LUMINA_USE_LOCAL_OLLAMA=true for local development."
+            )
         
         last_error: Exception | None = None
         

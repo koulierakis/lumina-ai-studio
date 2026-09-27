@@ -88,6 +88,7 @@ def test_generate_json_fallback_chain(monkeypatch):
     """Test that generate_json falls back through providers on failure."""
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("HF_TOKEN", "fake-token")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")  # Enable local Ollama for this test
     
     client = OllamaClient()
     
@@ -146,26 +147,140 @@ def test_generate_json_no_providers_raises(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("HUGGINGFACEHUB_API_TOKEN", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
     
     client = OllamaClient()
-    
-    # Ollama provider should still be available (local)
-    # This tests the error message when all providers fail
-    def mock_ollama(self, prompt, model=None):
-        raise OllamaError("Local Ollama unavailable")
-    
-    def mock_groq(self, prompt, model=None):
-        raise JSONRecoveryError("No Groq")
-    
-    def mock_hf(self, prompt, model=None):
-        raise OllamaError("No HF")
-    
-    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
-    monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     
     try:
         client.generate_json("test prompt")
         assert False, "Should have raised"
     except OllamaError as e:
+        assert "No model providers configured" in str(e)
+
+
+def test_generate_json_production_uses_cloud_only(monkeypatch):
+    """Test that production (no local Ollama) uses only cloud providers."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("HF_TOKEN", "fake-token")
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
+    
+    client = OllamaClient()
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        raise JSONRecoveryError("Groq JSON recovery exhausted")
+    
+    def mock_hf(self, prompt, model=None):
+        call_order.append("huggingface")
+        return {"result": "success"}
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        return {"result": "should not be called"}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    result = client.generate_json("test prompt")
+    
+    assert result == {"result": "success"}
+    # Should NOT call ollama in production
+    assert call_order == ["groq", "huggingface"]
+    assert "ollama" not in call_order
+
+
+def test_generate_json_local_ollama_enabled(monkeypatch):
+    """Test that local Ollama is used when LUMINA_USE_LOCAL_OLLAMA=true."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    
+    client = OllamaClient()
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        raise JSONRecoveryError("Groq JSON recovery exhausted")
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        return {"result": "success"}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    result = client.generate_json("test prompt")
+    
+    assert result == {"result": "success"}
+    assert call_order == ["groq", "ollama"]
+
+
+def test_generate_json_production_ollama_endpoint(monkeypatch):
+    """Test that production Ollama endpoint is used when OLLAMA_BASE_URL is configured."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.example.com")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
+    
+    client = OllamaClient()
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        raise JSONRecoveryError("Groq JSON recovery exhausted")
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        # Verify the base_url was updated
+        assert self.base_url == "https://ollama.example.com"
+        return {"result": "success"}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    result = client.generate_json("test prompt")
+    
+    assert result == {"result": "success"}
+    assert call_order == ["groq", "ollama"]
+    assert client.base_url == "https://ollama.example.com"
+
+
+def test_generate_json_localhost_ollama_not_used_in_production(monkeypatch):
+    """Test that localhost Ollama is NOT used as production fallback."""
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
+    
+    client = OllamaClient()
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        raise JSONRecoveryError("Groq JSON recovery exhausted")
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        return {"result": "should not be called"}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    # Should raise because Groq fails and no other providers are available
+    # (localhost Ollama is not included in production chain)
+    try:
+        client.generate_json("test prompt")
+        assert False, "Should have raised"
+    except OllamaError as e:
         assert "All providers failed" in str(e)
+    assert call_order == ["groq"]
+    assert "ollama" not in call_order
