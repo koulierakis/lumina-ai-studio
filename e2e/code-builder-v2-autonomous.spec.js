@@ -151,7 +151,7 @@ test.describe('Code Builder V2 Autonomous Production Test', () => {
       new URL(response.url()).pathname === '/api/code-builder-v2/tasks' && response.request().method() === 'POST'
     ), { timeout: 30000 });
 
-    await page.getByRole('button', { name: 'Create plan' }).click();
+    await page.getByRole('button', { name: 'Create autonomous plan' }).click();
     const createResponse = await createTaskResponse;
     expect(createResponse.status()).toBe(200);
     const taskPayload = await createResponse.json();
@@ -319,7 +319,7 @@ The plan must reference files that cannot be created and validation commands tha
       new URL(response.url()).pathname === '/api/code-builder-v2/tasks' && response.request().method() === 'POST'
     ), { timeout: 30000 });
 
-    await page.getByRole('button', { name: 'Create plan' }).click();
+    await page.getByRole('button', { name: 'Create autonomous plan' }).click();
     const createResponse = await createTaskResponse;
     expect(createResponse.status()).toBe(200);
     const taskPayload = await createResponse.json();
