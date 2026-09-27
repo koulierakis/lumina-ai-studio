@@ -45,18 +45,19 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
 
 @dataclass(slots=True)
 class OllamaClient:
-    """Cloud-first LLM client retained under the legacy class name for compatibility.
+    """Cloud-first LLM client with local Ollama fallback.
 
     Routing policy:
     1. GROQ_API_KEY present -> Groq chat completions.
-    2. Otherwise -> Hugging Face InferenceClient.
+    2. HF_TOKEN present -> Hugging Face InferenceClient.
+    3. Local Ollama server -> qwen2.5-coder:1.5b
 
-    The Code Builder V2 no longer calls a local Ollama server.
+    The Code Builder V2 prefers cloud providers for quality.
     """
 
-    base_url: str = "http://127.0.0.1:11434"  # legacy compatibility only; never contacted
-    default_model: str = "qwen2.5-coder:7b"  # legacy local model setting; cloud routing ignores Ollama-style names
-    timeout_seconds: int = 180
+    base_url: str = "http://127.0.0.1:11434"
+    default_model: str = "qwen2.5-coder:1.5b"
+    timeout_seconds: int = 600
 
     @staticmethod
     def _is_cloud_model_name(model: str | None) -> bool:
@@ -157,10 +158,61 @@ class OllamaClient:
             raise OllamaError("Hugging Face returned an empty response.")
         return _extract_json_object(raw)
 
+    def _generate_with_local_ollama(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
+        """Generate using local Ollama server via HTTP API."""
+        import urllib.request
+        import urllib.error
+
+        model = requested_model or self.default_model
+        url = f"{self.base_url}/api/generate"
+        
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json",
+            "options": {
+                "temperature": 0.1,
+                "num_ctx": 8192,
+                "num_predict": 8192,
+            }
+        }
+        
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.URLError as exc:
+            raise OllamaError(f"Local Ollama request failed: {exc}") from exc
+        except Exception as exc:
+            raise OllamaError(f"Local Ollama request failed: {exc}") from exc
+
+        if not isinstance(raw, str) or not raw.strip():
+            raise OllamaError("Local Ollama returned an empty response.")
+        
+        # Ollama returns {"response": "..."} when format=json
+        try:
+            parsed = json.loads(raw)
+            if "response" in parsed:
+                raw = parsed["response"]
+        except json.JSONDecodeError:
+            pass
+            
+        return _extract_json_object(raw)
+
     def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         if os.getenv("GROQ_API_KEY", "").strip():
             return self._generate_with_groq(prompt, model)
-        return self._generate_with_huggingface(prompt, model)
+        if os.getenv("HF_TOKEN", "").strip() or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip():
+            return self._generate_with_huggingface(prompt, model)
+        return self._generate_with_local_ollama(prompt, model)
 
 
 @dataclass(slots=True)
