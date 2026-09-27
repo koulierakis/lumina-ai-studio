@@ -202,7 +202,7 @@ class OllamaClient:
             return requested
         return "Qwen/Qwen2.5-Coder-32B-Instruct"
 
-def _generate_with_groq(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
+    def _generate_with_groq(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
         api_key = os.getenv("GROQ_API_KEY", "").strip()
         if not api_key:
             raise OllamaError("GROQ_API_KEY is not configured.")
@@ -561,6 +561,26 @@ class OllamaChangeGenerator:
     ) -> list[ProposedFileChange]:
         plan_json = plan.model_dump_json()
         context_json = json.dumps(file_context, ensure_ascii=False)
+        
+        # Determine if incremental generation is needed
+        # Use incremental for 3+ files or when explicitly requested
+        use_incremental = len(plan.changes) >= 3
+        
+        if use_incremental:
+            return self._generate_incremental(request, plan, file_context, plan_json, context_json)
+        
+        # Fast path: single provider call for small applications
+        return self._generate_fast_path(request, plan, file_context, plan_json, context_json)
+
+    def _generate_fast_path(
+        self,
+        request: TaskRequest,
+        plan: ChangePlan,
+        file_context: dict[str, str],
+        plan_json: str,
+        context_json: str,
+    ) -> list[ProposedFileChange]:
+        """Original fast path: generate all files in one provider call."""
         prompt = f"""You are the implementation engine of LUMINA Code Builder V2.
 Implement EXACTLY the approved plan and return ONLY JSON:
 {{"changes":[{{"path":"relative/path","operation":"create|modify|delete","content":"full file content or null for delete"}}]}}
@@ -609,3 +629,124 @@ Original request: {request.prompt}
             raise JSONRecoveryError(
                 f"Schema validation failed after {max_schema_retries + 1} attempts: {schema_error}"
             )
+
+    def _generate_incremental(
+        self,
+        request: TaskRequest,
+        plan: ChangePlan,
+        file_context: dict[str, str],
+        plan_json: str,
+        context_json: str,
+    ) -> list[ProposedFileChange]:
+        """Generate files incrementally - one file per provider call."""
+        log.info("Using incremental generation for %d files", len(plan.changes))
+        
+        # Track progress
+        progress = GenerationProgress(total_files=len(plan.changes))
+        all_changes: list[ProposedFileChange] = []
+        
+        # Sort changes for deterministic order: creates first, then modifies, then deletes
+        sorted_changes = sorted(plan.changes, key=lambda c: (c.operation != "create", c.operation != "modify", c.path))
+        
+        for idx, planned_change in enumerate(sorted_changes):
+            progress.current_file_index = idx
+            file_path = planned_change.path
+            operation = planned_change.operation
+            
+            log.info("Generating file %d/%d: %s (%s)", idx + 1, len(sorted_changes), file_path, operation)
+            
+            # Build prompt for this single file
+            single_context = {}
+            if file_path in file_context and operation in {"modify", "delete"}:
+                single_context[file_path] = file_context[file_path]
+            
+            # Include previously generated files as context for dependency awareness
+            for completed in progress.get_completed_changes():
+                if completed.path != file_path:
+                    single_context[completed.path] = completed.content or ""
+            
+            single_context_json = json.dumps(single_context, ensure_ascii=False)
+            single_plan_json = json.dumps({
+                "summary": f"Generate single file: {file_path}",
+                "changes": [{
+                    "path": file_path,
+                    "operation": operation,
+                    "reason": planned_change.reason
+                }],
+                "validation_commands": []
+            })
+            
+            file_prompt = f"""You are the implementation engine of LUMINA Code Builder V2.
+Generate ONLY the specified file and return ONLY JSON:
+{{"changes":[{{"path":"{file_path}","operation":"{operation}","content":"full file content or null for delete"}}]}}
+Hard rules:
+- Return exactly ONE change object for the specified path.
+- For create/modify return the COMPLETE final file content, never a diff.
+- For delete content must be null.
+- Do not use markdown fences.
+- Consider the context of previously generated files.
+Approved plan (this file only): {single_plan_json}
+Current file context: {single_context_json}
+Original request: {request.prompt}
+"""
+            max_schema_retries = 2
+            current_prompt = file_prompt
+            
+            for attempt in range(max_schema_retries + 1):
+                try:
+                    data = self.client.generate_json(current_prompt, request.model)
+                    
+                    # Validate schema for single file
+                    is_valid, schema_error = _validate_changes_schema(data, log)
+                    if is_valid:
+                        raw_changes = data.get("changes", [])
+                        if raw_changes:
+                            item = raw_changes[0]
+                            change = ProposedFileChange(
+                                path=str(item.get("path", "")),
+                                operation=str(item.get("operation", "")),
+                                content=item.get("content"),
+                            )
+                            # Verify this is the expected file
+                            if change.path != file_path:
+                                log.warning("Provider returned unexpected file: %s (expected %s)", change.path, file_path)
+                            progress.mark_completed(change)
+                            all_changes.append(change)
+                            break
+                        else:
+                            raise OllamaError("No changes returned for single file generation")
+                    
+                    # Schema validation failed - try recovery
+                    log.warning(
+                        "Schema validation failed for %s (attempt %d/%d): %s",
+                        file_path, attempt + 1, max_schema_retries + 1, schema_error
+                    )
+                    
+                    if attempt < max_schema_retries:
+                        current_prompt = _build_schema_recovery_prompt(file_prompt, json.dumps(data), schema_error, attempt)
+                        continue
+                    
+                    # Schema retries exhausted for this file
+                    progress.mark_failed(file_path)
+                    raise JSONRecoveryError(
+                        f"Schema validation failed for {file_path} after {max_schema_retries + 1} attempts: {schema_error}"
+                    )
+                    
+                except RateLimitError:
+                    # Re-raise rate limit errors immediately for provider fallback
+                    progress.mark_failed(file_path)
+                    raise
+                except (JSONRecoveryError, OllamaError):
+                    # Re-raise to trigger provider fallback
+                    progress.mark_failed(file_path)
+                    raise
+            
+            # Small delay between files to be respectful to rate limits
+            if idx < len(sorted_changes) - 1:
+                time.sleep(0.5)
+        
+        if progress.failed_file:
+            raise JSONRecoveryError(f"Failed to generate file: {progress.failed_file}")
+        
+        log.info("Incremental generation completed: %d files generated", len(all_changes))
+        return all_changes

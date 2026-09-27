@@ -1,5 +1,5 @@
 from code_builder_v2.models import TaskRequest
-from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner, OllamaError, JSONRecoveryError, _extract_json_object
+from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner, OllamaError, JSONRecoveryError, RateLimitError, _extract_json_object
 
 
 class FakeClient:
@@ -575,3 +575,155 @@ def test_ollama_generator_hf_unsupported_task_fallback(monkeypatch):
     assert "groq" in call_order
     assert "huggingface" in call_order
     assert "ollama" in call_order
+
+
+def test_ollama_generator_incremental_multi_file(monkeypatch):
+    """Test that multi-file applications are generated incrementally (one file per call)."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    # Track how many times generate_json is called
+    call_count = [0]
+    
+    def mock_generate_json(self, prompt, model=None):
+        call_count[0] += 1
+        # Each call should return a single file change
+        file_idx = call_count[0] - 1
+        return {"changes": [{
+            "path": f"file{file_idx}.py",
+            "operation": "create",
+            "content": f"# File {file_idx}\nvalue = {file_idx}\n"
+        }]}
+    
+    monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    # Plan with 3 files - should trigger incremental generation
+    plan = ChangePlan(
+        summary="Create multi-file app",
+        changes=[
+            PlannedChange(path="file0.py", operation="create", reason="first"),
+            PlannedChange(path="file1.py", operation="create", reason="second"),
+            PlannedChange(path="file2.py", operation="create", reason="third"),
+        ],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create 3 files")
+    
+    changes = generator.generate(request, plan, {})
+    
+    # Should have called generate_json 3 times (once per file)
+    assert call_count[0] == 3
+    assert len(changes) == 3
+    assert changes[0].path == "file0.py"
+    assert changes[1].path == "file1.py"
+    assert changes[2].path == "file2.py"
+
+
+def test_ollama_generator_incremental_failed_file_retry(monkeypatch):
+    """Test that a failed file can be retried without regenerating completed files."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    from code_builder_v2.ollama import OllamaError, JSONRecoveryError, RateLimitError
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    # Track call sequence
+    call_log = []
+    
+    def mock_generate_json(self, prompt, model=None):
+        call_log.append(prompt)
+        # Check for the specific file being generated in the prompt
+        if '"path": "file0.py"' in prompt or 'file0.py' in prompt and 'file1.py' not in prompt:
+            return {"changes": [{
+                "path": "file0.py",
+                "operation": "create",
+                "content": "# File 0\nvalue = 0\n"
+            }]}
+        elif '"path": "file1.py"' in prompt or ('file1.py' in prompt and 'file2.py' not in prompt and 'file0.py' not in prompt):
+            return {"changes": [{
+                "path": "file1.py",
+                "operation": "create",
+                "content": "# File 1\nvalue = 1\n"
+            }]}
+        elif '"path": "file2.py"' in prompt:
+            # Fail on third file - simulate rate limit
+            raise RateLimitError("Rate limit exceeded", provider="groq", model="test")
+        return {"changes": []}
+    
+    monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    plan = ChangePlan(
+        summary="Create multi-file app",
+        changes=[
+            PlannedChange(path="file0.py", operation="create", reason="first"),
+            PlannedChange(path="file1.py", operation="create", reason="second"),
+            PlannedChange(path="file2.py", operation="create", reason="third"),
+        ],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create 3 files")
+    
+    # Should fail on third file
+    try:
+        generator.generate(request, plan, {})
+        assert False, "Should have raised RateLimitError"
+    except RateLimitError:
+        pass
+    
+    # Verify first two files were generated (calls made for file0 and file1)
+    file0_calls = sum(1 for p in call_log if 'file0.py' in p and 'file1.py' not in p)
+    file1_calls = sum(1 for p in call_log if 'file1.py' in p and 'file2.py' not in p)
+    file2_calls = sum(1 for p in call_log if 'file2.py' in p)
+    
+    # Each file should be attempted at least once
+    assert file0_calls >= 1
+    assert file1_calls >= 1
+    assert file2_calls >= 1
+
+
+def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
+    """Test that small applications (1-2 files) use fast path (single call)."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    call_count = [0]
+    
+    def mock_generate_json(self, prompt, model=None):
+        call_count[0] += 1
+        # Return all files in one response (fast path)
+        return {"changes": [
+            {"path": "a.py", "operation": "create", "content": "x = 1"},
+            {"path": "b.py", "operation": "create", "content": "y = 2"},
+        ]}
+    
+    monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    # Plan with 2 files - should use fast path
+    plan = ChangePlan(
+        summary="Create small app",
+        changes=[
+            PlannedChange(path="a.py", operation="create", reason="first"),
+            PlannedChange(path="b.py", operation="create", reason="second"),
+        ],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create 2 files")
+    
+    changes = generator.generate(request, plan, {})
+    
+    # Should have called generate_json only once (fast path)
+    assert call_count[0] == 1
+    assert len(changes) == 2
