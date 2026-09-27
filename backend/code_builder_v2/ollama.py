@@ -213,7 +213,7 @@ class OllamaClient:
                     f"Groq structured output validation failed after {max_retries + 1} attempts: {exc}"
                 ) from exc
 
-def _generate_with_huggingface(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
+    def _generate_with_huggingface(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
         token = (
             os.getenv("HF_TOKEN", "").strip()
             or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip()
@@ -278,10 +278,6 @@ def _generate_with_huggingface(self, prompt: str, requested_model: str | None) -
                 )
                 if attempt < max_retries:
                     prompt = _build_json_recovery_prompt(prompt, raw, attempt)
-                    continue
-                raise JSONRecoveryError(
-                    f"Hugging Face structured output validation failed after {max_retries + 1} attempts: {exc}"
-                ) from exc
                     continue
                 raise JSONRecoveryError(
                     f"Hugging Face structured output validation failed after {max_retries + 1} attempts: {exc}"

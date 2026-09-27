@@ -7,7 +7,7 @@ import os
 import sqlite3
 import threading
 from abc import ABC, abstractmethod
-from datetime import UTC
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -26,7 +26,7 @@ def runtime_database_path() -> Path:
 def _now_iso() -> str:
     from datetime import datetime
 
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _json_default(value: Any) -> str:

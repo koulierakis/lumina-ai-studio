@@ -48,11 +48,6 @@ def test_cloud_code_model_defaults_to_verified_shared_groq_model(monkeypatch):
 def test_cloud_code_model_explicit_override_takes_precedence(monkeypatch):
     monkeypatch.setenv("GROQ_CODE_MODEL", "openai/gpt-oss-20b")
     assert OllamaClient()._groq_model("qwen2.5-coder:7b") == "openai/gpt-oss-20b"
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
->>>>>>> 2ea8923 (Fix HF provider routing: skip unsupported task/provider combos)
 
 
 def test_extract_json_object_handles_truncated_json():
