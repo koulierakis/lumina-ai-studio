@@ -236,15 +236,15 @@ test.describe('Code Builder V2 Autonomous Production Test', () => {
     await expect(page.locator('#count, #counter, [id*="count" i]')).toBeVisible({ timeout: 15000 });
     
     // Find increment button
-    const incrementBtn = page.locator('button#incrementBtn, button:has-text("Increment"), button:has-text("+"), button:has-text("increment" i)').first();
+    const incrementBtn = page.locator('button#incrementBtn, button:has-text("Increment"), button:has-text("+"), button:text-matches("increment", "i")').first();
     await expect(incrementBtn).toBeVisible({ timeout: 15000 });
 
     // Find decrement button
-    const decrementBtn = page.locator('button#decrementBtn, button:has-text("Decrement"), button:has-text("-"), button:has-text("decrement" i)').first();
+    const decrementBtn = page.locator('button#decrementBtn, button:has-text("Decrement"), button:has-text("-"), button:text-matches("decrement", "i")').first();
     await expect(decrementBtn).toBeVisible({ timeout: 15000 });
 
     // Find reset button
-    const resetBtn = page.locator('button#resetBtn, button:has-text("Reset"), button:has-text("reset" i)').first();
+    const resetBtn = page.locator('button#resetBtn, button:has-text("Reset"), button:text-matches("reset", "i")').first();
     await expect(resetBtn).toBeVisible({ timeout: 15000 });
 
     // Test user flow: Increment
