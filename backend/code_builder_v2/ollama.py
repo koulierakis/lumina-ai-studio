@@ -187,6 +187,7 @@ class OllamaClient:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
+                    max_tokens=8192,
                     response_format={"type": "json_object"},
                 )
                 raw = response.choices[0].message.content
@@ -427,6 +428,8 @@ class OllamaPlanner:
 Return ONLY JSON matching this schema:
 {{"summary":"...","changes":[{{"path":"relative/path","operation":"create|modify|delete","reason":"..."}}],"validation_commands":["..."]}}
 Rules: every required file must be listed; use repository-relative paths only; do not invent unrelated files; include focused validation commands.
+For static HTML/CSS/JS files (no build step, no package.json), use ONLY simple file existence checks like ["ls index.html", "test -f index.html"] or empty array [].
+Do NOT include commands that start servers, run tests, or require dependencies (npm, python -m http.server, playwright, etc.).
 User request:\n{request.prompt}
 """
         try:

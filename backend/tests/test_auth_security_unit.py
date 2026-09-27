@@ -98,6 +98,7 @@ def test_e2e_account_missing_env_vars(monkeypatch):
     # Only owner configured
     monkeypatch.setenv("OWNER_EMAIL", "owner@example.com")
     monkeypatch.setenv("OWNER_PASSWORD", "owner-secret")
+    monkeypatch.delenv("OWNER_PASSWORD_HASH", raising=False)
     monkeypatch.delenv("LUMINA_E2E_EMAIL", raising=False)
     monkeypatch.delenv("LUMINA_E2E_PASSWORD", raising=False)
     monkeypatch.delenv("LUMINA_E2E_PASSWORD_HASH", raising=False)
