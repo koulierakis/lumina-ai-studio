@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any
 
 from .applier import ProposedFileChange
@@ -19,6 +20,43 @@ class OllamaError(RuntimeError):
 
 class JSONRecoveryError(OllamaError):
     """Raised when JSON recovery attempts are exhausted."""
+
+
+class RateLimitError(OllamaError):
+    """Raised when provider rate limit (429) is hit."""
+    
+    def __init__(self, message: str, retry_after: int | None = None, provider: str | None = None, model: str | None = None):
+        super().__init__(message)
+        self.retry_after = retry_after
+        self.provider = provider
+        self.model = model
+
+
+@dataclass(slots=True)
+class GenerationProgress:
+    """Track incremental generation progress for resumability."""
+    completed_files: dict[str, ProposedFileChange] = field(default_factory=dict)
+    failed_file: str | None = None
+    total_files: int = 0
+    current_file_index: int = 0
+    
+    def is_complete(self) -> bool:
+        return self.current_file_index >= self.total_files
+    
+    def get_next_file(self, planned_changes: list[Any]) -> Any | None:
+        if self.current_file_index < len(planned_changes):
+            return planned_changes[self.current_file_index]
+        return None
+    
+    def mark_completed(self, change: ProposedFileChange) -> None:
+        self.completed_files[change.path] = change
+        self.current_file_index += 1
+    
+    def mark_failed(self, path: str) -> None:
+        self.failed_file = path
+    
+    def get_completed_changes(self) -> list[ProposedFileChange]:
+        return list(self.completed_files.values())
 
 
 def _extract_json_object(raw: str) -> dict[str, Any]:
@@ -164,21 +202,22 @@ class OllamaClient:
             return requested
         return "Qwen/Qwen2.5-Coder-32B-Instruct"
 
-    def _generate_with_groq(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
+def _generate_with_groq(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
         api_key = os.getenv("GROQ_API_KEY", "").strip()
         if not api_key:
             raise OllamaError("GROQ_API_KEY is not configured.")
 
         max_retries = 2
         last_raw = ""
+        model = self._groq_model(requested_model)
         
         for attempt in range(max_retries + 1):
             try:
-                from groq import Groq
+                from groq import Groq, RateLimitError as GroqRateLimitError, APIError as GroqAPIError
 
                 client = Groq(api_key=api_key, timeout=self.timeout_seconds)
                 response = client.chat.completions.create(
-                    model=self._groq_model(requested_model),
+                    model=model,
                     messages=[
                         {
                             "role": "system",
@@ -187,9 +226,38 @@ class OllamaClient:
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
+                    max_tokens=8192,
                     response_format={"type": "json_object"},
                 )
                 raw = response.choices[0].message.content
+            except GroqRateLimitError as exc:
+                retry_after = getattr(exc, 'retry_after', None)
+                log.warning(
+                    "Groq rate limit hit (attempt %d/%d), provider=groq, model=%s, retry_after=%s",
+                    attempt + 1, max_retries + 1, model, retry_after
+                )
+                if attempt < max_retries:
+                    wait_time = retry_after if retry_after else (2 ** attempt * 5)
+                    log.info("Waiting %ds before retry", wait_time)
+                    time.sleep(wait_time)
+                    continue
+                raise RateLimitError(
+                    f"Groq rate limit exceeded after {max_retries + 1} attempts",
+                    retry_after=retry_after,
+                    provider="groq",
+                    model=model
+                ) from exc
+            except GroqAPIError as exc:
+                log.warning(
+                    "Groq API error (attempt %d/%d), provider=groq, model=%s, status=%s",
+                    attempt + 1, max_retries + 1, model, getattr(exc, 'status_code', 'unknown')
+                )
+                if attempt < max_retries and getattr(exc, 'status_code', 500) >= 500:
+                    wait_time = 2 ** attempt * 5
+                    log.info("Waiting %ds before retry", wait_time)
+                    time.sleep(wait_time)
+                    continue
+                raise OllamaError(f"Groq code-model request failed: {exc}") from exc
             except Exception as exc:
                 raise OllamaError(f"Groq code-model request failed: {exc}") from exc
 
@@ -206,7 +274,6 @@ class OllamaClient:
                     attempt + 1, max_retries + 1, exc
                 )
                 if attempt < max_retries:
-                    # Build recovery prompt with the failed response
                     prompt = _build_json_recovery_prompt(prompt, raw, attempt)
                     continue
                 raise JSONRecoveryError(
@@ -230,6 +297,7 @@ class OllamaClient:
         for attempt in range(max_retries + 1):
             try:
                 from huggingface_hub import InferenceClient
+                from huggingface_hub.errors import HFValidationError, HfHubHTTPError
 
                 client = InferenceClient(
                     model=model,
@@ -251,6 +319,49 @@ class OllamaClient:
                     temperature=0.1,
                 )
                 raw = response.choices[0].message.content
+            except HfHubHTTPError as exc:
+                status = getattr(exc, 'response', None)
+                status_code = getattr(status, 'status_code', None) if status else None
+                log.warning(
+                    "HF HTTP error (attempt %d/%d), provider=huggingface, model=%s, status=%s",
+                    attempt + 1, max_retries + 1, model, status_code
+                )
+                if status_code == 429:
+                    retry_after = None
+                    if status and hasattr(status, 'headers'):
+                        retry_after = status.headers.get('retry-after')
+                    if attempt < max_retries:
+                        wait_time = int(retry_after) if retry_after else (2 ** attempt * 5)
+                        log.info("Waiting %ds before retry", wait_time)
+                        time.sleep(wait_time)
+                        continue
+                    raise RateLimitError(
+                        f"HF rate limit exceeded after {max_retries + 1} attempts",
+                        retry_after=int(retry_after) if retry_after else None,
+                        provider="huggingface",
+                        model=model
+                    ) from exc
+                elif status_code and status_code >= 500:
+                    if attempt < max_retries:
+                        wait_time = 2 ** attempt * 5
+                        log.info("Waiting %ds before retry", wait_time)
+                        time.sleep(wait_time)
+                        continue
+                raise OllamaError(
+                    f"Hugging Face code-model request failed for {model}: {exc}"
+                ) from exc
+            except HFValidationError as exc:
+                # Check for specific unsupported task/provider errors
+                error_msg = str(exc).lower()
+                if "task" in error_msg and "not supported" in error_msg:
+                    # This provider/model combo doesn't support the required task
+                    # Skip to next provider immediately (don't retry)
+                    raise OllamaError(
+                        f"Hugging Face provider does not support required task for {model}: {exc}"
+                    ) from exc
+                raise OllamaError(
+                    f"Hugging Face validation error for {model}: {exc}"
+                ) from exc
             except Exception as exc:
                 # Check for specific unsupported task/provider errors
                 error_msg = str(exc).lower()
