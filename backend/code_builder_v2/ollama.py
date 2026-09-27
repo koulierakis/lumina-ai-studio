@@ -107,29 +107,49 @@ class OllamaClient:
         if not api_key:
             raise OllamaError("GROQ_API_KEY is not configured.")
 
-        try:
-            from groq import Groq
+        max_retries = 2
+        last_raw = ""
+        
+        for attempt in range(max_retries + 1):
+            try:
+                from groq import Groq
 
-            client = Groq(api_key=api_key, timeout=self.timeout_seconds)
-            response = client.chat.completions.create(
-                model=self._groq_model(requested_model),
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are the LUMINA Code Builder V2 engine. Return only a valid JSON object with no markdown fences.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"},
-            )
-            raw = response.choices[0].message.content
-        except Exception as exc:
-            raise OllamaError(f"Groq code-model request failed: {exc}") from exc
+                client = Groq(api_key=api_key, timeout=self.timeout_seconds)
+                response = client.chat.completions.create(
+                    model=self._groq_model(requested_model),
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are the LUMINA Code Builder V2 engine. Return only a valid JSON object with no markdown fences.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.1,
+                    response_format={"type": "json_object"},
+                )
+                raw = response.choices[0].message.content
+            except Exception as exc:
+                raise OllamaError(f"Groq code-model request failed: {exc}") from exc
 
-        if not isinstance(raw, str) or not raw.strip():
-            raise OllamaError("Groq returned an empty response.")
-        return _extract_json_object(raw)
+            if not isinstance(raw, str) or not raw.strip():
+                raise OllamaError("Groq returned an empty response.")
+            
+            last_raw = raw
+            
+            try:
+                return _extract_json_object(raw)
+            except OllamaError as exc:
+                log.warning(
+                    "Groq JSON parse failed (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, exc
+                )
+                if attempt < max_retries:
+                    # Build recovery prompt with the failed response
+                    prompt = _build_json_recovery_prompt(prompt, raw, attempt)
+                    continue
+                raise JSONRecoveryError(
+                    f"Groq structured output validation failed after {max_retries + 1} attempts: {exc}"
+                ) from exc
 
     def _generate_with_huggingface(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
         token = (
@@ -139,42 +159,61 @@ class OllamaClient:
         )
         model = self._hf_model(requested_model)
 
-        try:
-            from huggingface_hub import InferenceClient
-
-            client = InferenceClient(
-                model=model,
-                token=token,
-                timeout=self.timeout_seconds,
-            )
+        max_retries = 2
+        last_raw = ""
+        
+        for attempt in range(max_retries + 1):
             try:
-                response = client.chat_completion(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "You are the LUMINA Code Builder V2 engine. Return only a valid JSON object with no markdown fences.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=8192,
-                    temperature=0.1,
-                )
-                raw = response.choices[0].message.content
-            except Exception:
-                raw = client.text_generation(
-                    prompt,
-                    max_new_tokens=8192,
-                    temperature=0.1,
-                    return_full_text=False,
-                )
-        except Exception as exc:
-            raise OllamaError(
-                f"Hugging Face code-model request failed for {model}: {exc}"
-            ) from exc
+                from huggingface_hub import InferenceClient
 
-        if not isinstance(raw, str) or not raw.strip():
-            raise OllamaError("Hugging Face returned an empty response.")
-        return _extract_json_object(raw)
+                client = InferenceClient(
+                    model=model,
+                    token=token,
+                    timeout=self.timeout_seconds,
+                )
+                try:
+                    response = client.chat_completion(
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are the LUMINA Code Builder V2 engine. Return only a valid JSON object with no markdown fences.",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        max_tokens=8192,
+                        temperature=0.1,
+                    )
+                    raw = response.choices[0].message.content
+                except Exception:
+                    raw = client.text_generation(
+                        prompt,
+                        max_new_tokens=8192,
+                        temperature=0.1,
+                        return_full_text=False,
+                    )
+            except Exception as exc:
+                raise OllamaError(
+                    f"Hugging Face code-model request failed for {model}: {exc}"
+                ) from exc
+
+            if not isinstance(raw, str) or not raw.strip():
+                raise OllamaError("Hugging Face returned an empty response.")
+            
+            last_raw = raw
+            
+            try:
+                return _extract_json_object(raw)
+            except OllamaError as exc:
+                log.warning(
+                    "Hugging Face JSON parse failed (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, exc
+                )
+                if attempt < max_retries:
+                    prompt = _build_json_recovery_prompt(prompt, raw, attempt)
+                    continue
+                raise JSONRecoveryError(
+                    f"Hugging Face structured output validation failed after {max_retries + 1} attempts: {exc}"
+                ) from exc
 
     def _generate_with_local_ollama(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
         """Generate using local Ollama server via HTTP API."""
@@ -184,53 +223,113 @@ class OllamaClient:
         model = requested_model or self.default_model
         url = f"{self.base_url}/api/generate"
         
-        payload = {
-            "model": model,
-            "prompt": prompt,
-            "stream": False,
-            "format": "json",
-            "options": {
-                "temperature": 0.1,
-                "num_ctx": 8192,
-                "num_predict": 8192,
+        max_retries = 2
+        last_raw = ""
+        
+        for attempt in range(max_retries + 1):
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "temperature": 0.1,
+                    "num_ctx": 8192,
+                    "num_predict": 8192,
+                }
             }
-        }
-        
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url,
-            data=data,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
-                raw = response.read().decode("utf-8")
-        except urllib.error.URLError as exc:
-            raise OllamaError(f"Local Ollama request failed: {exc}") from exc
-        except Exception as exc:
-            raise OllamaError(f"Local Ollama request failed: {exc}") from exc
-
-        if not isinstance(raw, str) or not raw.strip():
-            raise OllamaError("Local Ollama returned an empty response.")
-        
-        # Ollama returns {"response": "..."} when format=json
-        try:
-            parsed = json.loads(raw)
-            if "response" in parsed:
-                raw = parsed["response"]
-        except json.JSONDecodeError:
-            pass
             
-        return _extract_json_object(raw)
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
+                    raw = response.read().decode("utf-8")
+            except urllib.error.URLError as exc:
+                raise OllamaError(f"Local Ollama request failed: {exc}") from exc
+            except Exception as exc:
+                raise OllamaError(f"Local Ollama request failed: {exc}") from exc
+
+            if not isinstance(raw, str) or not raw.strip():
+                raise OllamaError("Local Ollama returned an empty response.")
+            
+            last_raw = raw
+            
+            # Ollama returns {"response": "..."} when format=json
+            try:
+                parsed = json.loads(raw)
+                if "response" in parsed:
+                    raw = parsed["response"]
+            except json.JSONDecodeError:
+                pass
+                
+            try:
+                return _extract_json_object(raw)
+            except OllamaError as exc:
+                log.warning(
+                    "Local Ollama JSON parse failed (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, exc
+                )
+                if attempt < max_retries:
+                    prompt = _build_json_recovery_prompt(prompt, raw, attempt)
+                    continue
+                raise JSONRecoveryError(
+                    f"Local Ollama structured output validation failed after {max_retries + 1} attempts: {exc}"
+                ) from exc
 
     def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
+        """Generate JSON with automatic provider fallback on failure.
+        
+        Provider priority: Groq -> HuggingFace -> Local Ollama
+        Falls back on JSONRecoveryError, OllamaError, and network failures.
+        """
+        providers = []
+        
         if os.getenv("GROQ_API_KEY", "").strip():
-            return self._generate_with_groq(prompt, model)
+            providers.append(("groq", self._generate_with_groq))
         if os.getenv("HF_TOKEN", "").strip() or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip():
-            return self._generate_with_huggingface(prompt, model)
-        return self._generate_with_local_ollama(prompt, model)
+            providers.append(("huggingface", self._generate_with_huggingface))
+        providers.append(("ollama", self._generate_with_local_ollama))
+        
+        if not providers:
+            raise OllamaError("No model providers configured. Set GROQ_API_KEY, HF_TOKEN, or run local Ollama.")
+        
+        last_error: Exception | None = None
+        
+        for provider_name, provider_fn in providers:
+            try:
+                log.info("Attempting JSON generation with provider: %s", provider_name)
+                result = provider_fn(prompt, model)
+                log.info("JSON generation succeeded with provider: %s", provider_name)
+                return result
+            except JSONRecoveryError as exc:
+                log.warning(
+                    "Provider %s JSON recovery exhausted, falling back: %s",
+                    provider_name, exc
+                )
+                last_error = exc
+                continue
+            except OllamaError as exc:
+                log.warning(
+                    "Provider %s failed, falling back: %s",
+                    provider_name, exc
+                )
+                last_error = exc
+                continue
+            except Exception as exc:
+                log.warning(
+                    "Provider %s unexpected error, falling back: %s",
+                    provider_name, exc
+                )
+                last_error = exc
+                continue
+        
+        raise OllamaError(f"All providers failed. Last error: {last_error}")
 
 
 @dataclass(slots=True)
