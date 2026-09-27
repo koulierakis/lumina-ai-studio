@@ -1,0 +1,29 @@
+{
+  "id": "lumina-builder-test-11",
+  "name": "Lumina Builder Test",
+  "workspace_root": "/workspace/51779d58-a432-4b81-8e8e-c29bb5c20ec1/sessions/agent_59724a9c-9f0a-41e5-8564-1b69d335ad74/generated_projects/lumina-builder-test-11",
+  "status": "generating",
+  "framework": "react_vite",
+  "dev_server": {
+    "port": null,
+    "url": null,
+    "pid": null,
+    "project_id": null,
+    "status": "stopped",
+    "started_at": null,
+    "framework": "unknown",
+    "command": null,
+    "error": null
+  },
+  "created_at": "2026-09-27T00:08:08.470292Z",
+  "updated_at": "2026-09-27T00:08:08.470298Z",
+  "task_ids": [],
+  "metadata": {
+    "summary": "A simple responsive React web application with a heading and a button that changes a visible message when clicked.",
+    "run_instructions": [
+      "npm install",
+      "npm run dev"
+    ],
+    "original_prompt": "Create a simple responsive React web application with a heading saying Lumina Builder Test and a button that changes a visible message when clicked."
+  }
+}

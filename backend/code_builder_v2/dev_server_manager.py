@@ -138,7 +138,8 @@ class DevServerManager:
     def _monitor_process(self, project_id: str, server_process: DevServerProcess, log_fh) -> None:
         process = server_process.process
         try:
-            for line in iter(process.stdout.readline, ""):
+            while True:
+                line = process.stdout.readline()
                 if not line:
                     break
                 line = line.rstrip("\n")
@@ -170,8 +171,10 @@ class DevServerManager:
     def _check_health(self, url: str) -> bool:
         try:
             import urllib.request
-            req = urllib.request.Request(url, method="HEAD")
-            with urllib.request.urlopen(req, timeout=2) as resp:
+            req = urllib.request.Request(url, method="GET")
+            req.add_header('User-Agent', 'Mozilla/5.0 (compatible; LuminaCodeBuilder/1.0)')
+            req.add_header('Accept', '*/*')
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 return resp.status < 500
         except Exception:
             return False

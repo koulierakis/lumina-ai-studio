@@ -20,6 +20,9 @@ from .models import (
     TaskStatus,
     ValidationResult,
 )
+from .project_service import ProjectService, V2Builder
+from .project_router import router as project_router
+from .router import router as task_router
 
 __all__ = [
     "BuildTask",
@@ -36,4 +39,8 @@ __all__ = [
     "TaskRequest",
     "TaskStatus",
     "ValidationResult",
+    "ProjectService",
+    "V2Builder",
+    "project_router",
+    "task_router",
 ]

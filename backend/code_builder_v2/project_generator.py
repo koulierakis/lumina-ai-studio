@@ -57,19 +57,23 @@ def _safe_file(project: Path, relative: str) -> Path:
 
 
 def ollama_status() -> dict[str, Any]:
+    url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.environ.get("CODE_MODEL", "qwen2.5-coder:7b")
     try:
-        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=4)
+        response = requests.get(f"{url}/api/tags", timeout=4)
         response.raise_for_status()
         models = [m.get("name") for m in response.json().get("models", [])]
-        return {"online": True, "model": OLLAMA_MODEL, "installed": OLLAMA_MODEL in models, "models": models}
+        return {"online": True, "model": model, "installed": model in models, "models": models}
     except Exception:
-        return {"online": False, "model": OLLAMA_MODEL, "installed": False, "models": []}
+        return {"online": False, "model": model, "installed": False, "models": []}
 
 
 def _generate(prompt: str, timeout: int = 600) -> str:
+    url = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
+    model = os.environ.get("CODE_MODEL", "qwen2.5-coder:7b")
     response = requests.post(
-        f"{OLLAMA_URL}/api/generate",
-        json={"model": OLLAMA_MODEL, "prompt": prompt, "stream": False, "options": {"temperature": 0.15}},
+        f"{url}/api/generate",
+        json={"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0.15}},
         timeout=timeout,
     )
     response.raise_for_status()
@@ -144,7 +148,13 @@ Return ONLY valid JSON with this exact shape:
 Rules:
 - Maximum {MAX_FILES} files.
 - Use only relative safe paths.
-- Include all configuration files needed (package.json, pyproject.toml, etc.).
+- Include ALL configuration files needed (package.json, vite.config.js, pyproject.toml, etc.).
+- For React/Vite: MUST include package.json with dependencies: react, react-dom, and devDependencies: vite, @vitejs/plugin-react
+- For React/Vite: MUST include index.html at project root with <div id="root"></div> and <script type="module" src="/src/main.jsx"></script>
+- For React/Vite: MUST include vite.config.js with @vitejs/plugin-react
+- For React/Vite: MUST include src/main.jsx or src/main.tsx as entry point
+- For React 18: MUST use ReactDOM.createRoot() in entry point, NOT ReactDOM.render()
+- For React/Vite: DO NOT include react-scripts (that's for Create React App)
 - Include a README.md with run instructions.
 - Prefer simple, maintainable technologies.
 - For React: use Vite, TypeScript, functional components.
@@ -204,9 +214,9 @@ def install_dependencies(project: Project) -> tuple[bool, str]:
 
     if (project_path / "package.json").exists():
         if (project_path / "package-lock.json").exists():
-            commands_to_try.append(["npm", "ci"])
+            commands_to_try.append(["npm", "ci", "--legacy-peer-deps"])
         else:
-            commands_to_try.append(["npm", "install"])
+            commands_to_try.append(["npm", "install", "--legacy-peer-deps"])
 
     if (project_path / "requirements.txt").exists():
         commands_to_try.append(["pip", "install", "-r", "requirements.txt"])
@@ -246,7 +256,7 @@ def get_dev_server_command(project: Project) -> tuple[str, int] | None:
     framework = project.framework
 
     if framework == FrameworkType.react_vite:
-        return ("npm run dev -- --host 0.0.0.0 --port {port}", 5173)
+        return ("npx vite --host 0.0.0.0 --port {port}", 5173)
     if framework == FrameworkType.nextjs:
         return ("npm run dev -- --port {port}", 3000)
     if framework == FrameworkType.python_fastapi:
@@ -257,7 +267,7 @@ def get_dev_server_command(project: Project) -> tuple[str, int] | None:
         return ("npx serve . -l {port}", 3000)
 
     if (project_path / "package.json").exists():
-        return ("npm run dev -- --host 0.0.0.0 --port {port}", 5173)
+        return ("npx vite --host 0.0.0.0 --port {port}", 5173)
     if (project_path / "requirements.txt").exists() or (project_path / "pyproject.toml").exists():
         return ("uvicorn main:app --host 0.0.0.0 --port {port} --reload", 8000)
 
