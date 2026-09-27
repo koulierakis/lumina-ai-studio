@@ -61,6 +61,68 @@ Failed response (truncated): {failed_response[-3000:]}
 Return ONLY the complete valid JSON object matching the original schema. No markdown, no explanation."""
 
 
+def _build_schema_recovery_prompt(original_prompt: str, failed_response: str, schema_error: str, attempt: int) -> str:
+    """Build a concise recovery prompt for schema-invalid JSON."""
+    return f"""The previous response was valid JSON but violated the required Code Builder schema.
+
+Schema error: {schema_error}
+
+Required schema:
+{{"changes":[
+  {{"path":"relative/path","operation":"create|update|delete","content":"full file content or null for delete"}}
+]}}
+
+Hard rules:
+- "changes" MUST be an array of objects, NOT strings or nested arrays
+- Each change object MUST have: "path" (string), "operation" (string: create|update|delete), "content" (string or null)
+- NO extra fields, NO missing fields, NO string items in changes array
+
+Original request: {original_prompt}
+
+Failed response (truncated): {failed_response[-3000:]}
+
+Return ONLY the complete valid JSON object matching the schema above. No markdown, no explanation."""
+
+
+def _validate_changes_schema(data: dict[str, Any], log: logging.Logger) -> tuple[bool, str]:
+    """Validate that parsed JSON matches Code Builder changes schema.
+    
+    Returns: (is_valid, error_message)
+    """
+    if "changes" not in data:
+        return False, "Missing 'changes' key"
+    
+    changes = data["changes"]
+    if not isinstance(changes, list):
+        return False, "'changes' must be an array"
+    
+    if not changes:
+        return False, "'changes' array is empty"
+    
+    valid_operations = {"create", "update", "delete"}
+    
+    for idx, item in enumerate(changes):
+        if not isinstance(item, dict):
+            return False, f"changes[{idx}] must be an object, got {type(item).__name__}"
+        
+        if "path" not in item or not isinstance(item["path"], str) or not item["path"].strip():
+            return False, f"changes[{idx}] missing or invalid 'path' (must be non-empty string)"
+        
+        if "operation" not in item or not isinstance(item["operation"], str) or item["operation"] not in valid_operations:
+            return False, f"changes[{idx}] missing or invalid 'operation' (must be create|update|delete)"
+        
+        if "content" not in item:
+            return False, f"changes[{idx}] missing 'content' field"
+        
+        if item["operation"] in {"create", "update"} and item["content"] is None:
+            return False, f"changes[{idx}] 'content' must be string for create/update operations"
+        
+        if item["operation"] == "delete" and item["content"] is not None:
+            return False, f"changes[{idx}] 'content' must be null for delete operations"
+    
+    return True, ""
+
+
 @dataclass(slots=True)
 class OllamaClient:
     """Cloud-first LLM client with local Ollama fallback.
@@ -395,19 +457,38 @@ Approved plan: {plan_json}
 Current file context: {context_json}
 Original request: {request.prompt}
 """
-        data = self.client.generate_json(prompt, request.model)
-        raw_changes = data.get("changes")
-        if not isinstance(raw_changes, list):
-            raise OllamaError("Generated result is missing changes array")
-        changes: list[ProposedFileChange] = []
-        for item in raw_changes:
-            if not isinstance(item, dict):
-                raise OllamaError("Each generated change must be an object")
-            changes.append(
-                ProposedFileChange(
-                    path=str(item.get("path", "")),
-                    operation=str(item.get("operation", "")),
-                    content=item.get("content"),
-                )
+        max_schema_retries = 2
+        current_prompt = prompt
+        
+        for attempt in range(max_schema_retries + 1):
+            data = self.client.generate_json(current_prompt, request.model)
+            
+            # Validate schema
+            is_valid, schema_error = _validate_changes_schema(data, log)
+            if is_valid:
+                raw_changes = data.get("changes", [])
+                changes: list[ProposedFileChange] = []
+                for item in raw_changes:
+                    changes.append(
+                        ProposedFileChange(
+                            path=str(item.get("path", "")),
+                            operation=str(item.get("operation", "")),
+                            content=item.get("content"),
+                        )
+                    )
+                return changes
+            
+            # Schema validation failed - try recovery
+            log.warning(
+                "Schema validation failed (attempt %d/%d): %s",
+                attempt + 1, max_schema_retries + 1, schema_error
             )
-        return changes
+            
+            if attempt < max_schema_retries:
+                current_prompt = _build_schema_recovery_prompt(prompt, json.dumps(data), schema_error, attempt)
+                continue
+            
+            # Schema retries exhausted - raise to trigger provider fallback
+            raise JSONRecoveryError(
+                f"Schema validation failed after {max_schema_retries + 1} attempts: {schema_error}"
+            )

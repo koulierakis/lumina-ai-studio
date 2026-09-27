@@ -284,3 +284,251 @@ def test_generate_json_localhost_ollama_not_used_in_production(monkeypatch):
         assert "All providers failed" in str(e)
     assert call_order == ["groq"]
     assert "ollama" not in call_order
+
+
+def test_validate_changes_schema_accepts_valid_changes():
+    """Test that _validate_changes_schema accepts valid changes."""
+    from code_builder_v2.ollama import _validate_changes_schema
+    import logging
+    
+    log = logging.getLogger("test")
+    
+    # Valid create
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]
+    }, log)
+    assert valid is True
+    assert error == ""
+    
+    # Valid update
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "update", "content": "x = 2"}]
+    }, log)
+    assert valid is True
+    
+    # Valid delete
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "delete", "content": None}]
+    }, log)
+    assert valid is True
+    
+    # Multiple valid changes
+    valid, error = _validate_changes_schema({
+        "changes": [
+            {"path": "a.py", "operation": "create", "content": "x = 1"},
+            {"path": "b.py", "operation": "update", "content": "y = 2"},
+            {"path": "c.py", "operation": "delete", "content": None}
+        ]
+    }, log)
+    assert valid is True
+
+
+def test_validate_changes_schema_rejects_strings_in_changes():
+    """Test that _validate_changes_schema rejects strings in changes array."""
+    from code_builder_v2.ollama import _validate_changes_schema
+    import logging
+    
+    log = logging.getLogger("test")
+    
+    # String instead of object
+    valid, error = _validate_changes_schema({
+        "changes": ["not an object"]
+    }, log)
+    assert valid is False
+    assert "must be an object" in error
+
+
+def test_validate_changes_schema_rejects_nested_arrays():
+    """Test that _validate_changes_schema rejects nested arrays in changes."""
+    from code_builder_v2.ollama import _validate_changes_schema
+    import logging
+    
+    log = logging.getLogger("test")
+    
+    # Nested array
+    valid, error = _validate_changes_schema({
+        "changes": [[{"path": "a.py", "operation": "create", "content": "x = 1"}]]
+    }, log)
+    assert valid is False
+    assert "must be an object" in error
+
+
+def test_validate_changes_schema_rejects_missing_fields():
+    """Test that _validate_changes_schema rejects missing required fields."""
+    from code_builder_v2.ollama import _validate_changes_schema
+    import logging
+    
+    log = logging.getLogger("test")
+    
+    # Missing path
+    valid, error = _validate_changes_schema({
+        "changes": [{"operation": "create", "content": "x = 1"}]
+    }, log)
+    assert valid is False
+    assert "path" in error
+    
+    # Missing operation
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "content": "x = 1"}]
+    }, log)
+    assert valid is False
+    assert "operation" in error
+    
+    # Invalid operation
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "invalid", "content": "x = 1"}]
+    }, log)
+    assert valid is False
+    assert "operation" in error
+    
+    # Missing content
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "create"}]
+    }, log)
+    assert valid is False
+    assert "content" in error
+    
+    # None content for create
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "create", "content": None}]
+    }, log)
+    assert valid is False
+    assert "content" in error
+    
+    # Non-null content for delete
+    valid, error = _validate_changes_schema({
+        "changes": [{"path": "a.py", "operation": "delete", "content": "should be null"}]
+    }, log)
+    assert valid is False
+    assert "content" in error
+
+
+def test_validate_changes_schema_rejects_empty_changes():
+    """Test that _validate_changes_schema rejects empty changes array."""
+    from code_builder_v2.ollama import _validate_changes_schema
+    import logging
+    
+    log = logging.getLogger("test")
+    
+    valid, error = _validate_changes_schema({
+        "changes": []
+    }, log)
+    assert valid is False
+    assert "empty" in error
+    
+    # Missing changes key
+    valid, error = _validate_changes_schema({
+        "other": "data"
+    }, log)
+    assert valid is False
+    assert "changes" in error
+    
+    # Changes not an array
+    valid, error = _validate_changes_schema({
+        "changes": "not an array"
+    }, log)
+    assert valid is False
+    assert "array" in error
+
+
+def test_schema_recovery_prompt_contains_schema_error(monkeypatch):
+    """Test that the schema recovery prompt includes the schema error."""
+    from code_builder_v2.ollama import _build_schema_recovery_prompt
+    
+    original = "Create a React app"
+    failed = '{"changes": ["not an object"]}'
+    schema_error = "changes[0] must be an object, got str"
+    
+    recovery = _build_schema_recovery_prompt(original, failed, schema_error, 0)
+    
+    assert original in recovery
+    assert schema_error in recovery
+    assert "changes" in recovery
+    assert "create|update|delete" in recovery
+    assert "MUST be an array of objects" in recovery
+
+
+def test_ollama_generator_schema_recovery(monkeypatch):
+    """Test that OllamaChangeGenerator retries on schema-invalid output."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    # First response has invalid schema (strings in changes), second is valid
+    responses = [
+        {"changes": ["invalid", "also invalid"]},  # Schema invalid
+        {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}  # Valid
+    ]
+    
+    call_count = [0]
+    
+    def mock_generate_json(self, prompt, model=None):
+        call_count[0] += 1
+        return responses.pop(0)
+    
+    monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    plan = ChangePlan(
+        summary="Create app",
+        changes=[PlannedChange(path="a.py", operation="create", reason="needed")],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create a.py")
+    
+    changes = generator.generate(request, plan, {})
+    
+    # Should have retried once and succeeded
+    assert call_count[0] == 2
+    assert len(changes) == 1
+    assert changes[0].path == "a.py"
+    assert changes[0].content == "x = 1"
+
+
+def test_ollama_generator_schema_fallback_after_retries(monkeypatch):
+    """Test that schema validation failure falls back to next provider after retries."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("HF_TOKEN", "fake-token")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        # Always return schema-invalid response
+        raise JSONRecoveryError("Schema validation failed after 3 attempts")
+    
+    def mock_hf(self, prompt, model=None):
+        call_order.append("huggingface")
+        return {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        return {"changes": [{"path": "b.py", "operation": "create", "content": "y = 2"}]}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    plan = ChangePlan(
+        summary="Create app",
+        changes=[PlannedChange(path="a.py", operation="create", reason="needed")],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create a.py")
+    
+    changes = generator.generate(request, plan, {})
+    
+    # Should fall back to HF after Groq schema retries exhausted
+    assert len(changes) == 1
+    assert changes[0].path == "a.py"
+    assert "groq" in call_order
+    assert "huggingface" in call_order
