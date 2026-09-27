@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -9,9 +10,15 @@ from .applier import ProposedFileChange
 from .models import ChangePlan, TaskRequest
 from .planner import PlannerUnavailable
 
+log = logging.getLogger(__name__)
+
 
 class OllamaError(RuntimeError):
     """Backward-compatible Code Builder V2 LLM error."""
+
+
+class JSONRecoveryError(OllamaError):
+    """Raised when JSON recovery attempts are exhausted."""
 
 
 def _extract_json_object(raw: str) -> dict[str, Any]:
@@ -41,6 +48,17 @@ def _extract_json_object(raw: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise OllamaError("Cloud code model JSON result must be an object.")
     return data
+
+
+def _build_json_recovery_prompt(original_prompt: str, failed_response: str, attempt: int) -> str:
+    """Build a concise recovery prompt for truncated/malformed JSON."""
+    return f"""The previous response was truncated or malformed JSON. Complete the JSON object correctly.
+
+Original request: {original_prompt}
+
+Failed response (truncated): {failed_response[-3000:]}
+
+Return ONLY the complete valid JSON object matching the original schema. No markdown, no explanation."""
 
 
 @dataclass(slots=True)
