@@ -220,6 +220,9 @@ class OllamaClient:
             or None
         )
         model = self._hf_model(requested_model)
+        
+        # Allow configuring HF provider to avoid incompatible ones (e.g., nscale)
+        hf_provider = os.getenv("HF_INFERENCE_PROVIDER", "").strip() or None
 
         max_retries = 2
         last_raw = ""
@@ -232,28 +235,31 @@ class OllamaClient:
                     model=model,
                     token=token,
                     timeout=self.timeout_seconds,
+                    provider=hf_provider,
                 )
-                try:
-                    response = client.chat_completion(
-                        messages=[
-                            {
-                                "role": "system",
-                                "content": "You are the LUMINA Code Builder V2 engine. Return only a valid JSON object with no markdown fences.",
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        max_tokens=8192,
-                        temperature=0.1,
-                    )
-                    raw = response.choices[0].message.content
-                except Exception:
-                    raw = client.text_generation(
-                        prompt,
-                        max_new_tokens=8192,
-                        temperature=0.1,
-                        return_full_text=False,
-                    )
+                # Use chat_completion for chat/instruct models - don't fall back to text_generation
+                # as it may use incompatible providers/tasks
+                response = client.chat_completion(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are the LUMINA Code Builder V2 engine. Return only a valid JSON object with no markdown fences.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    max_tokens=8192,
+                    temperature=0.1,
+                )
+                raw = response.choices[0].message.content
             except Exception as exc:
+                # Check for specific unsupported task/provider errors
+                error_msg = str(exc).lower()
+                if "task" in error_msg and "not supported" in error_msg:
+                    # This provider/model combo doesn't support the required task
+                    # Skip to next provider immediately (don't retry)
+                    raise OllamaError(
+                        f"Hugging Face provider does not support required task for {model}: {exc}"
+                    ) from exc
                 raise OllamaError(
                     f"Hugging Face code-model request failed for {model}: {exc}"
                 ) from exc

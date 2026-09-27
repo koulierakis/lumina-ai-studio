@@ -527,8 +527,51 @@ def test_ollama_generator_schema_fallback_after_retries(monkeypatch):
     
     changes = generator.generate(request, plan, {})
     
-    # Should fall back to HF after Groq schema retries exhausted
+
+# HF unsupported task error test
+def test_ollama_generator_hf_unsupported_task_fallback(monkeypatch):
+    """Test that HF 'task not supported' error falls back to next provider immediately."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    from code_builder_v2.ollama import OllamaError
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("HF_TOKEN", "fake-token")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        raise OllamaError("Groq API error")
+    
+    def mock_hf(self, prompt, model=None):
+        call_order.append("huggingface")
+        # Simulate the nscale "task not supported" error
+        raise OllamaError("Task 'text-generation' not supported by provider nscale")
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        return {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    plan = ChangePlan(
+        summary="Create app",
+        changes=[PlannedChange(path="a.py", operation="create", reason="needed")],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create a.py")
+    
+    changes = generator.generate(request, plan, {})
+    
+    # Should fall back to ollama after HF unsupported task error
     assert len(changes) == 1
     assert changes[0].path == "a.py"
     assert "groq" in call_order
     assert "huggingface" in call_order
+    assert "ollama" in call_order
