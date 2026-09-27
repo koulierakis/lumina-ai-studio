@@ -1,0 +1,77 @@
+name: Autonomous Code Builder V2 Production E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Render URL to test
+        required: false
+        default: https://lumina-ai-studio.onrender.com
+      spec:
+        description: Playwright spec file
+        required: false
+        default: e2e/code-builder-v2-autonomous.spec.js
+  push:
+    branches:
+      - work/lumina-production-unified
+    paths:
+      - 'backend/code_builder_v2/**'
+      - 'frontend/src/pages/CodeBuilderV2.jsx'
+      - 'e2e/code-builder-v2-autonomous.spec.js'
+      - '.github/workflows/autonomous-production-e2e.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  autonomous-production-e2e:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/work/lumina-production-unified'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LUMINA_E2E_BASE_URL: ${{ github.event.inputs.base_url || 'https://lumina-ai-studio.onrender.com' }}
+      LUMINA_E2E_EMAIL: ${{ secrets.LUMINA_E2E_EMAIL }}
+      LUMINA_E2E_PASSWORD: ${{ secrets.LUMINA_E2E_PASSWORD }}
+      LUMINA_E2E_MODEL: ${{ secrets.LUMINA_E2E_MODEL || 'openai/gpt-oss-120b' }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Playwright dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify credentials present
+        run: |
+          if [[ -z "$LUMINA_E2E_EMAIL" || -z "$LUMINA_E2E_PASSWORD" ]]; then
+            echo "ERROR: LUMINA_E2E_EMAIL and LUMINA_E2E_PASSWORD must be set as repository secrets"
+            echo "These should be a dedicated test account, never an owner/personal account"
+            exit 1
+          fi
+
+      - name: Run autonomous production E2E tests
+        run: npm run e2e:production:autonomous -- --base-url "$LUMINA_E2E_BASE_URL" --spec "${{ github.event.inputs.spec || 'e2e/code-builder-v2-autonomous.spec.js' }}"
+
+      - name: Upload Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autonomous-e2e-artifacts
+          path: |
+            test_reports/playwright-artifacts
+            test_reports/playwright-html
+          if-no-files-found: ignore
+          retention-days: 7

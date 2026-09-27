@@ -1,6 +1,8 @@
 {
   "scripts": {
     "e2e:render": "playwright test",
+    "e2e:render:autonomous": "playwright test e2e/code-builder-v2-autonomous.spec.js",
+    "e2e:production:autonomous": "python scripts/run_autonomous_production_e2e.py",
     "e2e:local": "python scripts/run_local_e2e.py"
   },
   "devDependencies": {

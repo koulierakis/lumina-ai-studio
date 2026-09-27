@@ -2,13 +2,14 @@
 
 Uses simple email + bcrypt password verified against env vars.
 Issues signed JWT tokens for session persistence.
+Supports optional E2E test account for automated testing.
 """
 from __future__ import annotations
 
 import hmac
 import ipaddress
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import bcrypt
@@ -42,31 +43,79 @@ def _owner_password_hash() -> str:
     return (os.environ.get("OWNER_PASSWORD_HASH") or "").strip()
 
 
+def _e2e_email() -> str:
+    return (os.environ.get("LUMINA_E2E_EMAIL") or "").strip().lower()
+
+
+def _e2e_password_hash() -> str:
+    return (os.environ.get("LUMINA_E2E_PASSWORD_HASH") or "").strip()
+
+
+def _e2e_password() -> str:
+    return os.environ.get("LUMINA_E2E_PASSWORD") or ""
+
+
 def _local_passwordless_enabled() -> bool:
     value = os.environ.get("LUMINA_LOCAL_PASSWORDLESS", "1")
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_e2e_email(email: str) -> bool:
+    e2e = _e2e_email()
+    return bool(e2e) and hmac.compare_digest(email.strip().lower(), e2e)
+
+
+def _is_owner_email(email: str) -> bool:
+    owner = _owner_email()
+    return bool(owner) and hmac.compare_digest(email.strip().lower(), owner)
+
+
+def _allowed_emails() -> list[str]:
+    emails = []
+    owner = _owner_email()
+    if owner:
+        emails.append(owner)
+    e2e = _e2e_email()
+    if e2e:
+        emails.append(e2e)
+    return emails
 
 
 def verify_credentials(email: str, password: str) -> bool:
     if not email or not password:
         return False
 
-    if not hmac.compare_digest(email.strip().lower(), _owner_email()):
-        return False
+    normalized = email.strip().lower()
 
-    password_hash = _owner_password_hash()
-    if password_hash:
-        try:
-            return bcrypt.checkpw(
-                password.encode("utf-8"),
-                password_hash.encode("utf-8"),
-            )
-        except (ValueError, TypeError):
-            return False
+    # Check owner credentials
+    if _is_owner_email(normalized):
+        password_hash = _owner_password_hash()
+        if password_hash:
+            try:
+                return bcrypt.checkpw(
+                    password.encode("utf-8"),
+                    password_hash.encode("utf-8"),
+                )
+            except (ValueError, TypeError):
+                return False
+        # Backward compatibility for existing installations.
+        return hmac.compare_digest(password, _owner_password())
 
-    # Backward compatibility for existing installations. Production deployments
-    # should set OWNER_PASSWORD_HASH and remove OWNER_PASSWORD.
-    return hmac.compare_digest(password, _owner_password())
+    # Check E2E test account credentials
+    if _is_e2e_email(normalized):
+        password_hash = _e2e_password_hash()
+        if password_hash:
+            try:
+                return bcrypt.checkpw(
+                    password.encode("utf-8"),
+                    password_hash.encode("utf-8"),
+                )
+            except (ValueError, TypeError):
+                return False
+        # Backward compatibility - use plain password if no hash
+        return hmac.compare_digest(password, _e2e_password())
+
+    return False
 
 
 def hash_password(plain: str) -> str:
@@ -76,8 +125,8 @@ def hash_password(plain: str) -> str:
 def issue_token(email: str, hours: int = 24 * 30) -> str:
     payload = {
         "sub": email.strip().lower(),
-        "iat": datetime.now(UTC),
-        "exp": datetime.now(UTC) + timedelta(hours=hours),
+        "iat": datetime.now(timezone.utc),
+        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
     }
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
@@ -103,7 +152,7 @@ def _is_loopback_request(request: Request) -> bool:
 
 
 async def require_owner(request: Request) -> str:
-    """Authenticate the owner, optionally allowing passwordless loopback access.
+    """Authenticate the owner or E2E test account, optionally allowing passwordless loopback access.
 
     Desktop installations default to passwordless access for requests originating
     from the same computer. Set ``LUMINA_LOCAL_PASSWORDLESS=0`` to require a
@@ -115,6 +164,9 @@ async def require_owner(request: Request) -> str:
     access by the local fallback.
     """
     owner_email = _owner_email() or "owner@lumina.local"
+    e2e_email = _e2e_email()
+    allowed_emails = _allowed_emails()
+
     authorization = (request.headers.get("authorization") or "").strip()
 
     if authorization:
@@ -122,9 +174,9 @@ async def require_owner(request: Request) -> str:
         if not separator or scheme.lower() != "bearer" or not token.strip():
             raise HTTPException(status_code=401, detail="Invalid authorization header")
         subject = decode_token(token.strip())
-        if not subject or not hmac.compare_digest(subject, owner_email):
+        if not subject or subject not in allowed_emails:
             raise HTTPException(status_code=401, detail="Invalid or expired token")
-        return owner_email
+        return subject
 
     if _local_passwordless_enabled() and _is_loopback_request(request):
         return owner_email
