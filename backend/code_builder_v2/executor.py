@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass
@@ -20,6 +20,8 @@ class CommandExecutor:
 
     def run(self, command: str, timeout_seconds: int) -> CommandResult:
         arguments = split(command)
+        if arguments and arguments[0] == "ls" and __import__("os").name == "nt":
+            arguments = ["cmd", "/c", "dir", "/b", *arguments[1:]]
         completed = subprocess.run(
             arguments,
             cwd=self.repository_root,
@@ -36,3 +38,4 @@ class CommandExecutor:
             stdout=completed.stdout,
             stderr=completed.stderr,
         )
+
