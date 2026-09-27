@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
+from pathlib import Path
 
 from .models import BuildTask, TaskRequest
 from .service import CodeBuilderService, InvalidTaskState, TaskNotFound
@@ -57,3 +59,28 @@ def cancel_task(task_id: str) -> BuildTask:
 @router.post("/tasks/{task_id}/rollback", response_model=BuildTask)
 def rollback_task(task_id: str) -> BuildTask:
     return _task_call(lambda: service().rollback_task(task_id))
+
+
+@router.get("/tasks/{task_id}/preview/{path:path}")
+def preview_file(task_id: str, path: str):
+    """Serve preview files from the task's repository."""
+    svc = service()
+    task = _task_call(lambda: svc.get_task(task_id))
+    
+    if task.status != "completed" or task.execution is None:
+        raise HTTPException(status_code=404, detail="Task not completed or no execution")
+    
+    if svc.repository_root is None:
+        raise HTTPException(status_code=404, detail="Repository not configured")
+    
+    file_path = svc.repository_root / path
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    # Security: ensure path is within repository_root
+    try:
+        file_path.resolve().relative_to(svc.repository_root.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    return FileResponse(file_path)
