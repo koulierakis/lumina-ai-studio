@@ -42,28 +42,28 @@ export class NavigationEngine {
         }
     }
 
-    // Έλεγχος της τρέχουσας θέσης σε σχέση με το επόμενο βήμα στροφής
+    // Advance past a maneuver only after crossing it, allowing guidance at its location.
     updateProgress(currentLat, currentLon) {
-        if (!this.steps || this.steps.length === 0 || this.currentStepIndex >= this.steps.length) {
-            return null;
-        }
-
-        const currentStep = this.steps[this.currentStepIndex];
-        const stepLocation = currentStep.maneuver.location; // [lon, lat]
-        const distanceToStep = this.getDistance(currentLat, currentLon, stepLocation[1], stepLocation[0]);
-
-        // Αν πλησιάσαμε τη στροφή στα 30 μέτρα, πάμε στο επόμενο βήμα
-        if (distanceToStep < 30 && this.currentStepIndex < this.steps.length - 1) {
+        if (!this.steps.length) return null;
+        while (this.currentStepIndex < this.steps.length - 1 &&
+               ['depart', 'notification', 'new name', 'continue'].includes(this.steps[this.currentStepIndex].maneuver.type)) {
             this.currentStepIndex++;
         }
-
-        const next = this.steps[this.currentStepIndex].maneuver.location;
-        const nextDistance = this.getDistance(currentLat, currentLon, next[1], next[0]);
+        const step = this.steps[this.currentStepIndex];
+        const [lon, lat] = step.maneuver.location;
+        const distance = this.getDistance(currentLat, currentLon, lat, lon);
+        // GPS can drift: after the first close approach, move to the following maneuver.
+        if (distance < 24 && this.currentStepIndex < this.steps.length - 1) {
+            this.currentStepIndex++;
+            return this.updateProgress(currentLat, currentLon);
+        }
         return {
-            distanceToNextTurn: Math.round(nextDistance),
-            instruction: this.translateInstruction(this.steps[this.currentStepIndex]),
-            type: this.steps[this.currentStepIndex].maneuver.type,
-            modifier: this.steps[this.currentStepIndex].maneuver.modifier
+            stepIndex: this.currentStepIndex,
+            distanceToNextTurn: Math.round(distance),
+            instruction: this.translateInstruction(step),
+            shouldSpeak: !['depart', 'notification', 'new name', 'continue'].includes(step.maneuver.type),
+            type: step.maneuver.type,
+            modifier: step.maneuver.modifier
         };
     }
 
@@ -71,17 +71,19 @@ export class NavigationEngine {
         const maneuver = step.maneuver;
         const type = maneuver.type;
         const modifier = maneuver.modifier || '';
-        const name = step.name ? `στην ${step.name}` : '';
-
-        if (type === 'depart') return `Ξεκινήστε την πορεία σας ${name}`;
+        const name = step.name ? ` στην οδό ${step.name}` : '';
         if (type === 'arrive') return 'Φτάσατε στον προορισμό σας';
-        if (type === 'turn') {
-            if (modifier.includes('right')) return `Στρίψτε δεξιά ${name}`;
-            if (modifier.includes('left')) return `Στρίψτε αριστερά ${name}`;
+        if (type === 'roundabout' || type === 'rotary' || type === 'roundabout turn') {
+            const exit = Number.isInteger(maneuver.exit) ? ` και πάρτε την ${maneuver.exit}η έξοδο` : '';
+            return `Μπείτε στον κυκλικό κόμβο${exit}${name}`;
         }
-        if (type === 'roundabout') return `Μπείτε στον κυκλικό κόμβο και πάρτε την έξοδο`;
-
-        return `Συνεχίστε ευθεία ${name}`;
+        if (type === 'merge') return `Ενωθείτε με την κυκλοφορία${name}`;
+        if (type === 'fork') return modifier.includes('left') ? `Κρατήστε αριστερά${name}` : `Κρατήστε δεξιά${name}`;
+        if (type === 'on ramp' || type === 'off ramp') return `Πάρτε τη ράμπα${name}`;
+        if (type === 'uturn' || modifier === 'uturn') return `Κάντε αναστροφή${name}`;
+        if (modifier.includes('right')) return `Στρίψτε δεξιά${name}`;
+        if (modifier.includes('left')) return `Στρίψτε αριστερά${name}`;
+        return `Συνεχίστε${name}`;
     }
 
     getDistance(lat1, lon1, lat2, lon2) {
