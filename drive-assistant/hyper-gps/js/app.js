@@ -3,7 +3,7 @@
  */
 
 import { MapEngine } from './map.js';
-import { VoiceAssistant } from './voice.js';
+import { VoiceAssistant } from './voice.js?v=37';
 import { NavigationEngine } from './navigation.js';
 import { PoiService } from './poi.js';
 import { StorageService } from './storage.js';
