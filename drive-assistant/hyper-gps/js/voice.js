@@ -10,6 +10,7 @@ export class VoiceAssistant {
         this.recognition = null;
         this.synthesis = window.speechSynthesis;
         this.isListening = false;
+        this.lastError = null;
 
         this.initRecognition();
     }
@@ -28,6 +29,7 @@ export class VoiceAssistant {
 
         this.recognition.onstart = () => {
             this.isListening = true;
+            this.lastError = null;
             if (this.onStatusChange) this.onStatusChange(true, 'Σε ακούω...');
         };
 
@@ -39,21 +41,33 @@ export class VoiceAssistant {
 
         this.recognition.onerror = (e) => {
             this.isListening = false;
-            if (this.onStatusChange) this.onStatusChange(false, 'Σφάλμα φωνής');
+            this.lastError = e.error === 'not-allowed' || e.error === 'service-not-allowed'
+                ? 'Επίτρεψε το μικρόφωνο στον browser.'
+                : 'Η φωνητική εντολή δεν είναι διαθέσιμη.';
+            if (this.onStatusChange) this.onStatusChange(false, this.lastError);
         };
 
         this.recognition.onend = () => {
             this.isListening = false;
-            if (this.onStatusChange) this.onStatusChange(false, 'Πάτησε για Εντολή');
+            if (this.onStatusChange && !this.lastError) this.onStatusChange(false, 'Πάτησε για Εντολή');
         };
     }
 
     toggleListening() {
-        if (!this.recognition) return;
+        if (!this.recognition) {
+            if (this.onStatusChange) this.onStatusChange(false, 'Η φωνή δεν υποστηρίζεται εδώ. Γράψε προορισμό.');
+            return;
+        }
         if (this.isListening) {
             this.recognition.stop();
         } else {
-            this.recognition.start();
+            this.lastError = null;
+            try {
+                this.recognition.start();
+            } catch (error) {
+                this.lastError = 'Η φωνητική εντολή δεν ξεκίνησε.';
+                if (this.onStatusChange) this.onStatusChange(false, this.lastError);
+            }
         }
     }
 
