@@ -16,6 +16,9 @@ class LuminaGpsApp {
         this.isNavigating = false;
         this.isHudActive = false;
         this.pendingRoute = null;
+        this.wakeLock = null;
+        this.tripMeters = 0;
+        this.lastTripFix = null;
 
         this.initModules();
         this.bindEvents();
@@ -79,6 +82,19 @@ class LuminaGpsApp {
             if (!location) return this.setStatus('Δεν βρέθηκε ο προορισμός. Δοκίμασε πλήρη διεύθυνση.');
             await this.startNavigation(location.lat, location.lon, destination);
         };
+
+        for (const key of ['fuel-consumption', 'fuel-price']) {
+            const input = document.getElementById(key);
+            input.value = localStorage.getItem(`hyper-gps-${key}`) || '';
+            input.oninput = () => {
+                localStorage.setItem(`hyper-gps-${key}`, input.value);
+                this.renderTrip();
+            };
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && this.isNavigating) this.acquireWakeLock();
+        });
+        window.addEventListener('pagehide', () => this.releaseWakeLock());
 
         // HUD Mirror Mode Toggle
         document.getElementById('btn-hud-mode').onclick = () => {
@@ -145,6 +161,7 @@ class LuminaGpsApp {
         this.setStatus('GPS ενεργό · Η διαδρομή χρειάζεται σύνδεση στο διαδίκτυο.');
         this.currentLocation.lat = latitude;
         this.currentLocation.lon = longitude;
+        this.trackTrip(pos);
 
         // Speed σε KM/H (το GPS επιστρέφει m/s)
         const speedKmh = speed ? Math.round(speed * 3.6) : 0;
@@ -263,6 +280,10 @@ class LuminaGpsApp {
 
         if (routeData) {
             this.isNavigating = true;
+            this.tripMeters = 0;
+            this.lastTripFix = null;
+            this.renderTrip();
+            this.acquireWakeLock();
             this.spokenManeuvers.clear();
             this.setStatus('Η διαδρομή είναι έτοιμη. Έλεγξε τις οδικές σημάνσεις.');
             this.mapEngine.drawNeonRoute(routeData.latLngs);
@@ -276,6 +297,56 @@ class LuminaGpsApp {
 
             this.voice.speak(`Ξεκινάει η πλοήγηση προς ${title}. Απόσταση ${routeData.distanceKm} χιλιόμετρα.`);
         } else this.setStatus('Αδυναμία υπολογισμού διαδρομής. Δοκίμασε ξανά αργότερα.');
+    }
+
+    async acquireWakeLock() {
+        if (this.wakeLock || !this.isNavigating || document.hidden) return;
+        if (!navigator.wakeLock?.request) {
+            document.getElementById('wake-lock-status').textContent = 'Η οθόνη ελέγχεται από τη συσκευή';
+            return;
+        }
+        try {
+            const lock = await navigator.wakeLock.request('screen');
+            if (!this.isNavigating || document.hidden) { await lock.release(); return; }
+            this.wakeLock = lock;
+            document.getElementById('wake-lock-status').textContent = 'Οθόνη ενεργή';
+            lock.addEventListener('release', () => {
+                if (this.wakeLock === lock) this.wakeLock = null;
+                document.getElementById('wake-lock-status').textContent = 'Οθόνη: αυτόματη αναστολή';
+            });
+        } catch (_) {
+            document.getElementById('wake-lock-status').textContent = 'Δεν επιτράπηκε η διατήρηση οθόνης';
+        }
+    }
+
+    releaseWakeLock() {
+        const lock = this.wakeLock;
+        this.wakeLock = null;
+        if (lock) lock.release().catch(() => {});
+        document.getElementById('wake-lock-status').textContent = 'Οθόνη: κανονική λειτουργία';
+    }
+
+    trackTrip(pos) {
+        if (!this.isNavigating || pos.coords.accuracy > 80) return;
+        const fix = { lat: pos.coords.latitude, lon: pos.coords.longitude, time: pos.timestamp };
+        const previous = this.lastTripFix;
+        this.lastTripFix = fix;
+        if (!previous) return;
+        const seconds = (fix.time - previous.time) / 1000;
+        const meters = PoiService.distanceMeters(previous.lat, previous.lon, fix.lat, fix.lon);
+        if (seconds > 0 && seconds <= 120 && meters >= 5 && meters <= 500 && meters / seconds <= 55) {
+            this.tripMeters += meters;
+            this.renderTrip();
+        }
+    }
+
+    renderTrip() {
+        document.getElementById('trip-distance').textContent = (this.tripMeters / 1000).toLocaleString('el-GR', { maximumFractionDigits: 1 });
+        const consumption = Number(document.getElementById('fuel-consumption').value);
+        const price = Number(document.getElementById('fuel-price').value);
+        document.getElementById('trip-cost').textContent = consumption > 0 && price > 0
+            ? `${((this.tripMeters / 1000) * consumption / 100 * price).toLocaleString('el-GR', { maximumFractionDigits: 2 })} €`
+            : '—';
     }
 
     updateTurnByTurn(lat, lon) {
@@ -301,6 +372,8 @@ class LuminaGpsApp {
 
     cancelNavigation() {
         this.isNavigating = false;
+        this.releaseWakeLock();
+        this.lastTripFix = null;
         this.pendingRoute = null;
         this.lastSpokenStep = -1;
         this.spokenManeuvers.clear();
