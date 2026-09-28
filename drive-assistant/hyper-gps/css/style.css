@@ -468,3 +468,17 @@ body, html {
 #radar-warning-card { top:225px; }
 .leaflet-control-attribution { font-size:9px!important; }
 @media(max-width:370px) { .digital-speed { font-size:34px; }.voice-core-btn { width:50px;height:50px; }.eta-item { font-size:12px; } }
+
+.destination-suggestions { max-height: 220px; overflow-y: auto; border: 1px solid #357985; border-radius: 8px; margin-top: 5px; background: #101924; }
+.address-suggestion { display: block; width: 100%; text-align: left; color: #fff; background: transparent; border: 0; border-bottom: 1px solid #29444b; padding: 10px; font: inherit; cursor: pointer; }
+.address-suggestion:hover, .address-suggestion.active { background: #164653; }
+.suggestion-empty { padding: 10px; font-size: 13px; }
+.voice-status-text { max-width: 135px; text-align: center; line-height: 1.2; }
+
+.wake-toggle { border: 1px solid #00f3ff; color: #00f3ff; background: #09131b; border-radius: 12px; padding: 3px 7px; font-size: 11px; cursor: pointer; }
+.wake-toggle[aria-pressed="true"] { background: #00f3ff; color: #001014; font-weight: bold; }
+#voice-status { font-size: 10px; max-width: 145px; overflow-wrap: anywhere; }
+
+.voice-select-label { color: #e9fbff; font-size: 11px; display: flex; gap: 4px; align-items: center; }
+#voice-choice { color: #e9fbff; background: #09131b; border: 1px solid #00f3ff; border-radius: 6px; max-width: 95px; font-size: 11px; }
+.voice-availability { font-size: 9px; max-width: 145px; text-align: center; color: #b2d5dc; }
