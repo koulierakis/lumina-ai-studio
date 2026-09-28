@@ -5,7 +5,7 @@
 export const PoiService = {
     // Αναζήτηση κοντινών POIs με βάση τις συντεταγμένες
     async findNearby(lat, lon, category) {
-        const radius = 3000; // 3 χλμ ακτίνα
+        const radius = 10000; // 10 χλμ ακτίνα
         let tag = '';
 
         switch (category) {
@@ -22,7 +22,7 @@ export const PoiService = {
               node[${tag}](around:${radius},${lat},${lon});
               way[${tag}](around:${radius},${lat},${lon});
             );
-            out center 6;
+            out center;
         `;
 
         const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
