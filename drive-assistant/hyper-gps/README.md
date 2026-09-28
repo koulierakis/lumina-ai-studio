@@ -17,3 +17,5 @@ The assistant speaks the nearest POI's mapped name and straight-line distance, t
 Turn guidance announces a maneuver once in the ~350–1100 m range and once within ~120 m, including OSRM roundabout exit numbers when present. Straight segments do not trigger repeated speech. These are approximate GPS-to-maneuver distances, not lane-level guidance. There is no validated camera, speed-limit, road hazard or enforcement feed; the app makes no spoken claims about these.
 
 Nearby POI search scans mapped locations within 10 km and sorts the whole returned set by straight-line distance; no arbitrary first-six cutoff. Availability and completeness still depend on Overpass and OpenStreetMap coverage.
+
+Voice categories now include fuel, pharmacies, hotels, restaurants, cafés, museums, sports centres, gyms, hospitals, clinics/health centres, railway stations, airports and ports. A named location with a city, such as «Τζούλι, βρες μου το Γενικό Νοσοκομείο στην Λάρισα», uses place geocoding rather than the 10 km nearby search, displays the returned place, and asks before routing. The returned map result must be checked because public geocoding may choose an ambiguous place.
