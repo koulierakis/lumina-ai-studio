@@ -16,6 +16,7 @@ export class VoiceAssistant {
         this.followupUntil = 0;
         this.speaking = false;
         this.voicePreference = localStorage.getItem('hyper-gps-voice') || 'female';
+        this.audioContext = null;
         this.lastError = null;
         this.restartTimer = null;
         this.initRecognition();
@@ -95,6 +96,9 @@ export class VoiceAssistant {
         this.lastError = null;
         clearTimeout(this.restartTimer);
         if (this.wakeEnabled) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (AudioContext && !this.audioContext) this.audioContext = new AudioContext();
+            this.audioContext?.resume().catch(() => {});
             if (this.isListening) this.recognition.stop();
             else this.startRecognition();
             this.status('Ακούω μόνο «Τζούλι»', true);
@@ -112,6 +116,7 @@ export class VoiceAssistant {
         let command = normalized;
         if (this.wakeEnabled) {
             if (wake) {
+                this.playWakeTone();
                 command = normalized.slice(wake[0].length).trim();
                 if (!command) {
                     this.armedUntil = Date.now() + 8000;
@@ -187,6 +192,20 @@ export class VoiceAssistant {
             return;
         }
         this.status('Πες, για παράδειγμα, «Τζούλι, δείξε το κοντινότερο βενζινάδικο».');
+    }
+
+    playWakeTone() {
+        const context = this.audioContext;
+        if (!context || context.state !== 'running') return;
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        oscillator.type = 'sine';
+        oscillator.frequency.value = 740;
+        gain.gain.setValueAtTime(0.04, context.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.13);
+        oscillator.connect(gain).connect(context.destination);
+        oscillator.start();
+        oscillator.stop(context.currentTime + 0.14);
     }
 
     expectFollowup(ms = 12000) {

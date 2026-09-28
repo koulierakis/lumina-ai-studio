@@ -486,3 +486,11 @@ body, html {
 .place-results { max-height: 165px; overflow-y: auto; display: grid; gap: 3px; margin-top: 5px; }
 .place-results.hidden { display: none; }
 .place-results button { text-align: left; background: #09131b; border: 1px solid #266d76; border-radius: 6px; color: #e9fbff; padding: 7px; cursor: pointer; font-size: 11px; }
+
+.trip-panel { position:absolute;left:12px;bottom:calc(115px + env(safe-area-inset-bottom));border-radius:10px;padding:7px 10px;font-size:11px;z-index:12;max-width:calc(100vw - 95px); }
+.trip-panel strong { color:#00f3ff; }
+.trip-panel small { color:#c0d4d9;display:block; }
+.trip-panel summary { cursor:pointer;color:#ffb700; }
+.trip-panel details[open] { padding-top:5px; }
+.trip-panel label { display:flex;align-items:center;justify-content:space-between;gap:6px;margin:4px 0; }
+.trip-panel input { width:72px;background:#101924;border:1px solid #43818a;color:#fff;border-radius:4px;padding:4px;user-select:text; }
