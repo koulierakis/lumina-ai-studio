@@ -59,24 +59,26 @@ export const PoiService = {
         return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     },
 
-    // Αναζήτηση τοποθεσίας με κείμενο (Geocoding)
-    async geocodeLocation(query) {
-        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+    // One-shot free-text place search; includes brands/professions outside predefined categories.
+    async searchPlaces(query) {
+        const search = query.replace(/\s+(?:στην|στον|στη|στο)\s+/i, ', ');
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(search)}&limit=5&addressdetails=1`;
         try {
             const res = await fetch(url, { headers: { 'Accept-Language': 'el, en' } });
+            if (!res.ok) throw new Error(`Geocoder ${res.status}`);
             const data = await res.json();
-            if (data && data.length > 0) {
-                return {
-                    name: data[0].display_name,
-                    lat: parseFloat(data[0].lat),
-                    lon: parseFloat(data[0].lon)
-                };
-            }
-            return null;
-        } catch (e) {
-            console.error('Geocoding error:', e);
-            return null;
+            return (data || []).map(item => ({
+                name: item.display_name,
+                lat: parseFloat(item.lat), lon: parseFloat(item.lon)
+            })).filter(place => Number.isFinite(place.lat) && Number.isFinite(place.lon));
+        } catch (error) {
+            console.error('Geocoding error:', error);
+            return [];
         }
+    },
+
+    async geocodeLocation(query) {
+        return (await this.searchPlaces(query))[0] || null;
     },
 
     getDefaultName(category) {

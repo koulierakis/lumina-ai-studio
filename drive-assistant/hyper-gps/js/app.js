@@ -189,12 +189,14 @@ class LuminaGpsApp {
         this.pendingRoute = null;
         if (cmd.type === 'SEARCH_PLACE') {
             this.setStatus('Αναζήτηση συγκεκριμένου σημείου…');
-            const loc = await PoiService.geocodeLocation(cmd.destination);
+            const places = await PoiService.searchPlaces(cmd.destination);
+            const loc = places[0];
+            this.showPlaceResults(places);
             if (loc) {
-                this.mapEngine.renderPOIs([{ ...loc, name: loc.name || cmd.destination }], poi => this.startNavigation(poi.lat, poi.lon, poi.name));
+                this.mapEngine.renderPOIs(places, poi => this.startNavigation(poi.lat, poi.lon, poi.name));
                 this.pendingRoute = { ...loc, name: loc.name || cmd.destination, expiresAt: Date.now() + 25000 };
-                this.setStatus(`Βρέθηκε: ${loc.name}. Έλεγξε ότι είναι το σωστό σημείο.`);
-                this.voice.speak(`Βρήκα ${loc.name}. Να ξεκινήσω τη διαδρομή;`, { followup: true });
+                this.setStatus(`Βρέθηκαν ${places.length} αποτελέσματα. Διάλεξε το σωστό σημείο από τη λίστα.`);
+                this.voice.speak(places.length > 1 ? `Βρήκα ${places.length} αποτελέσματα. Διάλεξε το σωστό σημείο από τη λίστα.` : `Βρήκα ${loc.name}. Να ξεκινήσω τη διαδρομή;`, { followup: places.length === 1 });
             } else {
                 this.setStatus('Δεν βρέθηκε το συγκεκριμένο σημείο. Πρόσθεσε πόλη ή πλήρη ονομασία.');
                 this.voice.speak('Δεν βρήκα το συγκεκριμένο σημείο. Δώσε πληρέστερη ονομασία ή πόλη.');
@@ -229,6 +231,23 @@ class LuminaGpsApp {
         } else if (cmd.type === 'CANCEL_NAV') {
             this.cancelNavigation();
         }
+    }
+
+    showPlaceResults(places) {
+        const list = document.getElementById('place-results');
+        list.replaceChildren();
+        for (const place of places) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = place.name;
+            button.onclick = () => {
+                this.pendingRoute = null;
+                list.replaceChildren();
+                this.startNavigation(place.lat, place.lon, place.name);
+            };
+            list.append(button);
+        }
+        list.classList.toggle('hidden', places.length === 0);
     }
 
     async startNavigation(destLat, destLon, title = 'Προορισμός') {

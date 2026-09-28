@@ -482,3 +482,7 @@ body, html {
 .voice-select-label { color: #e9fbff; font-size: 11px; display: flex; gap: 4px; align-items: center; }
 #voice-choice { color: #e9fbff; background: #09131b; border: 1px solid #00f3ff; border-radius: 6px; max-width: 95px; font-size: 11px; }
 .voice-availability { font-size: 9px; max-width: 145px; text-align: center; color: #b2d5dc; }
+
+.place-results { max-height: 165px; overflow-y: auto; display: grid; gap: 3px; margin-top: 5px; }
+.place-results.hidden { display: none; }
+.place-results button { text-align: left; background: #09131b; border: 1px solid #266d76; border-radius: 6px; color: #e9fbff; padding: 7px; cursor: pointer; font-size: 11px; }
