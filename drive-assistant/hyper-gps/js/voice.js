@@ -172,6 +172,12 @@ export class VoiceAssistant {
             this.onCommandRecognized({ type: 'POI', category, navigate });
             return;
         }
+        if (/^(?:(?:πες μου|μπορεις να)\s+)?(?:που ειναι|βρες μου|δειξε μου|βρες|δειξε|θελω να δω)\s+/.test(command)) {
+            const destination = command.replace(/^(?:(?:πες μου|μπορεις να)\s+)?(?:που ειναι|βρες μου|δειξε μου|βρες|δειξε|θελω να δω)\s+/, '')
+                .replace(/^(?:τα|το|την|τον|τη|ο|η)\s+/, '').trim();
+            if (destination) this.onCommandRecognized({ type: 'SEARCH_PLACE', destination });
+            return;
+        }
         if (/(παω|πηγαιν|οδηγησ|διαδρομη προς|navigate to)/.test(command)) {
             const destination = command.replace(/^(θελω να |μπορεις να |σε παρακαλω )*/, '')
                 .replace(/^(παω|πηγαινε με|πηγαινε|οδηγησε με|διαδρομη προς|navigate to)\s*/, '')
