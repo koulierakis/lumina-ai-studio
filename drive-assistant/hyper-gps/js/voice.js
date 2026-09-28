@@ -19,6 +19,7 @@ export class VoiceAssistant {
         this.audioContext = null;
         this.lastError = null;
         this.restartTimer = null;
+        this.retryCount = 0;
         this.initRecognition();
         document.addEventListener('visibilitychange', () => {
             if (document.hidden && this.isListening) this.recognition?.stop();
@@ -39,6 +40,7 @@ export class VoiceAssistant {
         this.recognition.onstart = () => {
             this.isListening = true;
             this.lastError = null;
+            this.retryCount = 0;
             this.status(this.wakeEnabled ? 'Ακούω μόνο «Τζούλι»' : 'Σε ακούω...', true);
         };
         this.recognition.onresult = event => {
@@ -50,10 +52,12 @@ export class VoiceAssistant {
         };
         this.recognition.onerror = event => {
             this.isListening = false;
-            if (event.error === 'no-speech' && this.wakeEnabled) return;
+            if (event.error === 'no-speech' || event.error === 'aborted') return;
             const denied = event.error === 'not-allowed' || event.error === 'service-not-allowed';
             if (denied) this.wakeEnabled = false;
-            this.lastError = denied ? 'Επίτρεψε το μικρόφωνο στον browser.' : 'Η φωνητική εντολή δεν είναι διαθέσιμη.';
+            this.lastError = denied ? 'Επίτρεψε το μικρόφωνο στις ρυθμίσεις του Chrome.'
+                : event.error === 'network' ? 'Η αναγνώριση φωνής χρειάζεται σύνδεση δικτύου.'
+                : `Σφάλμα μικροφώνου (${event.error}). Πάτησε ξανά.`;
             this.status(this.lastError);
         };
         this.recognition.onend = () => {
@@ -70,9 +74,14 @@ export class VoiceAssistant {
         this.recognition.continuous = this.wakeEnabled;
         try { this.recognition.start(); }
         catch (error) {
-            this.wakeEnabled = false;
-            this.lastError = 'Η ακρόαση δεν ξεκίνησε. Πάτησε ξανά.';
-            this.status(this.lastError);
+            if (error.name === 'InvalidStateError' && this.retryCount++ < 4 && this.wakeEnabled) {
+                clearTimeout(this.restartTimer);
+                this.restartTimer = setTimeout(() => this.startRecognition(), 750);
+            } else {
+                this.wakeEnabled = false;
+                this.lastError = 'Η ακρόαση δεν ξεκίνησε. Πάτησε ξανά.';
+                this.status(this.lastError);
+            }
         }
     }
 
@@ -112,7 +121,7 @@ export class VoiceAssistant {
     handleTranscript(raw) {
         const text = String(raw || '').trim();
         const normalized = text.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-        const wake = normalized.match(/^(?:ε[ι]?\s+)?(?:τζουλ[ιη]|julie|juli)(?:[\s,.:;!?]+|$)/);
+        const wake = normalized.match(/^(?:ε[ι]?\s+)?(?:τζουλ[ιη]|ζουλ[ιη]|julie|juli)(?:[\s,.:;!?]+|$)/);
         let command = normalized;
         if (this.wakeEnabled) {
             if (wake) {
