@@ -89,3 +89,40 @@ def test_service_executes_autonomous_task_and_records_attempts(tmp_path: Path):
     assert completed.execution.autonomous is True
     assert completed.execution.attempts == 2
     assert completed.execution.backup_id == "verified-backup"
+
+
+def test_autonomous_factory_accepts_progress_persist(tmp_path: Path):
+    """
+    Regression test for: <lambda>() got an unexpected keyword argument 'progress_persist'
+    
+    This test ensures that the autonomous_factory callback accepts the progress_persist
+    keyword argument. The production code in server.py uses a lambda that must accept
+    this parameter when called from CodeBuilderService.execute_task().
+    """
+    from code_builder_v2.service import CodeBuilderService
+    
+    # This lambda mimics the OLD server.py lambda that only accepts `task`
+    # This should fail with TypeError: <lambda>() got an unexpected keyword argument 'progress_persist'
+    old_style_factory = lambda task: FakeAutonomousLoop()
+    
+    service = CodeBuilderService(
+        planner=FakePlanner(),
+        pipeline=PipelinePlaceholder(),
+        autonomous_factory=old_style_factory,
+        repository_root=tmp_path,
+    )
+    task = service.create_task(
+        TaskRequest(
+            prompt="Create an autonomous example",
+            autonomous=True,
+            max_attempts=3,
+        )
+    )
+
+    # This should raise TypeError because the factory doesn't accept progress_persist
+    # The exception is caught in execute_task and stored in task.error
+    completed = service.execute_task(task.id)
+    
+    # The task should fail with the TypeError message
+    assert completed.status is TaskStatus.failed
+    assert "unexpected keyword argument 'progress_persist'" in completed.error

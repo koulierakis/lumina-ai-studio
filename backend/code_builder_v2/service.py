@@ -25,7 +25,7 @@ class CodeBuilderService:
     planner: Planner
     store: JsonTaskStore | None = None
     pipeline: ExecutionPipeline | None = None
-    autonomous_factory: Callable[[BuildTask], AutonomousBuildLoop] | None = None
+    autonomous_factory: Callable[[BuildTask, Callable[[], None] | None], AutonomousBuildLoop] | None = None
     repository_root: Path | None = None
     _tasks: dict[str, BuildTask] = field(default_factory=dict)
     _lock: RLock = field(default_factory=RLock)

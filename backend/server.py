@@ -468,10 +468,11 @@ code_builder_v2_service = CodeBuilderService(
     OllamaPlanner(code_builder_v2_client),
     store=JsonTaskStore(CODE_BUILDER_V2_RUNTIME_ROOT / "tasks.json"),
     pipeline=code_builder_v2_pipeline,
-    autonomous_factory=lambda task: create_autonomous_loop(
+    autonomous_factory=lambda task, progress_persist=None: create_autonomous_loop(
         task,
         client=code_builder_v2_client,
         runtime_root=CODE_BUILDER_V2_RUNTIME_ROOT,
+        progress_persist=progress_persist,
     ),
     repository_root=CODE_BUILDER_REPOSITORY_ROOT,
 )
