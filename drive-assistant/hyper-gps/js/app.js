@@ -7,6 +7,7 @@ import { VoiceAssistant } from './voice.js';
 import { NavigationEngine } from './navigation.js';
 import { PoiService } from './poi.js';
 import { StorageService } from './storage.js';
+import { createAddressAutocomplete } from './autocomplete.js';
 
 class LuminaGpsApp {
     constructor() {
@@ -14,6 +15,7 @@ class LuminaGpsApp {
         this.speedLimit = null;
         this.isNavigating = false;
         this.isHudActive = false;
+        this.pendingRoute = null;
 
         this.initModules();
         this.bindEvents();
@@ -32,6 +34,13 @@ class LuminaGpsApp {
         );
 
         this.renderFavoritesModal();
+        this.autocomplete = createAddressAutocomplete(
+            document.getElementById('destination-input'),
+            document.getElementById('destination-suggestions'),
+            { onSelect: place => { this.selectedDestination = place; },
+              onStatus: message => this.setStatus(message),
+              getLocation: () => this.hasPosition ? this.currentLocation : null }
+        );
     }
 
     bindEvents() {
@@ -40,13 +49,32 @@ class LuminaGpsApp {
             this.voice.toggleListening();
         };
 
+        document.getElementById('btn-wake-mode').onclick = () => {
+            const enabled = this.voice.toggleWakeMode();
+            document.getElementById('btn-wake-mode').setAttribute('aria-pressed', String(enabled));
+            document.getElementById('btn-wake-mode').textContent = enabled ? 'Τζούλι ON' : 'Τζούλι OFF';
+        };
+
+        const voiceChoice = document.getElementById('voice-choice');
+        voiceChoice.value = this.voice.voicePreference;
+        voiceChoice.onchange = () => this.voice.setVoicePreference(voiceChoice.value);
+        const refreshVoices = () => {
+            const voices = this.voice.availableGreekVoices();
+            const male = voices.some(v => /nestoras|male|ανδρ/i.test(v.name));
+            const female = voices.some(v => /athina|female|γυναικ/i.test(v.name));
+            document.getElementById('voice-availability').textContent = male && female ? 'Δύο ελληνικές φωνές διαθέσιμες' : voices.length ? 'Οι φωνές εξαρτώνται από τη συσκευή' : 'Δεν βρέθηκε ελληνική φωνή στη συσκευή';
+        };
+        refreshVoices();
+        if (this.voice.synthesis) this.voice.synthesis.addEventListener?.('voiceschanged', refreshVoices);
+
         document.getElementById('destination-form').onsubmit = async (event) => {
             event.preventDefault();
             const destination = document.getElementById('destination-input').value.trim();
             if (!this.hasPosition) return this.setStatus('Ενεργοποίησε την τοποθεσία πριν ζητήσεις διαδρομή.');
             if (!destination) return;
+            this.autocomplete.hide();
             this.setStatus('Αναζήτηση προορισμού…');
-            const location = await PoiService.geocodeLocation(destination);
+            const location = this.selectedDestination || await PoiService.geocodeLocation(destination);
             if (!location) return this.setStatus('Δεν βρέθηκε ο προορισμός. Δοκίμασε πλήρη διεύθυνση.');
             await this.startNavigation(location.lat, location.lon, destination);
         };
@@ -146,6 +174,18 @@ class LuminaGpsApp {
 
     // Φωνητικές Εντολές Router
     async handleVoiceCommand(cmd) {
+        if (cmd.type === 'CONFIRM_ROUTE' || cmd.type === 'DECLINE_ROUTE') {
+            const pending = this.pendingRoute;
+            this.pendingRoute = null;
+            if (!pending || Date.now() > pending.expiresAt) {
+                this.voice.speak('Δεν υπάρχει διαδρομή προς επιβεβαίωση.');
+                return;
+            }
+            if (cmd.type === 'CONFIRM_ROUTE') await this.startNavigation(pending.lat, pending.lon, pending.name);
+            else this.voice.speak('Εντάξει, δεν ξεκινώ διαδρομή.');
+            return;
+        }
+        this.pendingRoute = null;
         if (cmd.type === 'NAVIGATE') {
             const loc = await PoiService.geocodeLocation(cmd.destination);
             if (loc) {
@@ -154,12 +194,24 @@ class LuminaGpsApp {
                 this.setStatus('Δεν βρέθηκε ο προορισμός.');
             }
         } else if (cmd.type === 'POI') {
+            if (!this.hasPosition) {
+                this.setStatus('Χρειάζεται άδεια τοποθεσίας για κοντινά σημεία.');
+                this.voice.speak('Ενεργοποίησε την τοποθεσία για να βρω το κοντινότερο σημείο.');
+                return;
+            }
+            this.setStatus('Αναζήτηση κοντινών σημείων…');
             const pois = await PoiService.findNearby(this.currentLocation.lat, this.currentLocation.lon, cmd.category);
-            if (pois.length > 0) {
-                this.mapEngine.renderPOIs(pois, (poi) => this.startNavigation(poi.lat, poi.lon, poi.name));
-                this.voice.speak(`Βρέθηκαν ${pois.length} σημεία κοντά σας`);
+            if (pois.length) {
+                const nearest = pois[0];
+                const distance = Math.round(PoiService.distanceMeters(this.currentLocation.lat, this.currentLocation.lon, nearest.lat, nearest.lon));
+                this.mapEngine.renderPOIs(pois, poi => this.startNavigation(poi.lat, poi.lon, poi.name));
+                this.setStatus(`Κοντινότερο: ${nearest.name}, ${distance} μ. Πάτησε Πλοήγηση εδώ.`);
+                this.pendingRoute = { ...nearest, expiresAt: Date.now() + 25000 };
+                const distanceText = distance >= 1000 ? `${(distance / 1000).toLocaleString('el-GR', { maximumFractionDigits: 1 })} χιλιόμετρα` : `${distance} μέτρα`;
+                this.voice.speak(`Το κοντινότερο είναι ${nearest.name}, σε ${distanceText}. Να ξεκινήσω τη διαδρομή;`, { followup: true });
             } else {
-                this.voice.speak('Δεν βρέθηκαν σχετικά σημεία');
+                this.setStatus('Δεν βρέθηκαν κοντινά σημεία ή δεν απάντησε η υπηρεσία.');
+                this.voice.speak('Δεν βρήκα κοντινό σημείο αυτή τη στιγμή.');
             }
         } else if (cmd.type === 'CANCEL_NAV') {
             this.cancelNavigation();
@@ -208,6 +260,7 @@ class LuminaGpsApp {
 
     cancelNavigation() {
         this.isNavigating = false;
+        this.pendingRoute = null;
         this.lastSpokenStep = -1;
         this.mapEngine.clearRoute();
         document.getElementById('nav-banner').classList.add('nav-hidden');

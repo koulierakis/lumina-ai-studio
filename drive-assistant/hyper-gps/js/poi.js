@@ -29,19 +29,29 @@ export const PoiService = {
 
         try {
             const response = await fetch(url);
+            if (!response.ok) throw new Error(`Overpass ${response.status}`);
             const data = await response.json();
 
-            return data.elements.map(el => ({
+            return (data.elements || []).map(el => ({
                 id: el.id,
                 name: (el.tags?.name) || this.getDefaultName(category),
                 lat: el.lat ?? el.center?.lat,
                 lon: el.lon ?? el.center?.lon,
                 category: category
-            }));
+            })).filter(poi => Number.isFinite(poi.lat) && Number.isFinite(poi.lon))
+                .sort((a, b) => this.distanceMeters(lat, lon, a.lat, a.lon) - this.distanceMeters(lat, lon, b.lat, b.lon));
         } catch (error) {
             console.error('POI Fetch error:', error);
             return [];
         }
+    },
+
+    distanceMeters(lat1, lon1, lat2, lon2) {
+        const rad = Math.PI / 180;
+        const dLat = (lat2 - lat1) * rad;
+        const dLon = (lon2 - lon1) * rad;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+        return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     },
 
     // Αναζήτηση τοποθεσίας με κείμενο (Geocoding)

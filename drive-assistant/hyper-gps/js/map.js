@@ -96,37 +96,28 @@ export class MapEngine {
 
     renderPOIs(pois, onSelectPOI) {
         this.poiLayerGroup.clearLayers();
-
-        pois.forEach(poi => {
-            const iconHtml = `
-                <div style="
-                    background: #ffb700; color: #000;
-                    width: 32px; height: 32px;
-                    border-radius: 50%;
-                    display:flex; justify-content:center; align-items:center;
-                    box-shadow: 0 0 15px #ffb700; font-weight:bold; font-size:14px;">
-                    <i class="fa-solid fa-location-dot"></i>
-                </div>
-            `;
-            const icon = L.divIcon({ html: iconHtml, className: 'poi-icon', iconSize: [32, 32] });
-            const marker = L.marker([poi.lat, poi.lon], { icon }).addTo(this.poiLayerGroup);
-
-            marker.bindPopup(`
-                <div style="font-family: 'Rajdhani', sans-serif; color: #000;">
-                    <b>Σημείο ενδιαφέροντος</b><br>
-                    <button id="poi-nav-${poi.id}" style="
-                        margin-top: 5px; background: #000; color: #00f3ff;
-                        border: none; padding: 4px 8px; border-radius: 4px; font-weight: bold; cursor: pointer;">
-                        Πλοήγηση εδώ
-                    </button>
-                </div>
-            `);
-
-            marker.on('popupopen', () => {
-                document.getElementById(`poi-nav-${poi.id}`).onclick = () => {
-                    onSelectPOI(poi);
-                };
+        let nearestMarker = null;
+        pois.slice(0, 12).forEach((poi, index) => {
+            const icon = L.divIcon({
+                html: '<span style="display:grid;place-items:center;background:#ffb700;color:#000;width:32px;height:32px;border-radius:50%;font-weight:bold">⌖</span>',
+                className: 'poi-icon', iconSize: [32, 32]
             });
+            const marker = L.marker([poi.lat, poi.lon], { icon }).addTo(this.poiLayerGroup);
+            const popup = document.createElement('div');
+            const title = document.createElement('strong');
+            title.textContent = poi.name;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = 'Πλοήγηση εδώ';
+            button.style.cssText = 'display:block;margin-top:8px;padding:6px;background:#111;color:#00f3ff;border:0;border-radius:4px';
+            button.addEventListener('click', () => onSelectPOI(poi));
+            popup.append(title, button);
+            marker.bindPopup(popup);
+            if (index === 0) nearestMarker = marker;
         });
+        if (nearestMarker) {
+            this.map.setView(nearestMarker.getLatLng(), Math.max(this.map.getZoom(), 16));
+            nearestMarker.openPopup();
+        }
     }
 }
