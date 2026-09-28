@@ -30,6 +30,20 @@ def test_ollama_planner_parses_structured_plan():
     assert plan.changes[0].path == "a.py"
 
 
+def test_planner_requests_executable_validation_commands_only():
+    class CapturingClient:
+        prompt = ""
+
+        def generate_json(self, prompt, model=None):
+            self.prompt = prompt
+            return {"summary": "x", "changes": [], "validation_commands": []}
+
+    client = CapturingClient()
+    OllamaPlanner(client).create_plan(TaskRequest(prompt="Create index.html"))
+    assert 'Never put manual instructions such as "Open index.html in a browser"' in client.prompt
+    assert "return an empty list" in client.prompt
+
+
 def test_ollama_generator_returns_full_file_changes():
     client = FakeClient([{"changes":[{"path":"a.py","operation":"create","content":"x = 1\n"}]}])
     planner = OllamaPlanner(FakeClient([{"summary":"x","changes":[{"path":"a.py","operation":"create","reason":"needed"}],"validation_commands":[]}]))
