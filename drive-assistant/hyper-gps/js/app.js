@@ -26,6 +26,7 @@ class LuminaGpsApp {
         this.mapEngine = new MapEngine('map');
         this.hasPosition = false;
         this.lastSpokenStep = -1;
+        this.spokenManeuvers = new Set();
         this.navEngine = new NavigationEngine();
 
         this.voice = new VoiceAssistant(
@@ -230,6 +231,7 @@ class LuminaGpsApp {
 
         if (routeData) {
             this.isNavigating = true;
+            this.spokenManeuvers.clear();
             this.setStatus('Η διαδρομή είναι έτοιμη. Έλεγξε τις οδικές σημάνσεις.');
             this.mapEngine.drawNeonRoute(routeData.latLngs);
 
@@ -250,10 +252,17 @@ class LuminaGpsApp {
             document.getElementById('turn-distance').textContent = `${progress.distanceToNextTurn} m`;
             document.getElementById('turn-instruction').textContent = progress.instruction;
 
-            // Εκφώνηση όταν η στροφή είναι στα 150μ
-            if (progress.distanceToNextTurn <= 150 && progress.distanceToNextTurn >= 30 && this.lastSpokenStep !== this.navEngine.currentStepIndex) {
-                this.lastSpokenStep = this.navEngine.currentStepIndex;
-                this.voice.speak(`Σε ${progress.distanceToNextTurn} μέτρα ${progress.instruction}`);
+            // One advance notice and one near-maneuver reminder; no repeated straight-ahead speech.
+            if (progress.shouldSpeak) {
+                const distance = progress.distanceToNextTurn;
+                const band = distance <= 120 ? 'near' : distance <= 1100 && distance >= 350 ? 'advance' : null;
+                const key = `${progress.stepIndex}:${band}`;
+                if (band && !this.spokenManeuvers.has(key)) {
+                    this.spokenManeuvers.add(key);
+                    const prefix = progress.type === 'arrive' ? '' :
+                        distance > 1000 ? 'Σε περίπου ένα χιλιόμετρο, ' : `Σε ${Math.max(10, Math.round(distance / 10) * 10)} μέτρα, `;
+                    this.voice.speak(`${prefix}${progress.instruction}`);
+                }
             }
         }
     }
@@ -262,6 +271,7 @@ class LuminaGpsApp {
         this.isNavigating = false;
         this.pendingRoute = null;
         this.lastSpokenStep = -1;
+        this.spokenManeuvers.clear();
         this.mapEngine.clearRoute();
         document.getElementById('nav-banner').classList.add('nav-hidden');
         document.getElementById('route-eta').textContent = '--:--';
