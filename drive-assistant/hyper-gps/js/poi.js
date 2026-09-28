@@ -1,0 +1,76 @@
+/**
+ * poi.js - Smart Points of Interest (POI) Finder
+ */
+
+export const PoiService = {
+    // Αναζήτηση κοντινών POIs με βάση τις συντεταγμένες
+    async findNearby(lat, lon, category) {
+        const radius = 3000; // 3 χλμ ακτίνα
+        let tag = '';
+
+        switch (category) {
+            case 'fuel': tag = 'amenity=fuel'; break;
+            case 'pharmacy': tag = 'amenity=pharmacy'; break;
+            case 'hotel': tag = 'tourism=hotel'; break;
+            case 'restaurant': tag = 'amenity=restaurant'; break;
+            default: tag = 'amenity=fuel';
+        }
+
+        const overpassQuery = `
+            [out:json];
+            (
+              node[${tag}](around:${radius},${lat},${lon});
+              way[${tag}](around:${radius},${lat},${lon});
+            );
+            out center 6;
+        `;
+
+        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
+
+        try {
+            const response = await fetch(url);
+            const data = await response.json();
+
+            return data.elements.map(el => ({
+                id: el.id,
+                name: (el.tags?.name) || this.getDefaultName(category),
+                lat: el.lat ?? el.center?.lat,
+                lon: el.lon ?? el.center?.lon,
+                category: category
+            }));
+        } catch (error) {
+            console.error('POI Fetch error:', error);
+            return [];
+        }
+    },
+
+    // Αναζήτηση τοποθεσίας με κείμενο (Geocoding)
+    async geocodeLocation(query) {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`;
+        try {
+            const res = await fetch(url, { headers: { 'Accept-Language': 'el, en' } });
+            const data = await res.json();
+            if (data && data.length > 0) {
+                return {
+                    name: data[0].display_name,
+                    lat: parseFloat(data[0].lat),
+                    lon: parseFloat(data[0].lon)
+                };
+            }
+            return null;
+        } catch (e) {
+            console.error('Geocoding error:', e);
+            return null;
+        }
+    },
+
+    getDefaultName(category) {
+        const names = {
+            fuel: 'Πρατήριο Καυσίμων',
+            pharmacy: 'Φαρμακείο',
+            hotel: 'Ξενοδοχείο',
+            restaurant: 'Εστιατόριο'
+        };
+        return names[category] || 'Σημείο Ενδιαφέροντος';
+    }
+};
