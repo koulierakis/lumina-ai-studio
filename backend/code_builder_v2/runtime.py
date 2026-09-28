@@ -71,6 +71,7 @@ class WorkspaceAttemptRunner:
     generator: ChangeGenerator
     plan: ChangePlan
     request: TaskRequest
+    generation_progress: GenerationProgress | None = None
     _changed_paths: set[str] = field(default_factory=set)
 
     def run_attempt(
@@ -97,7 +98,7 @@ class WorkspaceAttemptRunner:
                 f"stderr={previous_evidence.stderr[-8000:]}"
             )
         request = self.request.model_copy(update={"prompt": prompt})
-        proposed = self.generator.generate(request, effective_plan, context)
+        proposed = self.generator.generate(request, effective_plan, context, self.generation_progress)
 
         backup = BackupService(workspace_root, workspace_root.parent / "attempt-backups")
         applier = AtomicChangeApplier(repository, backup)

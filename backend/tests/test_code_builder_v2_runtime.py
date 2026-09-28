@@ -9,7 +9,7 @@ class RepairingGenerator:
     def __init__(self):
         self.calls = 0
 
-    def generate(self, request, plan, file_context):
+    def generate(self, request, plan, file_context, progress=None):
         self.calls += 1
         operation = plan.changes[0].operation
         value = 1 if self.calls == 1 else 2

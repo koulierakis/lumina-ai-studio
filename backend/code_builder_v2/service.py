@@ -86,7 +86,7 @@ class CodeBuilderService:
             if task.request.autonomous:
                 if self.autonomous_factory is None or self.repository_root is None:
                     raise InvalidTaskState("Autonomous execution is not configured")
-                autonomous = self.autonomous_factory(task)
+                autonomous = self.autonomous_factory(task, progress_persist=lambda: self._persist())
                 autonomous_result = autonomous.execute(
                     repository_root=self.repository_root,
                     instruction=task.request.prompt,

@@ -10,7 +10,7 @@ import hashlib
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from .workspace import DisposableWorkspaceService
 
@@ -124,6 +124,7 @@ class AutonomousBuildLoop:
     publisher: VerifiedChangePublisher | None = None
     max_attempts: int = 3
     max_repeated_failure_fingerprints: int = 2
+    progress_persist: Callable[[], None] | None = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.max_attempts <= 10:
@@ -165,6 +166,10 @@ class AutonomousBuildLoop:
                     previous_evidence=previous_evidence,
                 )
                 changed_paths.update(result.changed_paths)
+
+                # Persist generation progress after each attempt
+                if self.progress_persist:
+                    self.progress_persist()
 
                 if result.successful:
                     backup_id: str | None = None

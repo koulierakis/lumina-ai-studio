@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Literal
@@ -29,7 +30,12 @@ class GenerationProgress(BaseModel):
 
     def mark_batch_completed(self, changes: list) -> None:
         for change in changes:
-            self.completed_files[change.path] = change.model_dump()
+            if hasattr(change, 'model_dump'):
+                self.completed_files[change.path] = change.model_dump()
+            elif is_dataclass(change):
+                self.completed_files[change.path] = asdict(change)
+            else:
+                self.completed_files[change.path] = change.__dict__
         self.current_file_index += len(changes)
 
     def mark_failed(self, path: str) -> None:
@@ -65,6 +71,7 @@ class TaskRequest(BaseModel):
     autonomous: bool = False
     max_attempts: int = Field(default=3, ge=1, le=10)
     timeout_seconds: int = Field(default=300, ge=30, le=3600)
+    batch_size: int = Field(default=1, ge=1, le=10)
 
 
 class PlannedChange(BaseModel):

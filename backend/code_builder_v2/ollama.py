@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .applier import ProposedFileChange
-from .models import ChangePlan, TaskRequest
+from .models import ChangePlan, TaskRequest, GenerationProgress
 from .planner import PlannerUnavailable
 
 log = logging.getLogger(__name__)
@@ -30,33 +30,6 @@ class RateLimitError(OllamaError):
         self.retry_after = retry_after
         self.provider = provider
         self.model = model
-
-
-@dataclass(slots=True)
-class GenerationProgress:
-    """Track incremental generation progress for resumability."""
-    completed_files: dict[str, ProposedFileChange] = field(default_factory=dict)
-    failed_file: str | None = None
-    total_files: int = 0
-    current_file_index: int = 0
-    
-    def is_complete(self) -> bool:
-        return self.current_file_index >= self.total_files
-    
-    def get_next_file(self, planned_changes: list[Any]) -> Any | None:
-        if self.current_file_index < len(planned_changes):
-            return planned_changes[self.current_file_index]
-        return None
-    
-    def mark_completed(self, change: ProposedFileChange) -> None:
-        self.completed_files[change.path] = change
-        self.current_file_index += 1
-    
-    def mark_failed(self, path: str) -> None:
-        self.failed_file = path
-    
-    def get_completed_changes(self) -> list[ProposedFileChange]:
-        return list(self.completed_files.values())
 
 
 def _extract_json_object(raw: str) -> dict[str, Any]:
@@ -461,13 +434,15 @@ class OllamaClient:
                     f"Local Ollama structured output validation failed after {max_retries + 1} attempts: {exc}"
                 ) from exc
 
-    def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None, progress: GenerationProgress | None = None) -> dict[str, Any]:
         """Generate JSON with automatic provider fallback on failure.
 
         Provider priority for production: Groq -> HuggingFace
         Local Ollama is ONLY included when explicitly configured via OLLAMA_BASE_URL
         pointing to a non-localhost endpoint (for production Ollama) or when
         LUMINA_USE_LOCAL_OLLAMA=true (for local development).
+        
+        If progress is provided, skip providers that have been rate-limited.
         """
         providers = []
         
@@ -499,6 +474,11 @@ class OllamaClient:
         last_error: Exception | None = None
         
         for provider_name, provider_fn in providers:
+            # Skip rate-limited providers if progress tracking is enabled
+            if progress and progress.is_provider_rate_limited(provider_name):
+                log.info("Skipping rate-limited provider: %s", provider_name)
+                continue
+            
             try:
                 log.info("Attempting JSON generation with provider: %s", provider_name)
                 result = provider_fn(prompt, model)
@@ -509,6 +489,16 @@ class OllamaClient:
                     "Provider %s JSON recovery exhausted, falling back: %s",
                     provider_name, exc
                 )
+                last_error = exc
+                continue
+            except RateLimitError as exc:
+                log.warning(
+                    "Provider %s rate limited, falling back: %s",
+                    provider_name, exc
+                )
+                # Track rate-limited provider for future calls
+                if progress:
+                    progress.add_rate_limited_provider(provider_name)
                 last_error = exc
                 continue
             except OllamaError as exc:
@@ -559,6 +549,7 @@ class OllamaChangeGenerator:
         request: TaskRequest,
         plan: ChangePlan,
         file_context: dict[str, str],
+        progress: GenerationProgress | None = None,
     ) -> list[ProposedFileChange]:
         plan_json = plan.model_dump_json()
         context_json = json.dumps(file_context, ensure_ascii=False)
@@ -568,10 +559,10 @@ class OllamaChangeGenerator:
         use_incremental = len(plan.changes) >= 3
         
         if use_incremental:
-            return self._generate_incremental(request, plan, file_context, plan_json, context_json)
+            return self._generate_incremental(request, plan, file_context, plan_json, context_json, progress)
         
         # Fast path: single provider call for small applications
-        return self._generate_fast_path(request, plan, file_context, plan_json, context_json)
+        return self._generate_fast_path(request, plan, file_context, plan_json, context_json, progress)
 
     def _generate_fast_path(
         self,
@@ -580,6 +571,7 @@ class OllamaChangeGenerator:
         file_context: dict[str, str],
         plan_json: str,
         context_json: str,
+        progress: GenerationProgress | None = None,
     ) -> list[ProposedFileChange]:
         """Original fast path: generate all files in one provider call."""
         prompt = f"""You are the implementation engine of LUMINA Code Builder V2.
@@ -599,7 +591,7 @@ Original request: {request.prompt}
         current_prompt = prompt
         
         for attempt in range(max_schema_retries + 1):
-            data = self.client.generate_json(current_prompt, request.model)
+            data = self.client.generate_json(current_prompt, request.model, progress)
             
             # Validate schema
             is_valid, schema_error = _validate_changes_schema(data, log)
@@ -638,112 +630,149 @@ Original request: {request.prompt}
         file_context: dict[str, str],
         plan_json: str,
         context_json: str,
+        progress: GenerationProgress | None = None,
     ) -> list[ProposedFileChange]:
-        """Generate files incrementally - one file per provider call."""
-        log.info("Using incremental generation for %d files", len(plan.changes))
+        """Generate files incrementally - batch files per provider call."""
+        # Get batch size from request or use default (1 file per call)
+        batch_size = getattr(request, 'batch_size', 1) or 1
         
-        # Track progress
-        progress = GenerationProgress(total_files=len(plan.changes))
-        all_changes: list[ProposedFileChange] = []
+        # Initialize or resume progress
+        if progress is None:
+            progress = GenerationProgress(total_files=len(plan.changes), batch_size=batch_size)
+        else:
+            progress.total_files = len(plan.changes)
+            progress.batch_size = batch_size
+        
+        log.info("Using incremental generation for %d files (batch_size=%d, resume_index=%d)", 
+                 len(plan.changes), batch_size, progress.current_file_index)
         
         # Sort changes for deterministic order: creates first, then modifies, then deletes
         sorted_changes = sorted(plan.changes, key=lambda c: (c.operation != "create", c.operation != "modify", c.path))
         
-        for idx, planned_change in enumerate(sorted_changes):
-            progress.current_file_index = idx
-            file_path = planned_change.path
-            operation = planned_change.operation
+        all_changes: list[ProposedFileChange] = []
+        
+        # Add already completed files from progress
+        for path, change_data in progress.completed_files.items():
+            all_changes.append(ProposedFileChange(
+                path=change_data["path"],
+                operation=change_data["operation"],
+                content=change_data["content"],
+            ))
+        
+        while not progress.is_complete():
+            # Get next batch of files to generate
+            batch = progress.get_next_batch(sorted_changes)
+            if not batch:
+                break
             
-            log.info("Generating file %d/%d: %s (%s)", idx + 1, len(sorted_changes), file_path, operation)
+            log.info("Generating batch of %d files (%d/%d)", len(batch), progress.current_file_index + 1, len(sorted_changes))
             
-            # Build prompt for this single file
-            single_context = {}
-            if file_path in file_context and operation in {"modify", "delete"}:
-                single_context[file_path] = file_context[file_path]
+            # Build prompt for this batch
+            batch_context = {}
+            batch_plan = {"changes": []}
             
-            # Include previously generated files as context for dependency awareness
-            for completed in progress.get_completed_changes():
-                if completed.path != file_path:
-                    single_context[completed.path] = completed.content or ""
-            
-            single_context_json = json.dumps(single_context, ensure_ascii=False)
-            single_plan_json = json.dumps({
-                "summary": f"Generate single file: {file_path}",
-                "changes": [{
+            for planned_change in batch:
+                file_path = planned_change.path
+                operation = planned_change.operation
+                
+                if file_path in file_context and operation in {"modify", "delete"}:
+                    batch_context[file_path] = file_context[file_path]
+                
+                batch_plan["changes"].append({
                     "path": file_path,
                     "operation": operation,
                     "reason": planned_change.reason
-                }],
-                "validation_commands": []
-            })
+                })
+            
+            # Include previously generated files as context for dependency awareness
+            for completed in progress.get_completed_changes():
+                path = completed.get("path", "")
+                if path and path not in batch_context:
+                    batch_context[path] = completed.get("content", "") or ""
+            
+            batch_context_json = json.dumps(batch_context, ensure_ascii=False)
+            batch_plan_json = json.dumps(batch_plan, ensure_ascii=False)
             
             file_prompt = f"""You are the implementation engine of LUMINA Code Builder V2.
-Generate ONLY the specified file and return ONLY JSON:
-{{"changes":[{{"path":"{file_path}","operation":"{operation}","content":"full file content or null for delete"}}]}}
+Generate ONLY the specified files and return ONLY JSON:
+{{"changes":[{{"path":"relative/path","operation":"create|modify|delete","content":"full file content or null for delete"}}]}}
 Hard rules:
-- Return exactly ONE change object for the specified path.
+- Return exactly one change object per specified path.
 - For create/modify return the COMPLETE final file content, never a diff.
 - For delete content must be null.
 - Do not use markdown fences.
 - Consider the context of previously generated files.
-Approved plan (this file only): {single_plan_json}
-Current file context: {single_context_json}
+Approved plan (this batch only): {batch_plan_json}
+Current file context: {batch_context_json}
 Original request: {request.prompt}
 """
             max_schema_retries = 2
             current_prompt = file_prompt
+            batch_success = False
             
             for attempt in range(max_schema_retries + 1):
                 try:
-                    data = self.client.generate_json(current_prompt, request.model)
+                    data = self.client.generate_json(current_prompt, request.model, progress)
                     
-                    # Validate schema for single file
+                    # Validate schema for batch
                     is_valid, schema_error = _validate_changes_schema(data, log)
                     if is_valid:
                         raw_changes = data.get("changes", [])
                         if raw_changes:
-                            item = raw_changes[0]
-                            change = ProposedFileChange(
-                                path=str(item.get("path", "")),
-                                operation=str(item.get("operation", "")),
-                                content=item.get("content"),
-                            )
-                            # Verify this is the expected file
-                            if change.path != file_path:
-                                log.warning("Provider returned unexpected file: %s (expected %s)", change.path, file_path)
-                            progress.mark_completed(change)
-                            all_changes.append(change)
+                            batch_changes = []
+                            for item in raw_changes:
+                                change = ProposedFileChange(
+                                    path=str(item.get("path", "")),
+                                    operation=str(item.get("operation", "")),
+                                    content=item.get("content"),
+                                )
+                                batch_changes.append(change)
+                            
+                            # Verify we got the expected files
+                            expected_paths = {pc.path for pc in batch}
+                            actual_paths = {c.path for c in batch_changes}
+                            if not expected_paths.issubset(actual_paths):
+                                missing = expected_paths - actual_paths
+                                log.warning("Provider missing expected files: %s", missing)
+                            
+                            progress.mark_batch_completed(batch_changes)
+                            all_changes.extend(batch_changes)
+                            batch_success = True
                             break
                         else:
-                            raise OllamaError("No changes returned for single file generation")
+                            raise OllamaError("No changes returned for batch generation")
                     
                     # Schema validation failed - try recovery
                     log.warning(
-                        "Schema validation failed for %s (attempt %d/%d): %s",
-                        file_path, attempt + 1, max_schema_retries + 1, schema_error
+                        "Schema validation failed for batch (attempt %d/%d): %s",
+                        attempt + 1, max_schema_retries + 1, schema_error
                     )
                     
                     if attempt < max_schema_retries:
                         current_prompt = _build_schema_recovery_prompt(file_prompt, json.dumps(data), schema_error, attempt)
                         continue
                     
-                    # Schema retries exhausted for this file
-                    progress.mark_failed(file_path)
+                    # Schema retries exhausted for this batch
+                    progress.mark_failed(batch[0].path if batch else "unknown")
                     raise JSONRecoveryError(
-                        f"Schema validation failed for {file_path} after {max_schema_retries + 1} attempts: {schema_error}"
+                        f"Schema validation failed for batch after {max_schema_retries + 1} attempts: {schema_error}"
                     )
                     
-                except RateLimitError:
-                    # Re-raise rate limit errors immediately for provider fallback
-                    progress.mark_failed(file_path)
+                except RateLimitError as rle:
+                    # Track rate-limited provider and re-raise for provider fallback
+                    progress.add_rate_limited_provider(rle.provider or "unknown")
+                    progress.mark_failed(batch[0].path if batch else "unknown")
                     raise
                 except (JSONRecoveryError, OllamaError):
                     # Re-raise to trigger provider fallback
-                    progress.mark_failed(file_path)
+                    progress.mark_failed(batch[0].path if batch else "unknown")
                     raise
             
-            # Small delay between files to be respectful to rate limits
-            if idx < len(sorted_changes) - 1:
+            if not batch_success:
+                break
+            
+            # Small delay between batches to be respectful to rate limits
+            if not progress.is_complete():
                 time.sleep(0.5)
         
         if progress.failed_file:

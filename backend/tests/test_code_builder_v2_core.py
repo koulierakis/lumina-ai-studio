@@ -51,7 +51,7 @@ def test_repository_round_trip(tmp_path: Path):
 
 
 class FakeAutonomousLoop:
-    def execute(self, *, repository_root, instruction):
+    def execute(self, *, repository_root, instruction, progress_persist=None):
         assert Path(repository_root).is_dir()
         assert instruction == "Create an autonomous example"
         return AutonomousBuildResult(
@@ -71,7 +71,7 @@ def test_service_executes_autonomous_task_and_records_attempts(tmp_path: Path):
     service = CodeBuilderService(
         planner=FakePlanner(),
         pipeline=PipelinePlaceholder(),
-        autonomous_factory=lambda task: FakeAutonomousLoop(),
+        autonomous_factory=lambda task, progress_persist=None: FakeAutonomousLoop(),
         repository_root=tmp_path,
     )
     task = service.create_task(

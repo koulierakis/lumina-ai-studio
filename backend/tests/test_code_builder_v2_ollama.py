@@ -1,12 +1,13 @@
 from code_builder_v2.models import TaskRequest
 from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner, OllamaError, JSONRecoveryError, RateLimitError, _extract_json_object
+from code_builder_v2.models import GenerationProgress
 
 
 class FakeClient:
     def __init__(self, responses):
         self.responses = list(responses)
 
-    def generate_json(self, prompt, model=None):
+    def generate_json(self, prompt, model=None, progress: GenerationProgress | None = None):
         return self.responses.pop(0)
 
 
@@ -17,7 +18,7 @@ class FakeClientWithRetry:
         self.success_response = success_response
         self.call_count = 0
 
-    def generate_json(self, prompt, model=None):
+    def generate_json(self, prompt, model=None, progress: GenerationProgress | None = None):
         self.call_count += 1
         if self.fail_responses:
             raise OllamaError(self.fail_responses.pop(0))
@@ -477,7 +478,7 @@ def test_ollama_generator_schema_recovery(monkeypatch):
     
     call_count = [0]
     
-    def mock_generate_json(self, prompt, model=None):
+    def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         return responses.pop(0)
     
@@ -601,7 +602,7 @@ def test_ollama_generator_incremental_multi_file(monkeypatch):
     # Track how many times generate_json is called
     call_count = [0]
     
-    def mock_generate_json(self, prompt, model=None):
+    def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         # Each call should return a single file change
         file_idx = call_count[0] - 1
@@ -649,7 +650,7 @@ def test_ollama_generator_incremental_failed_file_retry(monkeypatch):
     # Track call sequence
     call_log = []
     
-    def mock_generate_json(self, prompt, model=None):
+    def mock_generate_json(self, prompt, model=None, progress=None):
         call_log.append(prompt)
         # Check for the specific file being generated in the prompt
         if '"path": "file0.py"' in prompt or 'file0.py' in prompt and 'file1.py' not in prompt:
@@ -712,7 +713,7 @@ def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
     
     call_count = [0]
     
-    def mock_generate_json(self, prompt, model=None):
+    def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         # Return all files in one response (fast path)
         return {"changes": [
@@ -741,3 +742,178 @@ def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
     # Should have called generate_json only once (fast path)
     assert call_count[0] == 1
     assert len(changes) == 2
+
+
+def test_ollama_generator_resumable_generation(monkeypatch):
+    """Test that generation can resume from previous progress."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange, GenerationProgress
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    call_count = [0]
+    
+    def mock_generate_json(self, prompt, model=None, progress=None):
+        call_count[0] += 1
+        file_idx = call_count[0] - 1
+        return {"changes": [{
+            "path": f"file{file_idx}.py",
+            "operation": "create",
+            "content": f"# File {file_idx}\nvalue = {file_idx}\n"
+        }]}
+    
+    monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    plan = ChangePlan(
+        summary="Create multi-file app",
+        changes=[
+            PlannedChange(path="file0.py", operation="create", reason="first"),
+            PlannedChange(path="file1.py", operation="create", reason="second"),
+            PlannedChange(path="file2.py", operation="create", reason="third"),
+        ],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create 3 files")
+    
+    # First call: generate first 2 files (batch_size=2 would make 2 calls, but batch_size=1 makes 3)
+    progress = GenerationProgress(
+        total_files=3,
+        batch_size=1,
+        current_file_index=0,
+        completed_files={}
+    )
+    changes = generator.generate(request, plan, {}, progress)
+    
+    # With batch_size=1, should make 3 calls for 3 files
+    assert call_count[0] == 3
+    assert len(changes) == 3
+    assert changes[0].path == "file0.py"
+    assert changes[1].path == "file1.py"
+    assert changes[2].path == "file2.py"
+    assert progress.current_file_index == 3
+    assert progress.is_complete()
+    
+    # Second call with completed progress - should not call generate_json again
+    call_count[0] = 0
+    progress2 = GenerationProgress(
+        total_files=3,
+        batch_size=1,
+        current_file_index=3,  # Already complete
+        completed_files={
+            "file0.py": {"path": "file0.py", "operation": "create", "content": "# File 0\nvalue = 0\n"},
+            "file1.py": {"path": "file1.py", "operation": "create", "content": "# File 1\nvalue = 1\n"},
+            "file2.py": {"path": "file2.py", "operation": "create", "content": "# File 2\nvalue = 2\n"},
+        }
+    )
+    changes2 = generator.generate(request, plan, {}, progress2)
+    
+    # Should return existing completed files without calling generate_json
+    assert call_count[0] == 0
+    assert len(changes2) == 3
+    assert changes2[0].path == "file0.py"
+    assert changes2[1].path == "file1.py"
+    assert changes2[2].path == "file2.py"
+
+
+def test_ollama_generator_batch_generation(monkeypatch):
+    """Test that batch generation works with configurable batch size."""
+    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    call_count = [0]
+    batch_sizes = []
+    
+    def mock_generate_json(self, prompt, model=None, progress=None):
+        call_count[0] += 1
+        # Return multiple files per call based on what was requested
+        batch_sizes.append(call_count[0])
+        file_idx = call_count[0] - 1
+        # Each batch returns 2 files
+        changes = []
+        for i in range(2):
+            idx = file_idx * 2 + i
+            if idx < 4:  # Total 4 files
+                changes.append({
+                    "path": f"file{idx}.py",
+                    "operation": "create",
+                    "content": f"# File {idx}\nvalue = {idx}\n"
+                })
+        return {"changes": changes}
+    
+    monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
+    
+    client = OllamaClient()
+    generator = OllamaChangeGenerator(client)
+    
+    plan = ChangePlan(
+        summary="Create multi-file app",
+        changes=[
+            PlannedChange(path="file0.py", operation="create", reason="first"),
+            PlannedChange(path="file1.py", operation="create", reason="second"),
+            PlannedChange(path="file2.py", operation="create", reason="third"),
+            PlannedChange(path="file3.py", operation="create", reason="fourth"),
+        ],
+        validation_commands=[]
+    )
+    request = TaskRequest(prompt="create 4 files", batch_size=2)
+    
+    changes = generator.generate(request, plan, {})
+    
+    # Should have called generate_json 2 times (4 files / batch_size=2)
+    assert call_count[0] == 2
+    assert len(changes) == 4
+    assert changes[0].path == "file0.py"
+    assert changes[1].path == "file1.py"
+    assert changes[2].path == "file2.py"
+    assert changes[3].path == "file3.py"
+
+
+def test_ollama_client_skips_rate_limited_provider(monkeypatch):
+    """Test that client skips providers marked as rate-limited in progress."""
+    from code_builder_v2.models import GenerationProgress
+    
+    monkeypatch.setenv("GROQ_API_KEY", "fake-key")
+    monkeypatch.setenv("HF_TOKEN", "fake-token")
+    monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
+    
+    call_order = []
+    
+    def mock_groq(self, prompt, model=None):
+        call_order.append("groq")
+        raise RateLimitError("Rate limit exceeded", provider="groq", model="test")
+    
+    def mock_hf(self, prompt, model=None):
+        call_order.append("huggingface")
+        return {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
+    
+    def mock_ollama(self, prompt, model=None):
+        call_order.append("ollama")
+        return {"changes": [{"path": "b.py", "operation": "create", "content": "y = 2"}]}
+    
+    monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
+    monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
+    monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
+    
+    client = OllamaClient()
+    
+    # First call without progress - should try groq, fail, then try hf
+    result = client.generate_json("test prompt")
+    assert result == {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
+    assert "groq" in call_order
+    assert "huggingface" in call_order
+    
+    # Now with progress that marks groq as rate-limited
+    progress = GenerationProgress()
+    progress.add_rate_limited_provider("groq")
+    
+    call_order.clear()
+    result = client.generate_json("test prompt", progress=progress)
+    assert result == {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
+    # Should skip groq and go directly to huggingface
+    assert "groq" not in call_order
+    assert "huggingface" in call_order

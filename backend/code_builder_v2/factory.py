@@ -18,6 +18,7 @@ def create_autonomous_loop(
     *,
     client: OllamaClient,
     runtime_root: Path,
+    progress_persist: Callable[[], None] | None = None,
 ) -> AutonomousBuildLoop:
     if task.plan is None:
         raise ValueError("Cannot create autonomous runtime without a plan")
@@ -25,10 +26,12 @@ def create_autonomous_loop(
         generator=OllamaChangeGenerator(client),
         plan=task.plan,
         request=task.request,
+        generation_progress=task.generation_progress,
     )
     return AutonomousBuildLoop(
         runner=runner,
         diagnoser=EvidenceDiagnoser(client, model=task.request.model),
         publisher=VerifiedWorkspacePublisher(runtime_root),
         max_attempts=task.request.max_attempts,
+        progress_persist=progress_persist,
     )
