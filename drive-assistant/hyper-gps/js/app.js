@@ -187,7 +187,19 @@ class LuminaGpsApp {
             return;
         }
         this.pendingRoute = null;
-        if (cmd.type === 'NAVIGATE') {
+        if (cmd.type === 'SEARCH_PLACE') {
+            this.setStatus('Αναζήτηση συγκεκριμένου σημείου…');
+            const loc = await PoiService.geocodeLocation(cmd.destination);
+            if (loc) {
+                this.mapEngine.renderPOIs([{ ...loc, name: loc.name || cmd.destination }], poi => this.startNavigation(poi.lat, poi.lon, poi.name));
+                this.pendingRoute = { ...loc, name: loc.name || cmd.destination, expiresAt: Date.now() + 25000 };
+                this.setStatus(`Βρέθηκε: ${loc.name}. Έλεγξε ότι είναι το σωστό σημείο.`);
+                this.voice.speak(`Βρήκα ${loc.name}. Να ξεκινήσω τη διαδρομή;`, { followup: true });
+            } else {
+                this.setStatus('Δεν βρέθηκε το συγκεκριμένο σημείο. Πρόσθεσε πόλη ή πλήρη ονομασία.');
+                this.voice.speak('Δεν βρήκα το συγκεκριμένο σημείο. Δώσε πληρέστερη ονομασία ή πόλη.');
+            }
+        } else if (cmd.type === 'NAVIGATE') {
             const loc = await PoiService.geocodeLocation(cmd.destination);
             if (loc) {
                 this.startNavigation(loc.lat, loc.lon, cmd.destination);

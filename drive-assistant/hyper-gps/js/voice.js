@@ -148,8 +148,23 @@ export class VoiceAssistant {
         const category = /(βενζιν|καυσιμ|πρατηρι|gas|fuel)/.test(command) ? 'fuel'
             : /(φαρμακ|pharmacy)/.test(command) ? 'pharmacy'
             : /(ξενοδοχ|hotel)/.test(command) ? 'hotel'
-            : /(φαγητ|εστιατορ|restaurant|food)/.test(command) ? 'restaurant' : null;
+            : /(φαγητ|εστιατορ|restaurant|food)/.test(command) ? 'restaurant'
+            : /(καφε|καφετερι|cafe|coffee)/.test(command) ? 'cafe'
+            : /(μουσει|museum)/.test(command) ? 'museum'
+            : /(γυμναστηρι|fitness|gym)/.test(command) ? 'gym'
+            : /(αθλητικ|γηπεδ|sports)/.test(command) ? 'sports'
+            : /(νοσοκομ|hospital)/.test(command) ? 'hospital'
+            : /(κεντρ.{0,12}υγει|κλινικ|clinic)/.test(command) ? 'clinic'
+            : /(σιδηροδρομ|σταθμ.{0,10}τρεν|train station)/.test(command) ? 'railway'
+            : /(αεροδρομ|airport)/.test(command) ? 'airport'
+            : /(λιμαν|λιμεν|port|harbour)/.test(command) ? 'port' : null;
         if (category) {
+            const remote = !/(κοντιν|πλησιεστερ|εδω γυρω)/.test(command) && /(?:^|\s)(?:στην|στον|στη|στο)\s+\S+/.test(command);
+            if (remote) {
+                const destination = command.replace(/^(?:(?:βρες|δειξε|που ειναι|θελω να παω|πηγαινε με|οδηγησε με|σε παρακαλω|μου|το|η|ο|που)\s+)+/, '').trim();
+                this.onCommandRecognized({ type: 'SEARCH_PLACE', destination });
+                return;
+            }
             const navigate = /(παω|πηγαιν|οδηγησ|διαδρομ|navigate|take me)/.test(command);
             this.onCommandRecognized({ type: 'POI', category, navigate });
             return;

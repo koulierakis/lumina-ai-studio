@@ -13,6 +13,15 @@ export const PoiService = {
             case 'pharmacy': tag = 'amenity=pharmacy'; break;
             case 'hotel': tag = 'tourism=hotel'; break;
             case 'restaurant': tag = 'amenity=restaurant'; break;
+            case 'cafe': tag = 'amenity=cafe'; break;
+            case 'museum': tag = 'tourism=museum'; break;
+            case 'sports': tag = 'leisure=sports_centre'; break;
+            case 'gym': tag = 'leisure=fitness_centre'; break;
+            case 'hospital': tag = 'amenity=hospital'; break;
+            case 'clinic': tag = 'amenity=clinic'; break;
+            case 'railway': tag = 'railway=station'; break;
+            case 'airport': tag = 'aeroway=aerodrome'; break;
+            case 'port': tag = 'harbour=yes'; break;
             default: tag = 'amenity=fuel';
         }
 
@@ -79,7 +88,10 @@ export const PoiService = {
             fuel: 'Πρατήριο Καυσίμων',
             pharmacy: 'Φαρμακείο',
             hotel: 'Ξενοδοχείο',
-            restaurant: 'Εστιατόριο'
+            restaurant: 'Εστιατόριο',
+            cafe: 'Καφέ', museum: 'Μουσείο', sports: 'Αθλητική εγκατάσταση',
+            gym: 'Γυμναστήριο', hospital: 'Νοσοκομείο', clinic: 'Κέντρο υγείας',
+            railway: 'Σιδηροδρομικός σταθμός', airport: 'Αεροδρόμιο', port: 'Λιμάνι'
         };
         return names[category] || 'Σημείο Ενδιαφέροντος';
     }
