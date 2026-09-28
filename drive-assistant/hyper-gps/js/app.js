@@ -316,6 +316,10 @@ class LuminaGpsApp {
         const status = document.getElementById('voice-status');
         status.textContent = text;
         btn.classList.toggle('listening', isListening);
+        const wakeButton = document.getElementById('btn-wake-mode');
+        const enabled = Boolean(this.voice?.wakeEnabled);
+        wakeButton.setAttribute('aria-pressed', String(enabled));
+        wakeButton.textContent = enabled ? 'Τζούλι ON' : 'Τζούλι OFF';
     }
 
     renderFavoritesModal() {
