@@ -537,7 +537,8 @@ class OllamaPlanner:
         prompt = f"""You are the planning engine of LUMINA Code Builder V2.
 Return ONLY JSON matching this schema:
 {{"summary":"...","changes":[{{"path":"relative/path","operation":"create|modify|delete","reason":"..."}}],"validation_commands":["..."]}}
-Rules: every required file must be listed; use repository-relative paths only; do not invent unrelated files; include focused validation commands.
+Rules: every required file must be listed; use repository-relative paths only; do not invent unrelated files.
+validation_commands must contain only executable commands with an installed program as the first word (for example, "python -m pytest -q"). Never put manual instructions such as "Open index.html in a browser" in validation_commands. For a browser-only check with no executable command, return an empty list; browser verification is handled separately.
 User request:\n{request.prompt}
 """
         try:
