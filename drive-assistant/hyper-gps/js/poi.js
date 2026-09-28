@@ -5,7 +5,6 @@
 export const PoiService = {
     // Αναζήτηση κοντινών POIs με βάση τις συντεταγμένες
     async findNearby(lat, lon, category) {
-        const radius = 10000; // 10 χλμ ακτίνα
         let tag = '';
 
         switch (category) {
@@ -13,6 +12,9 @@ export const PoiService = {
             case 'pharmacy': tag = 'amenity=pharmacy'; break;
             case 'hotel': tag = 'tourism=hotel'; break;
             case 'restaurant': tag = 'amenity=restaurant'; break;
+            case 'fast_food': tag = 'amenity=fast_food'; break;
+            case 'tyres': tag = 'shop=tyres'; break;
+            case 'car_repair': tag = 'shop=car_repair'; break;
             case 'cafe': tag = 'amenity=cafe'; break;
             case 'museum': tag = 'tourism=museum'; break;
             case 'sports': tag = 'leisure=sports_centre'; break;
@@ -25,34 +27,28 @@ export const PoiService = {
             default: tag = 'amenity=fuel';
         }
 
-        const overpassQuery = `
-            [out:json];
-            (
-              node[${tag}](around:${radius},${lat},${lon});
-              way[${tag}](around:${radius},${lat},${lon});
-            );
-            out center;
-        `;
-
-        const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
-
-        try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`Overpass ${response.status}`);
-            const data = await response.json();
-
-            return (data.elements || []).map(el => ({
-                id: el.id,
-                name: (el.tags?.name) || this.getDefaultName(category),
-                lat: el.lat ?? el.center?.lat,
-                lon: el.lon ?? el.center?.lon,
-                category: category
-            })).filter(poi => Number.isFinite(poi.lat) && Number.isFinite(poi.lon))
-                .sort((a, b) => this.distanceMeters(lat, lon, a.lat, a.lon) - this.distanceMeters(lat, lon, b.lat, b.lon));
-        } catch (error) {
-            console.error('POI Fetch error:', error);
-            return [];
+        // Nearby means the caller's live position, in any region. Expand if no mapped result is close.
+        for (const radius of [10000, 30000]) {
+            const overpassQuery = `[out:json][timeout:20];(node[${tag}](around:${radius},${lat},${lon});way[${tag}](around:${radius},${lat},${lon}););out center;`;
+            const url = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`;
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Overpass ${response.status}`);
+                const data = await response.json();
+                const places = (data.elements || []).map(el => ({
+                    id: el.id,
+                    name: el.tags?.name || this.getDefaultName(category),
+                    lat: el.lat ?? el.center?.lat,
+                    lon: el.lon ?? el.center?.lon,
+                    category
+                })).filter(poi => Number.isFinite(poi.lat) && Number.isFinite(poi.lon))
+                    .sort((a, b) => this.distanceMeters(lat, lon, a.lat, a.lon) - this.distanceMeters(lat, lon, b.lat, b.lon));
+                if (places.length) return places;
+            } catch (error) {
+                console.error('POI Fetch error:', error);
+            }
         }
+        return [];
     },
 
     distanceMeters(lat1, lon1, lat2, lon2) {
@@ -88,7 +84,8 @@ export const PoiService = {
             fuel: 'Πρατήριο Καυσίμων',
             pharmacy: 'Φαρμακείο',
             hotel: 'Ξενοδοχείο',
-            restaurant: 'Εστιατόριο',
+            restaurant: 'Εστιατόριο', fast_food: 'Fast food',
+            tyres: 'Βουλκανιζατέρ', car_repair: 'Συνεργείο αυτοκινήτων',
             cafe: 'Καφέ', museum: 'Μουσείο', sports: 'Αθλητική εγκατάσταση',
             gym: 'Γυμναστήριο', hospital: 'Νοσοκομείο', clinic: 'Κέντρο υγείας',
             railway: 'Σιδηροδρομικός σταθμός', airport: 'Αεροδρόμιο', port: 'Λιμάνι'
