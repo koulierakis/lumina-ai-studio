@@ -88,6 +88,7 @@ class LuminaGpsApp {
 
         // Recenter Button
         document.getElementById('btn-recenter').onclick = () => {
+            this.mapEngine.followUser = true;
             this.mapEngine.updateUserLocation(this.currentLocation.lat, this.currentLocation.lon);
         };
 
@@ -194,7 +195,7 @@ class LuminaGpsApp {
             this.showPlaceResults(places);
             if (loc) {
                 this.mapEngine.renderPOIs(places, poi => this.startNavigation(poi.lat, poi.lon, poi.name));
-                this.pendingRoute = { ...loc, name: loc.name || cmd.destination, expiresAt: Date.now() + 25000 };
+                this.pendingRoute = places.length === 1 ? { ...loc, name: loc.name || cmd.destination, expiresAt: Date.now() + 25000 } : null;
                 this.setStatus(`Βρέθηκαν ${places.length} αποτελέσματα. Διάλεξε το σωστό σημείο από τη λίστα.`);
                 this.voice.speak(places.length > 1 ? `Βρήκα ${places.length} αποτελέσματα. Διάλεξε το σωστό σημείο από τη λίστα.` : `Βρήκα ${loc.name}. Να ξεκινήσω τη διαδρομή;`, { followup: places.length === 1 });
             } else {

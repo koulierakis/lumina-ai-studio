@@ -10,6 +10,7 @@ export class MapEngine {
         this.poiLayerGroup = null;
         this.tileLayer = null;
         this.isNight = true;
+        this.followUser = true;
 
         this.initMap(mapContainerId);
     }
@@ -68,11 +69,12 @@ export class MapEngine {
     updateUserLocation(lat, lon, heading) {
         if (this.userMarker) {
             this.userMarker.setLatLng([lat, lon]);
-            this.map.panTo([lat, lon], { animate: true, duration: 1 });
+            if (this.followUser) this.map.panTo([lat, lon], { animate: true, duration: 1 });
         }
     }
 
     drawNeonRoute(coordinates) {
+        this.followUser = true;
         if (this.routeLayer) this.map.removeLayer(this.routeLayer);
 
         // Φωτεινή Neon γραμμή διαδρομής
@@ -95,6 +97,7 @@ export class MapEngine {
     }
 
     renderPOIs(pois, onSelectPOI) {
+        this.followUser = false;
         this.poiLayerGroup.clearLayers();
         let nearestMarker = null;
         pois.slice(0, 12).forEach((poi, index) => {
