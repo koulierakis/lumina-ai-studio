@@ -54,12 +54,15 @@ export class MapEngine {
         this.isNight = isNight;
         if (this.tileLayer) this.map.removeLayer(this.tileLayer);
 
-        // Dark OLED Tiles (CartoDB DarkMatter) vs Day Tiles (CartoDB Positron)
-        const tileUrl = isNight
-            ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-            : 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-
-        this.tileLayer = L.tileLayer(tileUrl, { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors &copy; CARTO' }).addTo(this.map);
+        // The public CARTO endpoint now displays API KEY REQUIRED tiles.
+        // Reuse the OpenStreetMap basemap already used by Drive Assistant.
+        this.map.getPane('tilePane').style.filter = isNight
+            ? 'brightness(0.55) invert(1) hue-rotate(180deg)'
+            : '';
+        this.tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(this.map);
     }
 
     updateUserLocation(lat, lon, heading) {
