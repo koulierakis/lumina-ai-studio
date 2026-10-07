@@ -21,6 +21,12 @@ from .client import CapabilityExecutionError, MindCapabilityClient
 from .intent import ResolvedIntent, detect_confirmation, resolve_intent
 from .registry import CAPABILITY_REGISTRY
 
+_CONNECTOR_ACTIONS = {
+    "send_email": "email",
+    "send_whatsapp": "whatsapp",
+    "publish_social": "social",
+}
+
 
 def _json_safe(value: Any) -> Any:
     try:
@@ -69,7 +75,15 @@ class MindOrchestrator:
 
     # ------------------------------------------------------------- capability
     def catalog(self) -> list[dict[str, Any]]:
-        return [capability.describe() for capability in CAPABILITY_REGISTRY.values()]
+        entries = []
+        for capability in CAPABILITY_REGISTRY.values():
+            described = capability.describe()
+            if capability.id == "connect":
+                from ai_runtime.connectors import connector_status
+
+                described["connectors"] = connector_status()
+            entries.append(described)
+        return entries
 
     def resolve(self, message: str, context: dict[str, Any] | None = None) -> ResolvedIntent | None:
         return resolve_intent(message, context)
@@ -299,7 +313,7 @@ class MindOrchestrator:
             }
 
         try:
-            result = await self.client.execute(operation, owner, params)
+            result = await self._run(owner, capability_id, operation, params)
             outcome = summarize_result(operation, result)
             if journal:
                 self._journal(
@@ -333,6 +347,49 @@ class MindOrchestrator:
                 "error": exc.message,
                 "detail": exc.response,
             }
+
+    async def _run(
+        self,
+        owner: str,
+        capability_id: str,
+        operation: Any,
+        params: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute an operation.
+
+        Connector actions run in-process against the configured channel so the
+        approval decision is honoured at the exact moment it is taken; every
+        other capability goes through the real HTTP surface.
+        """
+        connector_id = _CONNECTOR_ACTIONS.get(operation.id) if capability_id == "connect" else None
+        if connector_id is not None:
+            return await self._run_connector(connector_id, operation.id, params)
+        return await self.client.execute(operation, owner, params)
+
+    @staticmethod
+    async def _run_connector(connector_id: str, action: str, params: dict[str, Any]) -> dict[str, Any]:
+        from ai_runtime.connectors import get_connector
+
+        connector = get_connector(connector_id)
+        if connector is None:
+            raise CapabilityExecutionError(400, f"Unknown connector: {connector_id}")
+        if action == "send_email":
+            result = await connector.send(
+                to=str(params.get("to") or ""),
+                subject=str(params.get("subject") or ""),
+                body=str(params.get("body") or ""),
+            )
+        elif action == "send_whatsapp":
+            result = await connector.send(
+                to=str(params.get("to") or ""),
+                text=str(params.get("body") or ""),
+            )
+        else:
+            result = await connector.publish(
+                text=str(params.get("body") or ""),
+                channel=str(params.get("channel") or ""),
+            )
+        return result.as_dict()
 
     async def handle_decision(
         self,

@@ -294,6 +294,95 @@ def _resolve_voice(text: str) -> ResolvedIntent | None:
     return None
 
 
+_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_PHONE_RE = re.compile(r"(?<![\w])(\+?\d[\d\s\-()]{7,}\d)(?![\w])")
+
+# Greek send stems are matched as substrings; short English words are matched on
+# word boundaries so "poster" does not trigger a "post".
+_SEND_STEMS_EL = (
+    "στείλε", "στειλε", "στελν", "στέλνω", "στελνω", "απόστειλε", "αποστειλε",
+    "μήνυμα", "μηνυμα", "μέιλ", "μειλ", "γουατσαπ", "βατσαπ",
+    "δημοσίευσ", "δημοσιευσ", "ανάρτησ", "αναρτησ", "μοιράσου", "μοιρασου",
+    "ανέβασ", "ανεβασ",
+)
+_SEND_WORDS_EN = ("send", "mail", "email", "e-mail", "whatsapp", "whats", "viber", "post", "publish", "share")
+
+_SOCIAL_STEMS_EL = ("δημοσίευσ", "δημοσιευσ", "ανάρτησ", "αναρτησ", "μοιράσου", "μοιρασου", "ανέβασ", "ανεβασ")
+_SOCIAL_WORDS_EN = ("post", "publish", "share", "social", "facebook", "instagram", "linkedin", "twitter", "x.com")
+
+_SOCIAL_PLATFORMS = (
+    ("facebook", ("facebook", "φέισμπουκ", "φεισμπουκ", "fb")),
+    ("instagram", ("instagram", "ίνσταγκραμ", "ινσταγκραμ", "insta")),
+    ("linkedin", ("linkedin", "λίνκεντιν", "λινκεντιν")),
+    ("twitter", ("twitter", "x.com", "τουίτερ", "τουιτερ")),
+)
+
+
+def _has_word(text: str, needles: tuple[str, ...]) -> bool:
+    """Word-boundary match for short ASCII tokens inside normalised text."""
+    return any(re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", text) for needle in needles)
+
+
+def _resolve_connect(text: str, original: str = "") -> ResolvedIntent | None:
+    original = original or text
+    wants_whatsapp = _has_any(text, ("γουατσαπ", "βατσαπ")) or _has_word(text, ("whatsapp", "whats", "viber"))
+    wants_email = _has_any(text, ("μέιλ", "μειλ")) or _has_word(text, ("email", "e-mail", "mail")) or bool(_EMAIL_RE.search(original))
+    wants_social = _has_any(text, _SOCIAL_STEMS_EL) or _has_word(text, _SOCIAL_WORDS_EN)
+    has_send = _has_any(text, _SEND_STEMS_EL) or _has_word(text, _SEND_WORDS_EN)
+
+    if not has_send and not wants_social:
+        return None
+
+    if wants_whatsapp:
+        match = _PHONE_RE.search(original)
+        if not match:
+            return None
+        recipient = match.group(1)
+        body = _extract_original_case(
+            original.replace(recipient, " "),
+            [*_SEND_STEMS_EL, *_SEND_WORDS_EN, "στο", "στη", "στην", "σε", "το", "τη", "τον", "μηνυμα", "μήνυμα"],
+        )
+        if not body:
+            return None
+        return ResolvedIntent("connect", "send_whatsapp", {"to": recipient, "body": body[:4000]})
+
+    if wants_email:
+        match = _EMAIL_RE.search(original)
+        if not match:
+            return None
+        recipient = match.group(0)
+        subject = ""
+        subject_match = re.search(r"(?:θέμα|θεμα|subject)\s*[:：]?\s*(.+)$", original, re.IGNORECASE)
+        if subject_match:
+            subject = subject_match.group(1).strip()[:200]
+        body = _extract_original_case(
+            original.replace(recipient, " "),
+            [*_SEND_STEMS_EL, *_SEND_WORDS_EN, "στο", "στη", "στην", "σε", "το", "τη", "τον", "θέμα", "θεμα", "subject"],
+        )
+        if not body:
+            return None
+        params: dict[str, Any] = {"to": recipient, "body": body[:8000]}
+        if subject:
+            params["subject"] = subject
+        return ResolvedIntent("connect", "send_email", params)
+
+    if wants_social:
+        channel = "facebook"
+        for name, aliases in _SOCIAL_PLATFORMS:
+            if _has_any(text, aliases) or _has_word(text, aliases):
+                channel = name
+                break
+        body = _extract_original_case(
+            original,
+            [*_SEND_STEMS_EL, *_SEND_WORDS_EN, "στο", "στη", "στην", "σε", "το", "τη", "τον"],
+        )
+        if len(body) < 3:
+            return None
+        return ResolvedIntent("connect", "publish_social", {"body": body[:4000], "channel": channel})
+
+    return None
+
+
 _CAPABILITY_TRIGGERS = (
     "έγγραφο", "εγγραφο", "έγγραφα", "εγγραφα", "συμφωνητικό", "συμφωνητικο",
     "σύμβαση", "συμβαση", "συμβόλαιο", "συμβολαιο", "επιστολή", "επιστολη",
@@ -306,6 +395,9 @@ _CAPABILITY_TRIGGERS = (
     "εκφώνησ", "εκφωνησ", "διάβασε", "διαβασε",
     "έργο", "εργο", "έργα", "εργα", "project", "projects",
     "κώδικα", "κωδικα", "κώδικες", "κωδικες", "code", "refactor",
+    "whatsapp", "γουατσαπ", "email", "e-mail", "μέιλ", "μειλ",
+    "δημοσίευσ", "δημοσιευσ", "ανάρτησ", "αναρτησ",
+    "facebook", "instagram", "linkedin", "twitter", "social",
 )
 
 
@@ -322,6 +414,7 @@ def resolve_intent(message: str, context: dict[str, Any] | None = None) -> Resol
         return None
 
     for resolver in (
+        _resolve_connect,
         _resolve_code_builder,
         _resolve_documents,
         _resolve_projects,
@@ -331,7 +424,7 @@ def resolve_intent(message: str, context: dict[str, Any] | None = None) -> Resol
     ):
         if resolver in (_resolve_documents, _resolve_projects):
             intent = resolver(text, context, message)
-        elif resolver in (_resolve_image, _resolve_video):
+        elif resolver in (_resolve_image, _resolve_video, _resolve_connect):
             intent = resolver(text, message)
         else:
             intent = resolver(text)

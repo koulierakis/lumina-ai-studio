@@ -354,6 +354,56 @@ async def mind_actions(owner: str = Depends(require_owner)) -> dict:
     return {"actions": executive_advisor.mind.list_actions(owner)}
 
 
+@router.get("/mind/connectors")
+async def mind_connectors(_: str = Depends(require_owner)) -> dict:
+    from .connectors import connector_status
+
+    return {"connectors": connector_status()}
+
+
+@router.post("/mind/connectors/email/send")
+async def mind_connector_email_send(body: dict, owner: str = Depends(require_owner)) -> dict:
+    from .connectors import get_connector
+
+    connector = get_connector("email")
+    result = await connector.send(
+        to=str(body.get("to") or ""),
+        subject=str(body.get("subject") or ""),
+        body=str(body.get("body") or ""),
+    )
+    if not result.ok:
+        raise HTTPException(400, result.detail)
+    return result.as_dict()
+
+
+@router.post("/mind/connectors/whatsapp/send")
+async def mind_connector_whatsapp_send(body: dict, owner: str = Depends(require_owner)) -> dict:
+    from .connectors import get_connector
+
+    connector = get_connector("whatsapp")
+    result = await connector.send(
+        to=str(body.get("to") or ""),
+        text=str(body.get("body") or ""),
+    )
+    if not result.ok:
+        raise HTTPException(400, result.detail)
+    return result.as_dict()
+
+
+@router.post("/mind/connectors/social/publish")
+async def mind_connector_social_publish(body: dict, owner: str = Depends(require_owner)) -> dict:
+    from .connectors import get_connector
+
+    connector = get_connector("social")
+    result = await connector.publish(
+        text=str(body.get("body") or ""),
+        channel=str(body.get("channel") or ""),
+    )
+    if not result.ok:
+        raise HTTPException(400, result.detail)
+    return result.as_dict()
+
+
 @router.get("/mind/pending")
 async def mind_pending(owner: str = Depends(require_owner), session_id: str | None = None) -> dict:
     pending = executive_advisor.mind.pending(owner, session_id)

@@ -340,6 +340,45 @@ _CODE_BUILDER = Capability(
     },
 )
 
+# ---------------------------------------------------------------------------
+# Connectors (outbound communication)
+# ---------------------------------------------------------------------------
+_CONNECT = Capability(
+    id="connect",
+    name="Connectors",
+    description=(
+        "Send the owner's communications through their own channels: email, "
+        "WhatsApp and social media. Actions execute only when the matching "
+        "channel is configured; otherwise they are validated in dry-run mode."
+    ),
+    operations={
+        "status": CapabilityOperation(
+            id="status", method="GET", path="/api/runtime/mind/connectors", risk="auto",
+            description="Report which communication channels are configured.",
+            summary_fields=("count",),
+        ),
+        "send_email": CapabilityOperation(
+            id="send_email", method="POST", path="/api/runtime/mind/connectors/email/send", risk="approval",
+            description="Send an email to a recipient.",
+            required_params=("to", "body"), optional_params=("subject",),
+            summary_fields=("status", "detail", "dry_run"),
+        ),
+        "send_whatsapp": CapabilityOperation(
+            id="send_whatsapp", method="POST", path="/api/runtime/mind/connectors/whatsapp/send", risk="approval",
+            description="Send a WhatsApp message to a phone number.",
+            required_params=("to", "body"),
+            summary_fields=("status", "detail", "dry_run"),
+        ),
+        "publish_social": CapabilityOperation(
+            id="publish_social", method="POST", path="/api/runtime/mind/connectors/social/publish", risk="approval",
+            description="Publish a text post to a social channel.",
+            required_params=("body",), optional_params=("channel",),
+            summary_fields=("status", "detail", "dry_run"),
+        ),
+    },
+)
+
+
 CAPABILITY_REGISTRY: dict[str, Capability] = {
     capability.id: capability
     for capability in (
@@ -349,6 +388,7 @@ CAPABILITY_REGISTRY: dict[str, Capability] = {
         _VOICE,
         _STUDIO,
         _CODE_BUILDER,
+        _CONNECT,
     )
 }
 
