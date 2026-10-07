@@ -9,7 +9,6 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
-from ai_runtime.capabilities import MindOrchestrator, orchestration_context  # noqa: E402
 from code_builder.ollama_service import (
     OllamaClientConfiguration,
     OllamaService,
@@ -17,6 +16,8 @@ from code_builder.ollama_service import (
 )
 from pydantic import BaseModel, ConfigDict, Field
 from runtime_info import load_runtime_config
+
+from ai_runtime.capabilities import MindOrchestrator, orchestration_context  # noqa: E402
 
 ADVISOR_ROLES = {
     "auto": "Executive Advisor",

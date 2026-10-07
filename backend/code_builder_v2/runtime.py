@@ -10,11 +10,11 @@ from typing import Any, Protocol
 from .applier import AtomicChangeApplier, ProposedFileChange
 from .autonomous import AttemptResult, FailureEvidence, RepairInstruction
 from .backup import BackupService
+from .executor import CommandExecutor
 from .generator import ChangeGenerator
-from .models import ChangePlan, PlannedChange, TaskRequest
+from .models import ChangePlan, GenerationProgress, PlannedChange, TaskRequest
 from .repository import Repository
 from .validation import ValidationError, ValidationRunner
-from .executor import CommandExecutor
 
 
 class JsonCodeClient(Protocol):

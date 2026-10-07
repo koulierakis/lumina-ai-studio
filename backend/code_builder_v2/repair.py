@@ -13,17 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import json
-import os
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
+from .browser import VerificationResult, verify_application
 from .providers import ModelRouter, ProviderError
-from .sandbox import SandboxRuntime, SandboxSession, CommandResult, create_sandbox_runtime
-from .browser import BrowserVerifier, VerificationResult, WorkflowVerifier
+from .sandbox import CommandResult, SandboxRuntime, SandboxSession, create_sandbox_runtime
 
 
 class RepairPhase(str, Enum):
@@ -44,8 +42,8 @@ class RepairEvidence:
 
     phase: RepairPhase
     attempt: int
-    sandbox_result: Optional[CommandResult] = None
-    browser_result: Optional[VerificationResult] = None
+    sandbox_result: CommandResult | None = None
+    browser_result: VerificationResult | None = None
     summary: str = ""
 
     @property
@@ -105,7 +103,7 @@ class RepairResult:
     successful: bool
     attempts: int
     events: tuple[RepairEvent, ...]
-    final_evidence: Optional[RepairEvidence] = None
+    final_evidence: RepairEvidence | None = None
     stop_reason: str = ""
     changed_files: tuple[str, ...] = ()
     total_duration_seconds: float = 0.0
@@ -143,7 +141,6 @@ class AppStartStep:
 
     async def execute(self, session: SandboxSession, runtime: SandboxRuntime) -> CommandResult:
         # Start server in background
-        import subprocess
         proc = await asyncio.create_subprocess_shell(
             self.command,
             cwd=session.workspace_root,
@@ -205,7 +202,7 @@ class ACIDiagnoser:
     Uses LLM to analyze structured evidence and produce minimal repair.
     """
 
-    def __init__(self, router: ModelRouter, model: Optional[str] = None):
+    def __init__(self, router: ModelRouter, model: str | None = None):
         self.router = router
         self.model = model
 
@@ -281,7 +278,7 @@ RULES:
 - If validation command fails, fix the command or the code it tests
 """.strip()
 
-    def _format_sandbox_evidence(self, result: Optional[CommandResult]) -> str:
+    def _format_sandbox_evidence(self, result: CommandResult | None) -> str:
         if not result:
             return "No sandbox evidence"
         return f"""Command: {result.command}
@@ -290,7 +287,7 @@ Stdout: {result.stdout[-3000:]}
 Stderr: {result.stderr[-3000:]}
 Duration: {result.duration_seconds:.1f}s"""
 
-    def _format_browser_evidence(self, result: Optional[VerificationResult]) -> str:
+    def _format_browser_evidence(self, result: VerificationResult | None) -> str:
         if not result or not result.evidence:
             return "No browser evidence"
         e = result.evidence
@@ -332,7 +329,7 @@ class AutonomousRepairLoop:
         sandbox: SandboxRuntime,
         max_attempts: int = 5,
         max_repeated_failures: int = 2,
-        model: Optional[str] = None,
+        model: str | None = None,
     ):
         self.router = router
         self.sandbox = sandbox
@@ -365,7 +362,7 @@ class AutonomousRepairLoop:
         start_step: AppStartStep,
         verify_step: BrowserVerifyStep,
         app_context: dict[str, Any],
-        env: Optional[dict[str, str]] = None,
+        env: dict[str, str] | None = None,
     ) -> RepairResult:
         """Execute the full autonomous repair loop."""
         start_time = time.time()
@@ -378,7 +375,7 @@ class AutonomousRepairLoop:
         self._add_event(RepairPhase.INITIALIZING, 0, f"Sandbox session created: {session.session_id}")
 
         try:
-            previous_evidence: Optional[RepairEvidence] = None
+            previous_evidence: RepairEvidence | None = None
 
             for attempt in range(1, self.max_attempts + 1):
                 phase = RepairPhase.BUILDING if attempt == 1 else RepairPhase.REPAIRING
@@ -505,12 +502,12 @@ class AutonomousRepairLoop:
         self._add_event(RepairPhase.REPAIRING, attempt, f"Applying repair: {instruction.instruction[:100]}")
 
         # Apply to sandbox
-        session = self.applier.runtime  # This is a hack, need proper session
-        # We need the session from the loop - fix this in execute()
+        # TODO: obtain the live SandboxSession from the repair loop; the applier's
+        # runtime handle is not a session, so this placeholder must not bind it.
         # For now, return True to indicate repair was generated
         return True
 
-    def _check_repeated_failure(self, evidence: Optional[RepairEvidence]) -> bool:
+    def _check_repeated_failure(self, evidence: RepairEvidence | None) -> bool:
         if not evidence:
             return False
         fp = evidence.fingerprint
@@ -539,8 +536,8 @@ async def run_autonomous_repair(
     port: int,
     app_type: str = "todo",
     max_attempts: int = 5,
-    router: Optional[ModelRouter] = None,
-    sandbox: Optional[SandboxRuntime] = None,
+    router: ModelRouter | None = None,
+    sandbox: SandboxRuntime | None = None,
 ) -> RepairResult:
     """Convenience function to run autonomous repair."""
 

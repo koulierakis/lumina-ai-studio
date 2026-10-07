@@ -1,6 +1,13 @@
-from code_builder_v2.models import TaskRequest
-from code_builder_v2.ollama import OllamaChangeGenerator, OllamaClient, OllamaPlanner, OllamaError, JSONRecoveryError, RateLimitError, _extract_json_object
-from code_builder_v2.models import GenerationProgress
+from code_builder_v2.models import GenerationProgress, TaskRequest
+from code_builder_v2.ollama import (
+    JSONRecoveryError,
+    OllamaChangeGenerator,
+    OllamaClient,
+    OllamaError,
+    OllamaPlanner,
+    RateLimitError,
+    _extract_json_object,
+)
 
 
 class FakeClient:
@@ -69,18 +76,18 @@ def test_extract_json_object_handles_truncated_json():
     """Test that _extract_json_object handles truncated/malformed JSON."""
     # Valid JSON
     assert _extract_json_object('{"key": "value"}') == {"key": "value"}
-    
+
     # JSON with markdown fences
     assert _extract_json_object('```json\n{"key": "value"}\n```') == {"key": "value"}
-    
+
     # JSON embedded in text
     assert _extract_json_object('Some text {"key": "value"} more text') == {"key": "value"}
-    
+
     # Truncated JSON (missing closing brace)
     truncated = '{"changes": [{"path": "a.py", "operation": "create", "content": "x = 1'
     try:
         _extract_json_object(truncated)
-        assert False, "Should have raised OllamaError"
+        raise AssertionError("Should have raised OllamaError")
     except OllamaError:
         pass  # Expected
 
@@ -88,12 +95,12 @@ def test_extract_json_object_handles_truncated_json():
 def test_json_recovery_prompt_contains_original_request():
     """Test that the recovery prompt preserves the original request."""
     from code_builder_v2.ollama import _build_json_recovery_prompt
-    
+
     original = "Create a multi-file React app"
     failed = '{"changes": [{"path": "App.jsx", "operation": "create", "content": "import React'
-    
+
     recovery = _build_json_recovery_prompt(original, failed, 0)
-    
+
     assert original in recovery
     assert "truncated" in recovery.lower() or "malformed" in recovery.lower()
     assert "complete valid JSON" in recovery
@@ -104,30 +111,30 @@ def test_generate_json_fallback_chain(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("HF_TOKEN", "fake-token")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")  # Enable local Ollama for this test
-    
+
     client = OllamaClient()
-    
+
     # Mock the provider methods to simulate failures then success
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise JSONRecoveryError("Groq JSON recovery exhausted")
-    
+
     def mock_hf(self, prompt, model=None):
         call_order.append("huggingface")
         raise OllamaError("HF failed")
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"result": "success"}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     result = client.generate_json("test prompt")
-    
+
     assert result == {"result": "success"}
     assert call_order == ["groq", "huggingface", "ollama"]
 
@@ -136,24 +143,24 @@ def test_generate_json_succeeds_on_first_provider(monkeypatch):
     """Test that generate_json succeeds on first provider without fallback."""
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("HF_TOKEN", "fake-token")
-    
+
     client = OllamaClient()
-    
+
     def mock_groq(self, prompt, model=None):
         return {"result": "success"}
-    
+
     def mock_hf(self, prompt, model=None):
         raise AssertionError("Should not fall back to HF")
-    
+
     def mock_ollama(self, prompt, model=None):
         raise AssertionError("Should not fall back to Ollama")
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     result = client.generate_json("test prompt")
-    
+
     assert result == {"result": "success"}
 
 
@@ -164,12 +171,12 @@ def test_generate_json_no_providers_raises(monkeypatch):
     monkeypatch.delenv("HUGGINGFACEHUB_API_TOKEN", raising=False)
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
-    
+
     client = OllamaClient()
-    
+
     try:
         client.generate_json("test prompt")
-        assert False, "Should have raised"
+        raise AssertionError("Should have raised")
     except OllamaError as e:
         assert "No model providers configured" in str(e)
 
@@ -180,29 +187,29 @@ def test_generate_json_production_uses_cloud_only(monkeypatch):
     monkeypatch.setenv("HF_TOKEN", "fake-token")
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
-    
+
     client = OllamaClient()
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise JSONRecoveryError("Groq JSON recovery exhausted")
-    
+
     def mock_hf(self, prompt, model=None):
         call_order.append("huggingface")
         return {"result": "success"}
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"result": "should not be called"}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     result = client.generate_json("test prompt")
-    
+
     assert result == {"result": "success"}
     # Should NOT call ollama in production
     assert call_order == ["groq", "huggingface"]
@@ -215,24 +222,24 @@ def test_generate_json_local_ollama_enabled(monkeypatch):
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
-    
+
     client = OllamaClient()
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise JSONRecoveryError("Groq JSON recovery exhausted")
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"result": "success"}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     result = client.generate_json("test prompt")
-    
+
     assert result == {"result": "success"}
     assert call_order == ["groq", "ollama"]
 
@@ -243,26 +250,26 @@ def test_generate_json_production_ollama_endpoint(monkeypatch):
     monkeypatch.setenv("OLLAMA_BASE_URL", "https://ollama.example.com")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
-    
+
     client = OllamaClient()
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise JSONRecoveryError("Groq JSON recovery exhausted")
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         # Verify the base_url was updated
         assert self.base_url == "https://ollama.example.com"
         return {"result": "success"}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     result = client.generate_json("test prompt")
-    
+
     assert result == {"result": "success"}
     assert call_order == ["groq", "ollama"]
     assert client.base_url == "https://ollama.example.com"
@@ -274,27 +281,27 @@ def test_generate_json_localhost_ollama_not_used_in_production(monkeypatch):
     monkeypatch.setenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("LUMINA_USE_LOCAL_OLLAMA", raising=False)
-    
+
     client = OllamaClient()
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise JSONRecoveryError("Groq JSON recovery exhausted")
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"result": "should not be called"}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     # Should raise because Groq fails and no other providers are available
     # (localhost Ollama is not included in production chain)
     try:
         client.generate_json("test prompt")
-        assert False, "Should have raised"
+        raise AssertionError("Should have raised")
     except OllamaError as e:
         assert "All providers failed" in str(e)
     assert call_order == ["groq"]
@@ -303,30 +310,31 @@ def test_generate_json_localhost_ollama_not_used_in_production(monkeypatch):
 
 def test_validate_changes_schema_accepts_valid_changes():
     """Test that _validate_changes_schema accepts valid changes."""
-    from code_builder_v2.ollama import _validate_changes_schema
     import logging
-    
+
+    from code_builder_v2.ollama import _validate_changes_schema
+
     log = logging.getLogger("test")
-    
+
     # Valid create
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]
     }, log)
     assert valid is True
     assert error == ""
-    
+
     # Valid update
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "update", "content": "x = 2"}]
     }, log)
     assert valid is True
-    
+
     # Valid delete
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "delete", "content": None}]
     }, log)
     assert valid is True
-    
+
     # Multiple valid changes
     valid, error = _validate_changes_schema({
         "changes": [
@@ -340,11 +348,12 @@ def test_validate_changes_schema_accepts_valid_changes():
 
 def test_validate_changes_schema_rejects_strings_in_changes():
     """Test that _validate_changes_schema rejects strings in changes array."""
-    from code_builder_v2.ollama import _validate_changes_schema
     import logging
-    
+
+    from code_builder_v2.ollama import _validate_changes_schema
+
     log = logging.getLogger("test")
-    
+
     # String instead of object
     valid, error = _validate_changes_schema({
         "changes": ["not an object"]
@@ -355,11 +364,12 @@ def test_validate_changes_schema_rejects_strings_in_changes():
 
 def test_validate_changes_schema_rejects_nested_arrays():
     """Test that _validate_changes_schema rejects nested arrays in changes."""
-    from code_builder_v2.ollama import _validate_changes_schema
     import logging
-    
+
+    from code_builder_v2.ollama import _validate_changes_schema
+
     log = logging.getLogger("test")
-    
+
     # Nested array
     valid, error = _validate_changes_schema({
         "changes": [[{"path": "a.py", "operation": "create", "content": "x = 1"}]]
@@ -370,46 +380,47 @@ def test_validate_changes_schema_rejects_nested_arrays():
 
 def test_validate_changes_schema_rejects_missing_fields():
     """Test that _validate_changes_schema rejects missing required fields."""
-    from code_builder_v2.ollama import _validate_changes_schema
     import logging
-    
+
+    from code_builder_v2.ollama import _validate_changes_schema
+
     log = logging.getLogger("test")
-    
+
     # Missing path
     valid, error = _validate_changes_schema({
         "changes": [{"operation": "create", "content": "x = 1"}]
     }, log)
     assert valid is False
     assert "path" in error
-    
+
     # Missing operation
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "content": "x = 1"}]
     }, log)
     assert valid is False
     assert "operation" in error
-    
+
     # Invalid operation
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "invalid", "content": "x = 1"}]
     }, log)
     assert valid is False
     assert "operation" in error
-    
+
     # Missing content
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "create"}]
     }, log)
     assert valid is False
     assert "content" in error
-    
+
     # None content for create
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "create", "content": None}]
     }, log)
     assert valid is False
     assert "content" in error
-    
+
     # Non-null content for delete
     valid, error = _validate_changes_schema({
         "changes": [{"path": "a.py", "operation": "delete", "content": "should be null"}]
@@ -420,24 +431,25 @@ def test_validate_changes_schema_rejects_missing_fields():
 
 def test_validate_changes_schema_rejects_empty_changes():
     """Test that _validate_changes_schema rejects empty changes array."""
-    from code_builder_v2.ollama import _validate_changes_schema
     import logging
-    
+
+    from code_builder_v2.ollama import _validate_changes_schema
+
     log = logging.getLogger("test")
-    
+
     valid, error = _validate_changes_schema({
         "changes": []
     }, log)
     assert valid is False
     assert "empty" in error
-    
+
     # Missing changes key
     valid, error = _validate_changes_schema({
         "other": "data"
     }, log)
     assert valid is False
     assert "changes" in error
-    
+
     # Changes not an array
     valid, error = _validate_changes_schema({
         "changes": "not an array"
@@ -449,13 +461,13 @@ def test_validate_changes_schema_rejects_empty_changes():
 def test_schema_recovery_prompt_contains_schema_error(monkeypatch):
     """Test that the schema recovery prompt includes the schema error."""
     from code_builder_v2.ollama import _build_schema_recovery_prompt
-    
+
     original = "Create a React app"
     failed = '{"changes": ["not an object"]}'
     schema_error = "changes[0] must be an object, got str"
-    
+
     recovery = _build_schema_recovery_prompt(original, failed, schema_error, 0)
-    
+
     assert original in recovery
     assert schema_error in recovery
     assert "changes" in recovery
@@ -465,37 +477,37 @@ def test_schema_recovery_prompt_contains_schema_error(monkeypatch):
 
 def test_ollama_generator_schema_recovery(monkeypatch):
     """Test that OllamaChangeGenerator retries on schema-invalid output."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
-    
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     # First response has invalid schema (strings in changes), second is valid
     responses = [
         {"changes": ["invalid", "also invalid"]},  # Schema invalid
         {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}  # Valid
     ]
-    
+
     call_count = [0]
-    
+
     def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         return responses.pop(0)
-    
+
     monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     plan = ChangePlan(
         summary="Create app",
         changes=[PlannedChange(path="a.py", operation="create", reason="needed")],
         validation_commands=[]
     )
     request = TaskRequest(prompt="create a.py")
-    
+
     changes = generator.generate(request, plan, {})
-    
+
     # Should have retried once and succeeded
     assert call_count[0] == 2
     assert len(changes) == 1
@@ -505,85 +517,85 @@ def test_ollama_generator_schema_recovery(monkeypatch):
 
 def test_ollama_generator_schema_fallback_after_retries(monkeypatch):
     """Test that schema validation failure falls back to next provider after retries."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
-    
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("HF_TOKEN", "fake-token")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         # Always return schema-invalid response
         raise JSONRecoveryError("Schema validation failed after 3 attempts")
-    
+
     def mock_hf(self, prompt, model=None):
         call_order.append("huggingface")
         return {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"changes": [{"path": "b.py", "operation": "create", "content": "y = 2"}]}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     plan = ChangePlan(
         summary="Create app",
         changes=[PlannedChange(path="a.py", operation="create", reason="needed")],
         validation_commands=[]
     )
     request = TaskRequest(prompt="create a.py")
-    
-    changes = generator.generate(request, plan, {})
-    
+
+    generator.generate(request, plan, {})
+
 
 # HF unsupported task error test
 def test_ollama_generator_hf_unsupported_task_fallback(monkeypatch):
     """Test that HF 'task not supported' error falls back to next provider immediately."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
     from code_builder_v2.ollama import OllamaError
-    
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("HF_TOKEN", "fake-token")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise OllamaError("Groq API error")
-    
+
     def mock_hf(self, prompt, model=None):
         call_order.append("huggingface")
         # Simulate the nscale "task not supported" error
         raise OllamaError("Task 'text-generation' not supported by provider nscale")
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     plan = ChangePlan(
         summary="Create app",
         changes=[PlannedChange(path="a.py", operation="create", reason="needed")],
         validation_commands=[]
     )
     request = TaskRequest(prompt="create a.py")
-    
+
     changes = generator.generate(request, plan, {})
-    
+
     # Should fall back to ollama after HF unsupported task error
     assert len(changes) == 1
     assert changes[0].path == "a.py"
@@ -594,14 +606,14 @@ def test_ollama_generator_hf_unsupported_task_fallback(monkeypatch):
 
 def test_ollama_generator_incremental_multi_file(monkeypatch):
     """Test that multi-file applications are generated incrementally (one file per call)."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
-    
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     # Track how many times generate_json is called
     call_count = [0]
-    
+
     def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         # Each call should return a single file change
@@ -611,12 +623,12 @@ def test_ollama_generator_incremental_multi_file(monkeypatch):
             "operation": "create",
             "content": f"# File {file_idx}\nvalue = {file_idx}\n"
         }]}
-    
+
     monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     # Plan with 3 files - should trigger incremental generation
     plan = ChangePlan(
         summary="Create multi-file app",
@@ -628,9 +640,9 @@ def test_ollama_generator_incremental_multi_file(monkeypatch):
         validation_commands=[]
     )
     request = TaskRequest(prompt="create 3 files")
-    
+
     changes = generator.generate(request, plan, {})
-    
+
     # Should have called generate_json 3 times (once per file)
     assert call_count[0] == 3
     assert len(changes) == 3
@@ -641,15 +653,15 @@ def test_ollama_generator_incremental_multi_file(monkeypatch):
 
 def test_ollama_generator_incremental_failed_file_retry(monkeypatch):
     """Test that a failed file can be retried without regenerating completed files."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
-    from code_builder_v2.ollama import OllamaError, JSONRecoveryError, RateLimitError
-    
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
+    from code_builder_v2.ollama import RateLimitError
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     # Track call sequence
     call_log = []
-    
+
     def mock_generate_json(self, prompt, model=None, progress=None):
         call_log.append(prompt)
         # Check for the specific file being generated in the prompt
@@ -669,12 +681,12 @@ def test_ollama_generator_incremental_failed_file_retry(monkeypatch):
             # Fail on third file - simulate rate limit
             raise RateLimitError("Rate limit exceeded", provider="groq", model="test")
         return {"changes": []}
-    
+
     monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     plan = ChangePlan(
         summary="Create multi-file app",
         changes=[
@@ -685,19 +697,19 @@ def test_ollama_generator_incremental_failed_file_retry(monkeypatch):
         validation_commands=[]
     )
     request = TaskRequest(prompt="create 3 files")
-    
+
     # Should fail on third file
     try:
         generator.generate(request, plan, {})
-        assert False, "Should have raised RateLimitError"
+        raise AssertionError("Should have raised RateLimitError")
     except RateLimitError:
         pass
-    
+
     # Verify first two files were generated (calls made for file0 and file1)
     file0_calls = sum(1 for p in call_log if 'file0.py' in p and 'file1.py' not in p)
     file1_calls = sum(1 for p in call_log if 'file1.py' in p and 'file2.py' not in p)
     file2_calls = sum(1 for p in call_log if 'file2.py' in p)
-    
+
     # Each file should be attempted at least once
     assert file0_calls >= 1
     assert file1_calls >= 1
@@ -706,13 +718,13 @@ def test_ollama_generator_incremental_failed_file_retry(monkeypatch):
 
 def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
     """Test that small applications (1-2 files) use fast path (single call)."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
-    
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     call_count = [0]
-    
+
     def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         # Return all files in one response (fast path)
@@ -720,12 +732,12 @@ def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
             {"path": "a.py", "operation": "create", "content": "x = 1"},
             {"path": "b.py", "operation": "create", "content": "y = 2"},
         ]}
-    
+
     monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     # Plan with 2 files - should use fast path
     plan = ChangePlan(
         summary="Create small app",
@@ -736,9 +748,9 @@ def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
         validation_commands=[]
     )
     request = TaskRequest(prompt="create 2 files")
-    
+
     changes = generator.generate(request, plan, {})
-    
+
     # Should have called generate_json only once (fast path)
     assert call_count[0] == 1
     assert len(changes) == 2
@@ -746,13 +758,13 @@ def test_ollama_generator_fast_path_for_small_apps(monkeypatch):
 
 def test_ollama_generator_resumable_generation(monkeypatch):
     """Test that generation can resume from previous progress."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange, GenerationProgress
-    
+    from code_builder_v2.models import ChangePlan, GenerationProgress, PlannedChange, TaskRequest
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     call_count = [0]
-    
+
     def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         file_idx = call_count[0] - 1
@@ -761,12 +773,12 @@ def test_ollama_generator_resumable_generation(monkeypatch):
             "operation": "create",
             "content": f"# File {file_idx}\nvalue = {file_idx}\n"
         }]}
-    
+
     monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     plan = ChangePlan(
         summary="Create multi-file app",
         changes=[
@@ -777,7 +789,7 @@ def test_ollama_generator_resumable_generation(monkeypatch):
         validation_commands=[]
     )
     request = TaskRequest(prompt="create 3 files")
-    
+
     # First call: generate first 2 files (batch_size=2 would make 2 calls, but batch_size=1 makes 3)
     progress = GenerationProgress(
         total_files=3,
@@ -786,7 +798,7 @@ def test_ollama_generator_resumable_generation(monkeypatch):
         completed_files={}
     )
     changes = generator.generate(request, plan, {}, progress)
-    
+
     # With batch_size=1, should make 3 calls for 3 files
     assert call_count[0] == 3
     assert len(changes) == 3
@@ -795,7 +807,7 @@ def test_ollama_generator_resumable_generation(monkeypatch):
     assert changes[2].path == "file2.py"
     assert progress.current_file_index == 3
     assert progress.is_complete()
-    
+
     # Second call with completed progress - should not call generate_json again
     call_count[0] = 0
     progress2 = GenerationProgress(
@@ -809,7 +821,7 @@ def test_ollama_generator_resumable_generation(monkeypatch):
         }
     )
     changes2 = generator.generate(request, plan, {}, progress2)
-    
+
     # Should return existing completed files without calling generate_json
     assert call_count[0] == 0
     assert len(changes2) == 3
@@ -820,14 +832,14 @@ def test_ollama_generator_resumable_generation(monkeypatch):
 
 def test_ollama_generator_batch_generation(monkeypatch):
     """Test that batch generation works with configurable batch size."""
-    from code_builder_v2.models import TaskRequest, ChangePlan, PlannedChange
-    
+    from code_builder_v2.models import ChangePlan, PlannedChange, TaskRequest
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     call_count = [0]
     batch_sizes = []
-    
+
     def mock_generate_json(self, prompt, model=None, progress=None):
         call_count[0] += 1
         # Return multiple files per call based on what was requested
@@ -844,12 +856,12 @@ def test_ollama_generator_batch_generation(monkeypatch):
                     "content": f"# File {idx}\nvalue = {idx}\n"
                 })
         return {"changes": changes}
-    
+
     monkeypatch.setattr(OllamaClient, "generate_json", mock_generate_json)
-    
+
     client = OllamaClient()
     generator = OllamaChangeGenerator(client)
-    
+
     plan = ChangePlan(
         summary="Create multi-file app",
         changes=[
@@ -861,9 +873,9 @@ def test_ollama_generator_batch_generation(monkeypatch):
         validation_commands=[]
     )
     request = TaskRequest(prompt="create 4 files", batch_size=2)
-    
+
     changes = generator.generate(request, plan, {})
-    
+
     # Should have called generate_json 2 times (4 files / batch_size=2)
     assert call_count[0] == 2
     assert len(changes) == 4
@@ -876,41 +888,41 @@ def test_ollama_generator_batch_generation(monkeypatch):
 def test_ollama_client_skips_rate_limited_provider(monkeypatch):
     """Test that client skips providers marked as rate-limited in progress."""
     from code_builder_v2.models import GenerationProgress
-    
+
     monkeypatch.setenv("GROQ_API_KEY", "fake-key")
     monkeypatch.setenv("HF_TOKEN", "fake-token")
     monkeypatch.setenv("LUMINA_USE_LOCAL_OLLAMA", "true")
-    
+
     call_order = []
-    
+
     def mock_groq(self, prompt, model=None):
         call_order.append("groq")
         raise RateLimitError("Rate limit exceeded", provider="groq", model="test")
-    
+
     def mock_hf(self, prompt, model=None):
         call_order.append("huggingface")
         return {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
-    
+
     def mock_ollama(self, prompt, model=None):
         call_order.append("ollama")
         return {"changes": [{"path": "b.py", "operation": "create", "content": "y = 2"}]}
-    
+
     monkeypatch.setattr(OllamaClient, "_generate_with_groq", mock_groq)
     monkeypatch.setattr(OllamaClient, "_generate_with_huggingface", mock_hf)
     monkeypatch.setattr(OllamaClient, "_generate_with_local_ollama", mock_ollama)
-    
+
     client = OllamaClient()
-    
+
     # First call without progress - should try groq, fail, then try hf
     result = client.generate_json("test prompt")
     assert result == {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}
     assert "groq" in call_order
     assert "huggingface" in call_order
-    
+
     # Now with progress that marks groq as rate-limited
     progress = GenerationProgress()
     progress.add_rate_limited_provider("groq")
-    
+
     call_order.clear()
     result = client.generate_json("test prompt", progress=progress)
     assert result == {"changes": [{"path": "a.py", "operation": "create", "content": "x = 1"}]}

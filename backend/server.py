@@ -116,9 +116,8 @@ from code_creator import ollama_status as code_ollama_status
 from code_creator import read_file as code_read_file
 from code_creator import run_safe_check as code_run_safe_check
 from developer_center import TASKS as DEVELOPER_TASKS  # noqa: E402
-from developer_center import local_system_metrics, repository_status
+from developer_center import local_system_metrics, repository_status, scrub_serialization_safe
 from developer_center import manager as developer_manager
-from developer_center import scrub_serialization_safe
 from document_studio.router import configure_document_studio_router  # noqa: E402
 from document_studio.router import router as document_studio_router
 from driver_assistance_services import (  # noqa: E402

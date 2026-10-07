@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.request
 import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 class ProviderError(RuntimeError):
@@ -50,7 +50,7 @@ class ModelProvider(ABC):
     """Abstract base for model providers."""
 
     @abstractmethod
-    def generate_json(self, prompt: str, model: Optional[str] = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         """Generate structured JSON from prompt."""
 
     @property
@@ -77,7 +77,7 @@ class OpenRouterProvider(ModelProvider):
     def name(self) -> str:
         return "openrouter"
 
-    def generate_json(self, prompt: str, model: Optional[str] = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         try:
             from openrouter import OpenRouter
         except ImportError as exc:
@@ -119,7 +119,7 @@ class GroqProvider(ModelProvider):
     def name(self) -> str:
         return "groq"
 
-    def generate_json(self, prompt: str, model: Optional[str] = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         try:
             from groq import Groq
         except ImportError as exc:
@@ -159,7 +159,7 @@ class HuggingFaceProvider(ModelProvider):
     def name(self) -> str:
         return "huggingface"
 
-    def generate_json(self, prompt: str, model: Optional[str] = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         try:
             from huggingface_hub import InferenceClient
         except ImportError as exc:
@@ -196,7 +196,7 @@ class OllamaProvider(ModelProvider):
     def name(self) -> str:
         return "ollama"
 
-    def generate_json(self, prompt: str, model: Optional[str] = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None) -> dict[str, Any]:
         model_name = model or self.default_model
         url = f"{self.base_url}/api/generate"
 
@@ -285,10 +285,10 @@ class ModelRouter:
 
         return providers
 
-    def generate_json(self, prompt: str, model: Optional[str] = None, preferred_provider: Optional[str] = None) -> dict[str, Any]:
+    def generate_json(self, prompt: str, model: str | None = None, preferred_provider: str | None = None) -> dict[str, Any]:
         """Generate with automatic fallback through provider chain."""
 
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         # If preferred provider specified, try it first
         if preferred_provider:

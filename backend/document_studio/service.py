@@ -3272,7 +3272,6 @@ def _translate_ai_service_error(exc: Exception) -> DocumentStudioAIServiceError:
     from .document_ai_provider import (
         DocumentAIProviderError,
         DocumentAIProviderTimeout,
-        MalformedDocumentAIResponse,
     )
     from .generation_orchestrator import (
         GenerationFallbackError,
@@ -3317,7 +3316,6 @@ async def create_natural_document_preview(
     from .natural_creation import create_natural_document
 
     def _retryable(exc: Exception) -> bool:
-        from .document_ai_provider import MalformedDocumentAIResponse
         from .natural_creation import NaturalCreationProviderError
 
         if isinstance(exc, MalformedDocumentAIResponse):

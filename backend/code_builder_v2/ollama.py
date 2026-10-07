@@ -4,11 +4,11 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from .applier import ProposedFileChange
-from .models import ChangePlan, TaskRequest, GenerationProgress
+from .models import ChangePlan, GenerationProgress, TaskRequest
 from .planner import PlannerUnavailable
 
 log = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class JSONRecoveryError(OllamaError):
 
 class RateLimitError(OllamaError):
     """Raised when provider rate limit (429) is hit."""
-    
+
     def __init__(self, message: str, retry_after: int | None = None, provider: str | None = None, model: str | None = None):
         super().__init__(message)
         self.retry_after = retry_after
@@ -97,40 +97,40 @@ Return ONLY the complete valid JSON object matching the schema above. No markdow
 
 def _validate_changes_schema(data: dict[str, Any], log: logging.Logger) -> tuple[bool, str]:
     """Validate that parsed JSON matches Code Builder changes schema.
-    
+
     Returns: (is_valid, error_message)
     """
     if "changes" not in data:
         return False, "Missing 'changes' key"
-    
+
     changes = data["changes"]
     if not isinstance(changes, list):
         return False, "'changes' must be an array"
-    
+
     if not changes:
         return False, "'changes' array is empty"
-    
+
     valid_operations = {"create", "update", "delete"}
-    
+
     for idx, item in enumerate(changes):
         if not isinstance(item, dict):
             return False, f"changes[{idx}] must be an object, got {type(item).__name__}"
-        
+
         if "path" not in item or not isinstance(item["path"], str) or not item["path"].strip():
             return False, f"changes[{idx}] missing or invalid 'path' (must be non-empty string)"
-        
+
         if "operation" not in item or not isinstance(item["operation"], str) or item["operation"] not in valid_operations:
             return False, f"changes[{idx}] missing or invalid 'operation' (must be create|update|delete)"
-        
+
         if "content" not in item:
             return False, f"changes[{idx}] missing 'content' field"
-        
+
         if item["operation"] in {"create", "update"} and item["content"] is None:
             return False, f"changes[{idx}] 'content' must be string for create/update operations"
-        
+
         if item["operation"] == "delete" and item["content"] is not None:
             return False, f"changes[{idx}] 'content' must be null for delete operations"
-    
+
     return True, ""
 
 
@@ -181,12 +181,13 @@ class OllamaClient:
             raise OllamaError("GROQ_API_KEY is not configured.")
 
         max_retries = 2
-        last_raw = ""
         model = self._groq_model(requested_model)
-        
+
         for attempt in range(max_retries + 1):
             try:
-                from groq import Groq, RateLimitError as GroqRateLimitError, APIError as GroqAPIError
+                from groq import APIError as GroqAPIError
+                from groq import Groq
+                from groq import RateLimitError as GroqRateLimitError
 
                 client = Groq(api_key=api_key, timeout=self.timeout_seconds)
                 response = client.chat.completions.create(
@@ -236,9 +237,8 @@ class OllamaClient:
 
             if not isinstance(raw, str) or not raw.strip():
                 raise OllamaError("Groq returned an empty response.")
-            
-            last_raw = raw
-            
+
+
             try:
                 return _extract_json_object(raw)
             except OllamaError as exc:
@@ -260,17 +260,16 @@ class OllamaClient:
             or None
         )
         model = self._hf_model(requested_model)
-        
+
         # Allow configuring HF provider to avoid incompatible ones (e.g., nscale)
         hf_provider = os.getenv("HF_INFERENCE_PROVIDER", "").strip() or None
 
         max_retries = 2
-        last_raw = ""
-        
+
         for attempt in range(max_retries + 1):
             try:
                 from huggingface_hub import InferenceClient
-                from huggingface_hub.errors import HFValidationError, HfHubHTTPError
+                from huggingface_hub.errors import HfHubHTTPError, HFValidationError
 
                 client = InferenceClient(
                     model=model,
@@ -350,9 +349,8 @@ class OllamaClient:
 
             if not isinstance(raw, str) or not raw.strip():
                 raise OllamaError("Hugging Face returned an empty response.")
-            
-            last_raw = raw
-            
+
+
             try:
                 return _extract_json_object(raw)
             except OllamaError as exc:
@@ -369,15 +367,14 @@ class OllamaClient:
 
     def _generate_with_local_ollama(self, prompt: str, requested_model: str | None) -> dict[str, Any]:
         """Generate using local Ollama server via HTTP API."""
-        import urllib.request
         import urllib.error
+        import urllib.request
 
         model = requested_model or self.default_model
         url = f"{self.base_url}/api/generate"
-        
+
         max_retries = 2
-        last_raw = ""
-        
+
         for attempt in range(max_retries + 1):
             payload = {
                 "model": model,
@@ -390,7 +387,7 @@ class OllamaClient:
                     "num_predict": 8192,
                 }
             }
-            
+
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
                 url,
@@ -398,7 +395,7 @@ class OllamaClient:
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
-            
+
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
                     raw = response.read().decode("utf-8")
@@ -409,9 +406,8 @@ class OllamaClient:
 
             if not isinstance(raw, str) or not raw.strip():
                 raise OllamaError("Local Ollama returned an empty response.")
-            
-            last_raw = raw
-            
+
+
             # Ollama returns {"response": "..."} when format=json
             try:
                 parsed = json.loads(raw)
@@ -419,7 +415,7 @@ class OllamaClient:
                     raw = parsed["response"]
             except json.JSONDecodeError:
                 pass
-                
+
             try:
                 return _extract_json_object(raw)
             except OllamaError as exc:
@@ -441,21 +437,21 @@ class OllamaClient:
         Local Ollama is ONLY included when explicitly configured via OLLAMA_BASE_URL
         pointing to a non-localhost endpoint (for production Ollama) or when
         LUMINA_USE_LOCAL_OLLAMA=true (for local development).
-        
+
         If progress is provided, skip providers that have been rate-limited.
         """
         providers = []
-        
+
         if os.getenv("GROQ_API_KEY", "").strip():
             providers.append(("groq", self._generate_with_groq))
         if os.getenv("HF_TOKEN", "").strip() or os.getenv("HUGGINGFACEHUB_API_TOKEN", "").strip():
             providers.append(("huggingface", self._generate_with_huggingface))
-        
+
         # Local Ollama ONLY when explicitly configured for production (non-localhost URL)
         # or explicitly enabled for local development
         ollama_base_url = os.getenv("OLLAMA_BASE_URL", "").strip()
         use_local_ollama = os.getenv("LUMINA_USE_LOCAL_OLLAMA", "").strip().lower() in {"1", "true", "yes", "on"}
-        
+
         if ollama_base_url and not ollama_base_url.startswith(("http://127.0.0.1", "http://localhost", "http://::1")):
             # Explicitly configured production Ollama endpoint
             self.base_url = ollama_base_url
@@ -463,22 +459,22 @@ class OllamaClient:
         elif use_local_ollama:
             # Local development with Ollama
             providers.append(("ollama", self._generate_with_local_ollama))
-        
+
         if not providers:
             raise OllamaError(
                 "No model providers configured. Set GROQ_API_KEY, HF_TOKEN, "
                 "or configure OLLAMA_BASE_URL for production Ollama / "
                 "LUMINA_USE_LOCAL_OLLAMA=true for local development."
             )
-        
+
         last_error: Exception | None = None
-        
+
         for provider_name, provider_fn in providers:
             # Skip rate-limited providers if progress tracking is enabled
             if progress and progress.is_provider_rate_limited(provider_name):
                 log.info("Skipping rate-limited provider: %s", provider_name)
                 continue
-            
+
             try:
                 log.info("Attempting JSON generation with provider: %s", provider_name)
                 result = provider_fn(prompt, model)
@@ -515,7 +511,7 @@ class OllamaClient:
                 )
                 last_error = exc
                 continue
-        
+
         raise OllamaError(f"All providers failed. Last error: {last_error}")
 
 
@@ -553,14 +549,14 @@ class OllamaChangeGenerator:
     ) -> list[ProposedFileChange]:
         plan_json = plan.model_dump_json()
         context_json = json.dumps(file_context, ensure_ascii=False)
-        
+
         # Determine if incremental generation is needed
         # Use incremental for 3+ files or when explicitly requested
         use_incremental = len(plan.changes) >= 3
-        
+
         if use_incremental:
             return self._generate_incremental(request, plan, file_context, plan_json, context_json, progress)
-        
+
         # Fast path: single provider call for small applications
         return self._generate_fast_path(request, plan, file_context, plan_json, context_json, progress)
 
@@ -589,10 +585,10 @@ Original request: {request.prompt}
 """
         max_schema_retries = 2
         current_prompt = prompt
-        
+
         for attempt in range(max_schema_retries + 1):
             data = self.client.generate_json(current_prompt, request.model, progress)
-            
+
             # Validate schema
             is_valid, schema_error = _validate_changes_schema(data, log)
             if is_valid:
@@ -607,17 +603,17 @@ Original request: {request.prompt}
                         )
                     )
                 return changes
-            
+
             # Schema validation failed - try recovery
             log.warning(
                 "Schema validation failed (attempt %d/%d): %s",
                 attempt + 1, max_schema_retries + 1, schema_error
             )
-            
+
             if attempt < max_schema_retries:
                 current_prompt = _build_schema_recovery_prompt(prompt, json.dumps(data), schema_error, attempt)
                 continue
-            
+
             # Schema retries exhausted - raise to trigger provider fallback
             raise JSONRecoveryError(
                 f"Schema validation failed after {max_schema_retries + 1} attempts: {schema_error}"
@@ -635,22 +631,22 @@ Original request: {request.prompt}
         """Generate files incrementally - batch files per provider call."""
         # Get batch size from request or use default (1 file per call)
         batch_size = getattr(request, 'batch_size', 1) or 1
-        
+
         # Initialize or resume progress
         if progress is None:
             progress = GenerationProgress(total_files=len(plan.changes), batch_size=batch_size)
         else:
             progress.total_files = len(plan.changes)
             progress.batch_size = batch_size
-        
-        log.info("Using incremental generation for %d files (batch_size=%d, resume_index=%d)", 
+
+        log.info("Using incremental generation for %d files (batch_size=%d, resume_index=%d)",
                  len(plan.changes), batch_size, progress.current_file_index)
-        
+
         # Sort changes for deterministic order: creates first, then modifies, then deletes
         sorted_changes = sorted(plan.changes, key=lambda c: (c.operation != "create", c.operation != "modify", c.path))
-        
+
         all_changes: list[ProposedFileChange] = []
-        
+
         # Add already completed files from progress
         for path, change_data in progress.completed_files.items():
             all_changes.append(ProposedFileChange(
@@ -658,41 +654,41 @@ Original request: {request.prompt}
                 operation=change_data["operation"],
                 content=change_data["content"],
             ))
-        
+
         while not progress.is_complete():
             # Get next batch of files to generate
             batch = progress.get_next_batch(sorted_changes)
             if not batch:
                 break
-            
+
             log.info("Generating batch of %d files (%d/%d)", len(batch), progress.current_file_index + 1, len(sorted_changes))
-            
+
             # Build prompt for this batch
             batch_context = {}
             batch_plan = {"changes": []}
-            
+
             for planned_change in batch:
                 file_path = planned_change.path
                 operation = planned_change.operation
-                
+
                 if file_path in file_context and operation in {"modify", "delete"}:
                     batch_context[file_path] = file_context[file_path]
-                
+
                 batch_plan["changes"].append({
                     "path": file_path,
                     "operation": operation,
                     "reason": planned_change.reason
                 })
-            
+
             # Include previously generated files as context for dependency awareness
             for completed in progress.get_completed_changes():
                 path = completed.get("path", "")
                 if path and path not in batch_context:
                     batch_context[path] = completed.get("content", "") or ""
-            
+
             batch_context_json = json.dumps(batch_context, ensure_ascii=False)
             batch_plan_json = json.dumps(batch_plan, ensure_ascii=False)
-            
+
             file_prompt = f"""You are the implementation engine of LUMINA Code Builder V2.
 Generate ONLY the specified files and return ONLY JSON:
 {{"changes":[{{"path":"relative/path","operation":"create|modify|delete","content":"full file content or null for delete"}}]}}
@@ -709,11 +705,11 @@ Original request: {request.prompt}
             max_schema_retries = 2
             current_prompt = file_prompt
             batch_success = False
-            
+
             for attempt in range(max_schema_retries + 1):
                 try:
                     data = self.client.generate_json(current_prompt, request.model, progress)
-                    
+
                     # Validate schema for batch
                     is_valid, schema_error = _validate_changes_schema(data, log)
                     if is_valid:
@@ -727,37 +723,37 @@ Original request: {request.prompt}
                                     content=item.get("content"),
                                 )
                                 batch_changes.append(change)
-                            
+
                             # Verify we got the expected files
                             expected_paths = {pc.path for pc in batch}
                             actual_paths = {c.path for c in batch_changes}
                             if not expected_paths.issubset(actual_paths):
                                 missing = expected_paths - actual_paths
                                 log.warning("Provider missing expected files: %s", missing)
-                            
+
                             progress.mark_batch_completed(batch_changes)
                             all_changes.extend(batch_changes)
                             batch_success = True
                             break
                         else:
                             raise OllamaError("No changes returned for batch generation")
-                    
+
                     # Schema validation failed - try recovery
                     log.warning(
                         "Schema validation failed for batch (attempt %d/%d): %s",
                         attempt + 1, max_schema_retries + 1, schema_error
                     )
-                    
+
                     if attempt < max_schema_retries:
                         current_prompt = _build_schema_recovery_prompt(file_prompt, json.dumps(data), schema_error, attempt)
                         continue
-                    
+
                     # Schema retries exhausted for this batch
                     progress.mark_failed(batch[0].path if batch else "unknown")
                     raise JSONRecoveryError(
                         f"Schema validation failed for batch after {max_schema_retries + 1} attempts: {schema_error}"
                     )
-                    
+
                 except RateLimitError as rle:
                     # Track rate-limited provider and re-raise for provider fallback
                     progress.add_rate_limited_provider(rle.provider or "unknown")
@@ -767,16 +763,16 @@ Original request: {request.prompt}
                     # Re-raise to trigger provider fallback
                     progress.mark_failed(batch[0].path if batch else "unknown")
                     raise
-            
+
             if not batch_success:
                 break
-            
+
             # Small delay between batches to be respectful to rate limits
             if not progress.is_complete():
                 time.sleep(0.5)
-        
+
         if progress.failed_file:
             raise JSONRecoveryError(f"Failed to generate file: {progress.failed_file}")
-        
+
         log.info("Incremental generation completed: %d files generated", len(all_changes))
         return all_changes

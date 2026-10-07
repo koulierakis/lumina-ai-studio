@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from pathlib import Path
 
 import httpx
 import pytest
-
 from ai_runtime.advisor import AdvisorRequest, ExecutiveAdvisorService
 from ai_runtime.capabilities import (
     CapabilityExecutionError,
@@ -290,9 +288,8 @@ def test_real_approval_executes_delete_when_confirmed(tmp_path: Path) -> None:
 
 
 def test_mind_decide_endpoint_approves_and_declines(tmp_path: Path) -> None:
-    from server import app
-
     from auth import issue_token
+    from server import app
 
     headers = {"Authorization": f"Bearer {issue_token(OWNER)}"}
     transport = httpx.ASGITransport(app=app)

@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import io
-import json
-import sys
 
-import pytest
 import server
 from PIL import Image
 from video_providers import get_video_provider

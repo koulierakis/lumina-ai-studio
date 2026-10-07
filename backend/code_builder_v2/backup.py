@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -27,7 +27,7 @@ class BackupService:
         self.backup_root.mkdir(parents=True, exist_ok=True)
 
     def create(self, paths: list[str]) -> BackupManifest:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         backup_id = f"{stamp}-{uuid4().hex[:8]}"
         folder = self.backup_root / backup_id
         folder.mkdir(parents=True, exist_ok=False)

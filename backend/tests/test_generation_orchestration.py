@@ -28,13 +28,13 @@ from document_studio.groq_provider import (
     GroqProviderHTTPError,
     GroqProviderUnavailable,
 )
+from document_studio.models import CompanyProfile, NaturalDocumentCreationRequest
+from document_studio.natural_creation import NaturalCreationProviderError
 from document_studio.sambanova_provider import (
     SambaNovaDocumentProvider,
     SambaNovaProviderHTTPError,
     SambaNovaProviderUnavailable,
 )
-from document_studio.models import CompanyProfile, NaturalDocumentCreationRequest
-from document_studio.natural_creation import NaturalCreationProviderError
 
 
 def run(coro):
