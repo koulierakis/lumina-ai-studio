@@ -1,4 +1,4 @@
-import { activeJobs, buildMessages, formatRelativeTime, suggestedActions } from './model';
+import { CONTROL_CENTER_TOOLS, activeJobs, buildMessages, formatRelativeTime, suggestedActions } from './model';
 
 describe('control center model', () => {
   it('keeps only actionable jobs and creates relevant next actions', () => {
@@ -25,5 +25,12 @@ describe('control center model', () => {
 
   it('formats recent timestamps for activity cards', () => {
     expect(formatRelativeTime('2026-07-24T10:00:00.000Z', Date.parse('2026-07-24T10:05:00.000Z'))).toBe('5m ago');
+  });
+
+  it('routes every control-center tool to its own studio', () => {
+    const byKey = Object.fromEntries(CONTROL_CENTER_TOOLS.map((tool) => [tool.key, tool.to]));
+    expect(byKey.voice).toBe('/studio/voice-studio');
+    expect(byKey.video).toBe('/studio/video-studio');
+    expect(new Set(CONTROL_CENTER_TOOLS.map((tool) => tool.to)).size).toBe(CONTROL_CENTER_TOOLS.length);
   });
 });

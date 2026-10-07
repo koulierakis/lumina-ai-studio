@@ -1,7 +1,7 @@
 export const CONTROL_CENTER_TOOLS = [
   { key: 'image', label: 'Image Studio', description: 'Create and edit visual content.', to: '/studio/generate', icon: 'image' },
   { key: 'video', label: 'Video Studio', description: 'Build polished video projects.', to: '/studio/video-studio', icon: 'video' },
-  { key: 'voice', label: 'Voice Studio', description: 'Record and shape voice-over.', to: '/studio/video-studio', icon: 'voice' },
+  { key: 'voice', label: 'Voice Studio', description: 'Record and shape voice-over.', to: '/studio/voice-studio', icon: 'voice' },
   { key: 'documents', label: 'Documents', description: 'Create refined client documents.', to: '/studio/documents', icon: 'document' },
   { key: 'finance', label: 'JSA Finance', description: 'Review financial workflows.', to: '/studio/finance', icon: 'finance' },
   { key: 'research', label: 'Internet Research', description: 'Gather focused research.', to: '/studio/research', icon: 'research' },

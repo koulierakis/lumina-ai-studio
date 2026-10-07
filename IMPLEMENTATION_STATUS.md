@@ -7,7 +7,11 @@
   routed `/studio/research` and `/studio/automations` to the `ComingSoon`
   placeholder even though the dashboard advertised them. The routes now render
   the real workspaces and the unused placeholder import was removed.
-  Regression coverage: `frontend/src/pages/ProductivityCenter.test.jsx`.
+  The dashboard's Voice Studio card also pointed at `/studio/video-studio`,
+  leaving the `/studio/voice-studio` page unreachable from the control center;
+  it now targets its own studio.
+  Regression coverage: `frontend/src/pages/ProductivityCenter.test.jsx`,
+  `frontend/src/dashboard/model.test.js`.
 - Document Studio final review polish: review mode now has explicit editing,
   reviewing and read-only viewing states; review actions normalize to the
   backend accept/reject suggestion contract; comments are grouped into threaded
