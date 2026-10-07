@@ -3341,6 +3341,14 @@ async def workspace_search(q: str = "", owner: str = Depends(require_owner)) -> 
     return {"media": media, "projects": projects, "jobs": jobs, "identity_packs": packs, "modules": modules}
 
 
+@api.get("/ai/health")
+async def ai_health(_: str = Depends(require_owner)) -> dict:
+    """One unified, credential-safe health view across every AI capability."""
+    from ai_health import collect_ai_health
+
+    return await collect_ai_health()
+
+
 @api.get("/settings/readiness")
 async def settings_readiness(_: str = Depends(require_owner)) -> dict:
     statuses = await provider_manager.statuses()
