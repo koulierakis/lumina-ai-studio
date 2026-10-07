@@ -19,6 +19,7 @@ if str(_LAUNCHER_DIR) not in sys.path:
 from lumina.config import load_config  # noqa: E402
 from lumina.doctor import run_doctor  # noqa: E402
 from lumina.errors import AlreadyRunningError, LauncherError  # noqa: E402
+from lumina.keys import set_keys_interactively  # noqa: E402
 from lumina.logging_util import setup_logging  # noqa: E402
 from lumina.paths import find_repo_root  # noqa: E402
 from lumina.services import (
@@ -107,6 +108,12 @@ def cmd_doctor(_: argparse.Namespace) -> int:
     return 0 if report.get("ok") else 3
 
 
+def cmd_set_keys(_: argparse.Namespace) -> int:
+    root = find_repo_root()
+    saved = set_keys_interactively(root)
+    return 0 if saved else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="lumina_launcher", description="LUMINA local runtime manager")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -115,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("restart", help="Safe stop then start")
     sub.add_parser("status", help="Show backend / frontend / Ollama state")
     sub.add_parser("doctor", help="Diagnose local dependencies and ports")
+    sub.add_parser("set-keys", help="Interactively store API keys in backend/.env")
     return parser
 
 
@@ -127,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
         "restart": cmd_restart,
         "status": cmd_status,
         "doctor": cmd_doctor,
+        "set-keys": cmd_set_keys,
     }
     return handlers[args.command](args)
 

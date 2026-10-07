@@ -30,6 +30,7 @@ python launcher\lumina_launcher.py doctor
 | `restart` | Safe stop, then start. |
 | `status` | Shows backend / frontend / Ollama readiness and owned PIDs. |
 | `doctor` | Checks Python, Node, npm, Ollama, model, paths, and ports. |
+| `set-keys` | Interactively stores API keys in `backend/.env` (hidden input, never printed). |
 
 Meaningful exit codes: `0` success, `2` already running, `3` missing dependency / doctor failure, `4` port in use, `5` startup timeout, `6` shutdown failure.
 
@@ -89,6 +90,26 @@ Phone / tablet: http://192.168.1.20:3000/ (same private network or Tailscale)
 `status` reports the same address as `remote_url`. If no private address can be detected, the launcher says so and points you to a VPN such as Tailscale.
 
 Keep this on a trusted private network. LUMINA does not expose itself to the public internet or configure a public hostname; do not port-forward `0.0.0.0`.
+
+## Adding API keys
+
+Cloud studios (Documents/Mind, images, video, voice) read their keys from
+`backend/.env`, which is never committed. The launcher can fill them in for you
+with hidden input, so keys never enter your shell history or any log:
+
+```bat
+python launcher\lumina_launcher.py set-keys
+```
+
+Pick the providers by number (for example `1,2`), or `all`, then paste each key
+at the hidden prompt. Skip a key with Enter. Restart LUMINA afterwards.
+
+The catalog maps providers to variables: `GROQ_API_KEY` (Documents AI + Mind),
+`GEMINI_API_KEY` (images), `OPENAI_API_KEY`, `CLOUDFLARE_API_TOKEN` +
+`CLOUDFLARE_ACCOUNT_ID`, `REPLICATE_API_TOKEN`, `HF_TOKEN`, `LUMA_API_KEY`,
+`ELEVENLABS_API_KEY`, and `HEYGEN_API_KEY`. You can also edit `backend/.env`
+directly; see `backend/.env.example` for every supported variable. Local
+providers (`edge-tts`, `mock`, `Ollama`) need no key.
 
 ## Troubleshooting
 
