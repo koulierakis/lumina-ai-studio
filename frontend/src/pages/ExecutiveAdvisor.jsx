@@ -5,6 +5,7 @@ import {
   BriefcaseBusiness,
   Building2,
   ChartNoAxesCombined,
+  CheckCircle2,
   CircleAlert,
   CircleDollarSign,
   Cloud,
@@ -13,9 +14,14 @@ import {
   Globe2,
   HardDrive,
   Loader2,
+  Mail,
+  Megaphone,
+  MessageCircle,
+  MessageSquareText,
   Mic,
   MicOff,
-  MessageSquareText,
+  PlugZap,
+  RefreshCw,
   Save,
   Send,
   ShieldCheck,
@@ -116,6 +122,14 @@ function OrchestrationPanel({ orchestration, deciding, onApprove, onDecline }) {
           <br />
           <span className="text-current/70">{label}</span>
           {status === 'executed' && summary && <div className="mt-1 break-words text-[10px] opacity-80">{summary}</div>}
+          {status === 'executed' && orchestration.result?.dry_run && (
+            <div className="mt-1 break-words text-[10px] font-medium text-amber-100" data-testid="mind-dry-run-note">
+              ΔΕΝ στάλθηκε — δοκιμαστική λειτουργία (dry-run). {orchestration.result?.detail || ''}
+            </div>
+          )}
+          {status === 'executed' && !orchestration.result?.dry_run && orchestration.result?.detail && (
+            <div className="mt-1 break-words text-[10px] opacity-80">{orchestration.result.detail}</div>
+          )}
           {status === 'executed' && orchestration.result?.items?.length > 0 && (
             <ul className="mt-1 space-y-0.5">
               {orchestration.result.items.slice(0, 5).map((item, index) => (
@@ -139,6 +153,181 @@ function OrchestrationPanel({ orchestration, deciding, onApprove, onDecline }) {
     </div>
   );
 }
+
+const CONNECTOR_META = {
+  email: {
+    label: 'Email',
+    icon: Mail,
+    testAction: 'send_email',
+    fields: [
+      { key: 'to', placeholder: 'client@example.com' },
+      { key: 'subject', placeholder: 'Θέμα (προαιρετικό)' },
+      { key: 'body', placeholder: 'Κείμενο μηνύματος', multiline: true },
+    ],
+  },
+  whatsapp: {
+    label: 'WhatsApp',
+    icon: MessageCircle,
+    testAction: 'send_whatsapp',
+    fields: [
+      { key: 'to', placeholder: '6941234567' },
+      { key: 'body', placeholder: 'Κείμενο μηνύματος', multiline: true },
+    ],
+  },
+  social: {
+    label: 'Social media',
+    icon: Megaphone,
+    testAction: 'publish_social',
+    fields: [
+      { key: 'channel', placeholder: 'facebook / instagram' },
+      { key: 'body', placeholder: 'Κείμενο ανάρτησης', multiline: true },
+    ],
+  },
+};
+
+function connectorTone(mode) {
+  if (mode === 'live') return 'border-emerald-400/25 bg-emerald-400/5 text-emerald-100';
+  if (mode === 'disabled') return 'border-white/10 bg-white/[0.02] text-white/40';
+  return 'border-amber-300/25 bg-amber-300/5 text-amber-100';
+}
+
+function connectorModeLabel(mode) {
+  if (mode === 'live') return 'Ενεργό';
+  if (mode === 'disabled') return 'Ανενεργό';
+  return 'Δοκιμή (dry-run)';
+}
+
+function connectorResultText(result) {
+  if (!result) return '';
+  if (result.dry_run) return `ΔΕΝ στάλθηκε — δοκιμαστική λειτουργία. ${result.detail || ''}`.trim();
+  return result.detail || result.status || '';
+}
+
+function ConnectorRow({ connector, busy, result, onTest }) {
+  const meta = CONNECTOR_META[connector.id] || { label: connector.id, icon: PlugZap, testAction: '', fields: [] };
+  const Icon = meta.icon;
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState({});
+  const testable = connector.mode !== 'disabled' && meta.testAction;
+
+  const update = (key, value) => setValues((current) => ({ ...current, [key]: value }));
+  const submit = () => {
+    if (busy) return;
+    onTest(connector.id, meta.testAction, values);
+  };
+
+  return (
+    <div className={`rounded-xl border p-3 ${connectorTone(connector.mode)}`} data-testid={`connector-${connector.id}`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0" />
+          <div className="min-w-0">
+            <div className="truncate text-xs font-medium text-white/85">{meta.label}</div>
+            <div className="text-[10px] uppercase tracking-[0.14em] opacity-80">{connectorModeLabel(connector.mode)}</div>
+          </div>
+        </div>
+        {connector.mode === 'live' && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-300" />}
+      </div>
+
+      {connector.mode === 'dry_run' && (
+        <p className="mt-2 text-[10px] leading-4 text-amber-100/80">
+          Δεν έχει ρυθμιστεί. Ό,τι στέλνεις μένει τοπικό και δεν φεύγει ποτέ από τη συσκευή σου.
+        </p>
+      )}
+
+      {result && (
+        <div
+          className={`mt-2 rounded-lg border px-2 py-1.5 text-[10px] leading-4 ${result.dry_run ? 'border-amber-300/30 bg-amber-300/10 text-amber-100' : result.ok ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-100' : 'border-red-400/25 bg-red-400/10 text-red-100'}`}
+          data-testid={`connector-result-${connector.id}`}
+        >
+          {result.dry_run && <span className="mr-1 font-semibold uppercase tracking-[0.12em]">Dry-run</span>}
+          {connectorResultText(result)}
+        </div>
+      )}
+
+      {testable && (
+        <>
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className="mt-2 text-[11px] text-white/45 hover:text-gold"
+            data-testid={`connector-test-toggle-${connector.id}`}
+          >
+            {open ? 'Κλείσιμο δοκιμής' : 'Δοκιμή αποστολής'}
+          </button>
+          {open && (
+            <div className="mt-2 space-y-2">
+              {meta.fields.map((field) => (
+                field.multiline ? (
+                  <textarea
+                    key={field.key}
+                    value={values[field.key] || ''}
+                    onChange={(event) => update(field.key, event.target.value)}
+                    placeholder={field.placeholder}
+                    rows={2}
+                    className="w-full resize-none rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-white/25"
+                  />
+                ) : (
+                  <input
+                    key={field.key}
+                    value={values[field.key] || ''}
+                    onChange={(event) => update(field.key, event.target.value)}
+                    placeholder={field.placeholder}
+                    className="w-full rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-[11px] text-white outline-none placeholder:text-white/25"
+                  />
+                )
+              ))}
+              <button
+                type="button"
+                onClick={submit}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-gold px-3 py-1.5 text-[11px] font-medium text-black disabled:opacity-40"
+                data-testid={`connector-test-submit-${connector.id}`}
+              >
+                {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                {connector.mode === 'live' ? 'Αποστολή' : 'Δοκιμή'}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ConnectorsPanel({ connectors, loading, busyId, results, onRefresh, onTest }) {
+  const dryRun = connectors.some((connector) => connector.mode === 'dry_run');
+  return (
+    <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4" data-testid="mind-connectors-panel">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2"><PlugZap className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Σύνδεσμοι</h2></div>
+        <button type="button" onClick={onRefresh} disabled={loading} className="text-white/35 hover:text-gold disabled:opacity-40" title="Ανανέωση">
+          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+        </button>
+      </div>
+      <p className="mt-2 text-[11px] leading-5 text-white/35">Email, WhatsApp και social — με έγκριση πριν φύγει οτιδήποτε.</p>
+      {dryRun && (
+        <div className="mt-2 rounded-lg border border-amber-300/25 bg-amber-300/5 px-2 py-1.5 text-[10px] leading-4 text-amber-100" data-testid="connectors-dry-run-banner">
+          Λειτουργία δοκιμής: κανένα μήνυμα δεν αποστέλλεται πραγματικά.
+        </div>
+      )}
+      <div className="mt-3 space-y-2">
+        {connectors.length === 0 && !loading && <p className="text-[11px] text-white/30">Δεν βρέθηκαν σύνδεσμοι.</p>}
+        {connectors.map((connector) => (
+          <ConnectorRow
+            key={connector.id}
+            connector={connector}
+            busy={busyId === connector.id}
+            result={results[connector.id]}
+            onTest={onTest}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+
 
 function Message({ item, onSpeak, onDecide, deciding }) {
   const assistant = item.role === 'assistant';
@@ -201,6 +390,10 @@ export default function ExecutiveAdvisor() {
   const [importingDocument, setImportingDocument] = useState(false);
   const [listening, setListening] = useState(false);
   const [decidingId, setDecidingId] = useState(null);
+  const [connectors, setConnectors] = useState([]);
+  const [connectorsLoading, setConnectorsLoading] = useState(false);
+  const [connectorBusyId, setConnectorBusyId] = useState(null);
+  const [connectorResults, setConnectorResults] = useState({});
   const documentInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -227,6 +420,20 @@ export default function ExecutiveAdvisor() {
   }, []);
 
   useEffect(() => { loadSidebar(); }, [loadSidebar]);
+
+  const loadConnectors = useCallback(async () => {
+    setConnectorsLoading(true);
+    try {
+      const data = await apiGet('/runtime/mind/connectors', { retry: false });
+      setConnectors(Array.isArray(data?.connectors) ? data.connectors : []);
+    } catch {
+      setConnectors([]);
+    } finally {
+      setConnectorsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadConnectors(); }, [loadConnectors]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -414,6 +621,30 @@ export default function ExecutiveAdvisor() {
       setError(err?.responseData?.detail || err?.message || 'Could not resolve pending action.');
     } finally {
       setDecidingId(null);
+    }
+  };
+
+  const testConnector = async (connectorId, action, values) => {
+    if (connectorBusyId) return;
+    setConnectorBusyId(connectorId);
+    setError('');
+    try {
+      const result = await apiPost('/runtime/mind/execute', {
+        capability: 'connect',
+        action,
+        params: values || {},
+        confirmed: true,
+        session_id: session?.id || null,
+      }, { timeout: 120000 });
+      const outcome = result?.result || result;
+      setConnectorResults((current) => ({ ...current, [connectorId]: outcome }));
+      if (result?.status === 'failed') {
+        setError(outcome?.detail || result?.error || 'Η δοκιμή απέτυχε.');
+      }
+    } catch (err) {
+      setError(err?.responseData?.detail || err?.message || 'Η δοκιμή απέτυχε.');
+    } finally {
+      setConnectorBusyId(null);
     }
   };
 
@@ -605,6 +836,14 @@ export default function ExecutiveAdvisor() {
           </section>
 
           <aside className="space-y-5">
+            <ConnectorsPanel
+              connectors={connectors}
+              loading={connectorsLoading}
+              busyId={connectorBusyId}
+              results={connectorResults}
+              onRefresh={loadConnectors}
+              onTest={testConnector}
+            />
             <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4" data-testid="advisor-documents-panel">
               <div className="flex items-center gap-2"><FileText className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Έγγραφα</h2></div>
               <p className="mt-2 text-[11px] leading-5 text-white/35">Σύνδεσε έως τρία αρχεία από τα Documents ώστε οι απαντήσεις να βασίζονται στο πραγματικό περιεχόμενό τους.</p>
