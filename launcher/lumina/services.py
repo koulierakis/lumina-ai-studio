@@ -29,8 +29,31 @@ from .process_manager import (
 )
 from .readiness import check_backend, check_frontend, check_ollama, port_in_use, wait_until
 from .state import clear_state, load_state, save_state
+from .networking import active_private_lan_ip
 
 logger = logging.getLogger("lumina.launcher.services")
+
+
+def remote_access_url(cfg: dict[str, Any]) -> str | None:
+    """Return the phone-reachable frontend URL when remote access is enabled.
+
+    ``None`` means remote access is off or no private address could be found,
+    in which case callers should keep showing the localhost URL.
+    """
+    if not cfg.get("remote_access"):
+        return None
+    lan_ip = active_private_lan_ip()
+    if not lan_ip:
+        return None
+    return f"http://{lan_ip}:{cfg['frontend_port']}/"
+
+
+def browsable_url(host: str, port: int) -> str:
+    """Build a browsable URL, mapping bind-all hosts to loopback.
+
+    ``0.0.0.0`` is a bind address, not a destination; a user cannot open it.
+    """
+    return f"http://{_probe_host(host)}:{port}/"
 
 
 def _creation_flags() -> int:
@@ -229,7 +252,9 @@ def _open_dashboard(repo_root: Path, cfg: dict[str, Any]) -> None:
     if not cfg.get("dashboard_auto_open"): return
     state = load_state(repo_root)
     if cfg.get("open_browser_once") and state.get("browser_opened"): return
-    url = f"http://{_probe_host(cfg['frontend_host'])}:{cfg['frontend_port']}/"
+    # On the machine itself, always open the local address: the LAN URL only
+    # matters for phones, and a local browser must never depend on LAN routing.
+    url = browsable_url(cfg['frontend_host'], cfg['frontend_port'])
     try:
         webbrowser.open(url); state["browser_opened"] = True; save_state(state, repo_root)
     except Exception as exc:
@@ -244,7 +269,7 @@ def start_all(repo_root: Path | None = None) -> dict[str, Any]:
     try:
         warnings = _start_ollama_if_needed(root, cfg); _start_backend(root, cfg); _start_frontend(root, cfg)
         state = load_state(root); state["warnings"] = warnings; save_state(state, root); _open_dashboard(root, cfg)
-        return {"ok": True, "warnings": warnings, "backend": check_backend(_probe_host(cfg["backend_host"]), cfg["backend_port"]), "frontend": check_frontend(_probe_host(cfg["frontend_host"]), cfg["frontend_port"]), "ollama": check_ollama(cfg["ollama_host"], cfg["ollama_port"], cfg["preferred_ollama_model"])}
+        return {"ok": True, "warnings": warnings, "dashboard_url": browsable_url(cfg["frontend_host"], cfg["frontend_port"]), "remote_url": remote_access_url(cfg), "backend": check_backend(_probe_host(cfg["backend_host"]), cfg["backend_port"]), "frontend": check_frontend(_probe_host(cfg["frontend_host"]), cfg["frontend_port"]), "ollama": check_ollama(cfg["ollama_host"], cfg["ollama_port"], cfg["preferred_ollama_model"])}
     except Exception:
         try: stop_all(root, release_lock=False)
         except Exception: logger.exception("Cleanup after failed start also failed.")
@@ -262,5 +287,6 @@ def stop_all(repo_root: Path | None = None, *, release_lock: bool = True) -> dic
 
 def status_report(repo_root: Path | None = None) -> dict[str, Any]:
     root = repo_root or find_repo_root(); cfg = load_config(root); cleanup_stale_pids(root); state = load_state(root)
+    remote_url = remote_access_url(cfg)
     backend = check_backend(_probe_host(cfg["backend_host"]), cfg["backend_port"]); frontend = check_frontend(_probe_host(cfg["frontend_host"]), cfg["frontend_port"]); ollama = check_ollama(cfg["ollama_host"], cfg["ollama_port"], cfg["preferred_ollama_model"]); services = state.get("services") or {}
-    return {"repo_root": str(root), "running": is_lumina_running(root), "remote_access": bool(cfg.get("remote_access")), "backend": {**backend, "pid": (services.get("backend") or {}).get("pid"), "owned": owns_process("backend", (services.get("backend") or {}).get("pid"), repo_root=root)}, "frontend": {**frontend, "pid": (services.get("frontend") or {}).get("pid"), "owned": owns_process("frontend", (services.get("frontend") or {}).get("pid"), repo_root=root)}, "ollama": {**ollama, "pid": (services.get("ollama") or {}).get("pid"), "owned": bool(state.get("owned_ollama")) and owns_process("ollama", (services.get("ollama") or {}).get("pid"), repo_root=root)}}
+    return {"repo_root": str(root), "running": is_lumina_running(root), "remote_access": bool(cfg.get("remote_access")), "dashboard_url": browsable_url(cfg["frontend_host"], cfg["frontend_port"]), "remote_url": remote_url, "backend": {**backend, "pid": (services.get("backend") or {}).get("pid"), "owned": owns_process("backend", (services.get("backend") or {}).get("pid"), repo_root=root)}, "frontend": {**frontend, "pid": (services.get("frontend") or {}).get("pid"), "owned": owns_process("frontend", (services.get("frontend") or {}).get("pid"), repo_root=root)}, "ollama": {**ollama, "pid": (services.get("ollama") or {}).get("pid"), "owned": bool(state.get("owned_ollama")) and owns_process("ollama", (services.get("ollama") or {}).get("pid"), repo_root=root)}}

@@ -1,6 +1,18 @@
 # Lumina AI Desktop Studio — Implementation Status
 
 ## Completed in this revision
+- Local runtime phone access: the launcher's `remote_access` mode now tells you
+  the address to open on your phone. It detects the machine's private LAN IPv4
+  (via `launcher/lumina/networking.py`), prints `Phone / tablet: http://<lan>:3000/`
+  on `start` and in `status` (as `remote_url`), and the local dashboard URL is
+  no longer reported as the unbrowsable `0.0.0.0` bind address. The toggle is
+  reachable end to end: Settings → Runtime manager exposes it and the backend
+  `/system/runtime-settings` persists `remote_access` while binding
+  `backend_host`/`frontend_host` to `0.0.0.0`; turning it off restores loopback
+  instead of leaving the bind-all address behind. Regression coverage:
+  `launcher/tests/test_mobile_remote_access.py`,
+  `backend/tests/test_runtime_system_unit.py`,
+  `frontend/src/pages/WorkspaceCenter.test.jsx`.
 - Studio routing completion: the Internet Research and Automations studios are
   now reachable. `ProductivityCenter` already implemented both views against the
   real `/api/research/*` and `/api/automations/*` endpoints, but `App.js` still

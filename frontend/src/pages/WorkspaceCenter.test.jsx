@@ -3,6 +3,7 @@ import { act } from 'react-dom/test-utils';
 import { createRoot } from 'react-dom/client';
 import { MemoryRouter } from 'react-router-dom';
 import WorkspaceCenter, { readRecentSearches } from './WorkspaceCenter';
+import { apiGet } from '../lib/api';
 
 jest.mock('../lib/api', () => ({
   apiDelete: jest.fn(),
@@ -50,5 +51,24 @@ describe('Workspace search recovery', () => {
   it('keeps only valid recent search text and caps the list at five entries', () => {
     localStorage.setItem('lumina_recent_searches', JSON.stringify(['one', 2, '', 'two', 'three', 'four', 'five', 'six']));
     expect(readRecentSearches()).toEqual(['one', 'two', 'three', 'four', 'five']);
+  });
+
+  it('offers the phone remote-access toggle in runtime settings', async () => {
+    apiGet.mockImplementation((path) => {
+      if (path === '/settings/readiness') return Promise.resolve({ security: {} });
+      if (path === '/settings/preferences') return Promise.resolve({});
+      if (path === '/system/runtime-settings') return Promise.resolve({ remote_access: false });
+      return Promise.resolve({});
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <WorkspaceCenter mode="settings" />
+        </MemoryRouter>,
+      );
+    });
+
+    expect(host.textContent).toContain('Open LUMINA from my phone or tablet');
   });
 });

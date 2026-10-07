@@ -55,6 +55,29 @@ def test_validate_and_save_runtime_settings(tmp_path: Path, monkeypatch):
     assert loaded["startup_timeout_seconds"] == 90
 
 
+def test_remote_access_defaults_off_and_keeps_loopback(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(runtime_info, "repo_root", lambda: tmp_path)
+    saved = runtime_info.save_runtime_settings({})
+    assert saved["remote_access"] is False
+    assert saved["backend_host"] == "127.0.0.1"
+    assert saved["frontend_host"] == "localhost"
+
+
+def test_remote_access_binds_local_network_and_is_reversible(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(runtime_info, "repo_root", lambda: tmp_path)
+    enabled = runtime_info.save_runtime_settings({"remote_access": True})
+    assert enabled["remote_access"] is True
+    assert enabled["backend_host"] == "0.0.0.0"
+    assert enabled["frontend_host"] == "0.0.0.0"
+    reloaded = runtime_info.load_runtime_config()
+    assert reloaded["remote_access"] is True
+    # Toggling it back off must restore loopback instead of leaving 0.0.0.0.
+    disabled = runtime_info.save_runtime_settings({"remote_access": False})
+    assert disabled["remote_access"] is False
+    assert disabled["backend_host"] == "127.0.0.1"
+    assert disabled["frontend_host"] == "localhost"
+
+
 def test_build_system_status_shape(monkeypatch):
     monkeypatch.setattr(
         runtime_info,

@@ -68,8 +68,27 @@ Supported keys (validated; invalid files fall back to defaults):
 - `startup_timeout_seconds`
 - `automatic_ollama_startup`
 - `logging_level`
+- `remote_access` (see below)
+- `backend_host` / `frontend_host` (advanced; set automatically by `remote_access`)
 
 Port changes apply on the next `start` / restart.
+
+## Opening LUMINA from your phone or tablet
+
+Set `remote_access` to `true` (Settings → **Runtime manager**, or `"remote_access": true` in `.lumina-runtime/config.json`). The launcher then:
+
+- binds the backend and frontend to `0.0.0.0` so other devices on the network can reach them;
+- serves the frontend from the same origin so the phone calls the backend through the web server (`REACT_APP_BACKEND_URL` is left empty) instead of trying its own `127.0.0.1`;
+- prints the reachable address, so you do not have to hunt for an IP:
+
+```text
+Dashboard: http://127.0.0.1:3000/
+Phone / tablet: http://192.168.1.20:3000/ (same private network or Tailscale)
+```
+
+`status` reports the same address as `remote_url`. If no private address can be detected, the launcher says so and points you to a VPN such as Tailscale.
+
+Keep this on a trusted private network. LUMINA does not expose itself to the public internet or configure a public hostname; do not port-forward `0.0.0.0`.
 
 ## Troubleshooting
 

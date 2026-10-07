@@ -60,6 +60,7 @@ def load_runtime_config() -> dict[str, Any]:
         "automatic_ollama_startup": True,
         "logging_level": "INFO",
         "open_browser_once": True,
+        "remote_access": False,
     }
     path = runtime_dir() / "config.json"
     if not path.exists():
@@ -383,7 +384,8 @@ def validate_runtime_settings(body: dict[str, Any]) -> dict[str, Any]:
     if not model or len(model) > 120:
         raise ValueError("Invalid preferred_ollama_model")
 
-    return {
+    remote_access = as_bool(merged.get("remote_access", False), "remote_access")
+    result = {
         "dashboard_auto_open": as_bool(merged["dashboard_auto_open"], "dashboard_auto_open"),
         "preferred_ollama_model": model,
         "code_builder_num_ctx": as_int(merged["code_builder_num_ctx"], "code_builder_num_ctx", 1, 131_072),
@@ -399,7 +401,20 @@ def validate_runtime_settings(body: dict[str, Any]) -> dict[str, Any]:
         "automatic_ollama_startup": as_bool(merged["automatic_ollama_startup"], "automatic_ollama_startup"),
         "logging_level": level,
         "open_browser_once": as_bool(merged["open_browser_once"], "open_browser_once"),
+        "remote_access": remote_access,
     }
+    # remote_access is the single source of truth for host binding, so toggling
+    # it off restores loopback instead of leaving 0.0.0.0 behind.
+    if result["remote_access"]:
+        # Bind the web app to every local interface so phones on the same
+        # private network can reach it. Internet exposure is intentionally not
+        # configured here; use a VPN such as Tailscale for off-network access.
+        result["backend_host"] = "0.0.0.0"
+        result["frontend_host"] = "0.0.0.0"
+    else:
+        result["backend_host"] = "127.0.0.1"
+        result["frontend_host"] = "localhost"
+    return result
 
 
 def save_runtime_settings(body: dict[str, Any]) -> dict[str, Any]:

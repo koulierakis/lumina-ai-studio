@@ -21,11 +21,28 @@ from lumina.doctor import run_doctor  # noqa: E402
 from lumina.errors import AlreadyRunningError, LauncherError  # noqa: E402
 from lumina.logging_util import setup_logging  # noqa: E402
 from lumina.paths import find_repo_root  # noqa: E402
-from lumina.services import start_all, status_report, stop_all  # noqa: E402
+from lumina.services import (
+    browsable_url,
+    remote_access_url,
+    start_all,
+    status_report,
+    stop_all,
+)  # noqa: E402
 
 
 def _print_json(payload: object) -> None:
     print(json.dumps(payload, indent=2, default=str))
+
+
+def _print_remote_hint(cfg: dict, report: dict | None = None) -> None:
+    """Print the phone-reachable URL when remote access is on."""
+    if not cfg.get("remote_access"):
+        return
+    remote_url = (report or {}).get("remote_url") or remote_access_url(cfg)
+    if remote_url:
+        print(f"Phone / tablet: {remote_url} (same private network or Tailscale)")
+    else:
+        print("Phone / tablet: no private LAN address detected; use Tailscale or set a VPN address.")
 
 
 def cmd_start(_: argparse.Namespace) -> int:
@@ -43,8 +60,9 @@ def cmd_start(_: argparse.Namespace) -> int:
     print("LUMINA started successfully.")
     for warning in result.get("warnings") or []:
         print(f"WARNING: {warning}")
-    print(f"Dashboard: http://{cfg['frontend_host']}:{cfg['frontend_port']}/")
-    print(f"Backend:   http://{cfg['backend_host']}:{cfg['backend_port']}/api/health")
+    print(f"Dashboard: {browsable_url(cfg['frontend_host'], cfg['frontend_port'])}")
+    print(f"Backend:   {browsable_url(cfg['backend_host'], cfg['backend_port'])}api/health")
+    _print_remote_hint(cfg, result)
     return 0
 
 
@@ -76,6 +94,7 @@ def cmd_status(_: argparse.Namespace) -> int:
     setup_logging(cfg["logging_level"], root)
     report = status_report(root)
     _print_json(report)
+    _print_remote_hint(cfg, report)
     return 0 if report.get("backend", {}).get("ok") or not report.get("running") else 0
 
 

@@ -141,6 +141,12 @@ function Settings() {
               <label className="block">Startup timeout (seconds)
                 <input type="number" min={30} max={900} value={runtime?.startup_timeout_seconds ?? 180} onChange={(e) => setRuntime({ ...runtime, startup_timeout_seconds: Number(e.target.value) })} className="mt-2 block w-full rounded bg-black/30 p-2" />
               </label>
+              <label className="flex items-start gap-2 sm:col-span-2">
+                <input type="checkbox" className="mt-1" checked={!!runtime?.remote_access} onChange={(e) => setRuntime({ ...runtime, remote_access: e.target.checked })} />
+                <span>Open LUMINA from my phone or tablet on the same Wi-Fi
+                  <span className="mt-1 block text-xs text-white/40">Binds the backend and web app to your local network and prints the phone address on startup. Apply on the next launcher start. Keep this on a trusted private network; use a VPN such as Tailscale for off-network access.</span>
+                </span>
+              </label>
               <div className="sm:col-span-2">
                 <button className="rounded bg-gold px-4 py-2 text-black">Save runtime settings</button>
                 {runtimeMessage && <p className="mt-3 text-emerald-300">{runtimeMessage}</p>}

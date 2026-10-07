@@ -100,11 +100,16 @@ def validate_config(raw: dict[str, Any] | None) -> dict[str, Any]:
         "open_browser_once": _coerce_bool(merged["open_browser_once"], "open_browser_once"),
         "remote_access": _coerce_bool(merged["remote_access"], "remote_access"),
     }
+    # remote_access is the single source of truth for host binding, so toggling
+    # it off restores loopback instead of leaving 0.0.0.0 behind.
     if result["remote_access"]:
         # Bind the web app to all local interfaces. Internet exposure is still
         # intentionally NOT configured here; use a private VPN such as Tailscale.
         result["backend_host"] = "0.0.0.0"
         result["frontend_host"] = "0.0.0.0"
+    else:
+        result["backend_host"] = "127.0.0.1"
+        result["frontend_host"] = "localhost"
     if result["logging_level"] not in ALLOWED_LOG_LEVELS:
         raise ConfigError("logging_level must be DEBUG, INFO, WARNING, or ERROR.")
     interval = result["readiness_poll_interval_seconds"]
