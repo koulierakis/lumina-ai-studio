@@ -4375,6 +4375,9 @@ app.add_middleware(
 @app.on_event("startup")
 async def _startup() -> None:
     global persistence_provider, talking_portrait_jobs_coll, talking_portrait_installs_coll
+    from config_validation import validate_auth_config
+
+    validate_auth_config()
     await persistence_provider.initialize()
     await persistence_provider.verify()
     await persistence_provider.recover_active_jobs()
