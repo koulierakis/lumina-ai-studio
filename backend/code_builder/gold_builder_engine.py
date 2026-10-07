@@ -17,7 +17,6 @@ from typing import Any, Iterator
 
 import httpx
 
-
 DEFAULT_BASE_URL = "http://127.0.0.1:8001"
 DEFAULT_TIMEOUT = 5.0
 
@@ -138,12 +137,11 @@ class GoldBuilderEngine:
         """Yield raw Server-Sent Event lines from the live job stream."""
         url = f"{self.base_url}/api/gb/jobs/{job_id}/stream"
         try:
-            with httpx.Client(timeout=None) as client:
-                with client.stream("GET", url) as response:
-                    if response.status_code >= 400:
-                        raise GoldBuilderUnavailable(f"Gold Builder stream returned {response.status_code}")
-                    for line in response.iter_lines():
-                        if line:
-                            yield line
+            with httpx.Client(timeout=None) as client, client.stream("GET", url) as response:
+                if response.status_code >= 400:
+                    raise GoldBuilderUnavailable(f"Gold Builder stream returned {response.status_code}")
+                for line in response.iter_lines():
+                    if line:
+                        yield line
         except httpx.HTTPError as exc:
             raise GoldBuilderUnavailable(f"Gold Builder stream failed: {exc}") from exc

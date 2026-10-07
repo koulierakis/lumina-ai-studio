@@ -1,16 +1,15 @@
 import httpx
 import pytest
-
-from code_builder.gold_builder_engine import (
-    GoldBuilderEngine,
-    GoldBuilderUnavailable,
-    gold_builder_base_url,
-)
 from code_builder.engine_registry import (
     GOLD_BUILDER_ENGINE,
     NATIVE_ENGINE,
     OPENHANDS_ENGINE,
     CodingEngineRegistry,
+)
+from code_builder.gold_builder_engine import (
+    GoldBuilderEngine,
+    GoldBuilderUnavailable,
+    gold_builder_base_url,
 )
 
 

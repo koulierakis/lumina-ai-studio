@@ -1,6 +1,4 @@
 import pytest
-
-import config_validation
 from config_validation import (
     ConfigurationError,
     database_dsn,
@@ -12,19 +10,34 @@ from config_validation import (
 _PLACEHOLDER = "postgresql://DB_USER:DB_PASSWORD@DB_HOST:5432/postgres"
 
 
+_CONFIG_ENV = (
+    "LUMINA_DATABASE_PROVIDER",
+    "DATABASE_URL",
+    "POSTGRES_DSN",
+    "LUMINA_ENV",
+    "OWNER_EMAIL",
+    "OWNER_PASSWORD_HASH",
+    "OWNER_PASSWORD",
+    "JWT_SECRET",
+)
+
+
 @pytest.fixture(autouse=True)
-def _clean_env(monkeypatch):
-    for name in (
-        "LUMINA_DATABASE_PROVIDER",
-        "DATABASE_URL",
-        "POSTGRES_DSN",
-        "LUMINA_ENV",
-        "OWNER_EMAIL",
-        "OWNER_PASSWORD_HASH",
-        "OWNER_PASSWORD",
-        "JWT_SECRET",
-    ):
-        monkeypatch.delenv(name, raising=False)
+def _preserve_env():
+    import os
+
+    # These tests assign directly through ``os.environ`` rather than through
+    # monkeypatch, so any variable they set would otherwise survive the test.
+    # A leaked ``LUMINA_ENV=production`` flips unrelated storage/health suites
+    # into production mode; snapshotting and restoring also protects the
+    # auth/DB secrets that conftest sets for other suites from being deleted.
+    saved = {name: os.environ.get(name) for name in _CONFIG_ENV}
+    yield
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 def test_defaults_to_sqlite_when_provider_unset():
@@ -87,10 +100,13 @@ def test_auth_allows_development_defaults_with_warning():
     validate_auth_config()  # must not raise in development
 
 
-def test_auth_raises_in_production_when_secrets_missing():
-    import os
+def test_auth_raises_in_production_when_secrets_missing(monkeypatch):
 
-    os.environ["LUMINA_ENV"] = "production"
+    monkeypatch.setenv("LUMINA_ENV", "production")
+    # conftest supplies owner/JWT secrets for the suite; a production auth check
+    # must still fail when they are genuinely absent, so clear them explicitly.
+    for name in ("OWNER_EMAIL", "OWNER_PASSWORD_HASH", "OWNER_PASSWORD", "JWT_SECRET"):
+        monkeypatch.delenv(name, raising=False)
     with pytest.raises(ConfigurationError):
         validate_auth_config()
 
@@ -107,7 +123,6 @@ def test_auth_passes_when_configured():
 
 def test_persistence_mode_uses_validation(monkeypatch):
     import importlib
-    import os
 
     monkeypatch.setenv("LUMINA_DATABASE_PROVIDER", "postgres")
     monkeypatch.setenv("DATABASE_URL", _PLACEHOLDER)

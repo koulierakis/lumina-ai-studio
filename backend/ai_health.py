@@ -10,7 +10,7 @@ of duplicating provider logic, and never raises when a subsystem is missing.
 from __future__ import annotations
 
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from enum import Enum
 from typing import Any, Awaitable, Callable
 
@@ -179,10 +179,10 @@ async def collect_ai_health() -> dict[str, Any]:
     providers += _from_entries(AiCapability.VIDEO, _safe_sync(video_provider_catalog, []))
 
     # VOICE / STT / TALKING_FACE
-    from voice_providers import voice_provider_catalog
     from stt_providers import stt_provider_catalog
     from talking_face_providers import talking_face_catalog
     from talking_portrait_providers import talking_portrait_catalog
+    from voice_providers import voice_provider_catalog
 
     providers += _from_entries(AiCapability.VOICE, _safe_sync(voice_provider_catalog, []))
     providers += _from_entries(AiCapability.STT, _safe_sync(stt_provider_catalog, []))
