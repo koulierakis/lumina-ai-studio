@@ -7,7 +7,6 @@ import Login from './pages/Login';
 import IdentityPacks from './pages/IdentityPacks';
 import Generate from './pages/Generate';
 import Gallery from './pages/Gallery';
-import ComingSoon from './pages/ComingSoon';
 import Editor from './pages/Editor';
 import EditorLanding from './pages/EditorLanding';
 import VideoStudio from './pages/VideoStudio';
@@ -22,6 +21,7 @@ import CodeBuilder from './pages/CodeBuilder';
 import CodeBuilderV2 from './pages/CodeBuilderV2';
 import DocumentStudio from './pages/DocumentStudio';
 import ExecutiveAdvisor from './pages/ExecutiveAdvisor';
+import ProductivityCenter from './pages/ProductivityCenter';
 
 export default function App() {
   return (
@@ -72,8 +72,8 @@ export default function App() {
               <Route path="projects/:projectId" element={<ProjectDetail />} />
               <Route path="documents" element={<DocumentStudio />} />
               <Route path="finance" element={<Navigate to="/studio/mind" replace />} />
-              <Route path="research" element={<ComingSoon title="Internet Research" />} />
-              <Route path="automations" element={<ComingSoon title="Automations" />} />
+              <Route path="research" element={<ProductivityCenter mode="research" />} />
+              <Route path="automations" element={<ProductivityCenter mode="automations" />} />
               <Route path="settings" element={<WorkspaceCenter mode="settings" />} />
               <Route path="search" element={<WorkspaceCenter mode="search" />} />
             </Route>

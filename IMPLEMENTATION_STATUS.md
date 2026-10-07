@@ -1,6 +1,13 @@
 # Lumina AI Desktop Studio — Implementation Status
 
 ## Completed in this revision
+- Studio routing completion: the Internet Research and Automations studios are
+  now reachable. `ProductivityCenter` already implemented both views against the
+  real `/api/research/*` and `/api/automations/*` endpoints, but `App.js` still
+  routed `/studio/research` and `/studio/automations` to the `ComingSoon`
+  placeholder even though the dashboard advertised them. The routes now render
+  the real workspaces and the unused placeholder import was removed.
+  Regression coverage: `frontend/src/pages/ProductivityCenter.test.jsx`.
 - Document Studio final review polish: review mode now has explicit editing,
   reviewing and read-only viewing states; review actions normalize to the
   backend accept/reject suggestion contract; comments are grouped into threaded
