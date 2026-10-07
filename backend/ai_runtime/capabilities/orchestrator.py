@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from . import autonomy
 from .client import CapabilityExecutionError, MindCapabilityClient
 from .intent import ResolvedIntent, detect_confirmation, resolve_intent
 from .registry import CAPABILITY_REGISTRY
@@ -48,6 +49,7 @@ class MindOrchestrator:
         self.actions_path = self.root / "actions.json"
         self.pending_path = self.root / "pending.json"
         self.client = client or MindCapabilityClient()
+        self._level: str | None = None
         self._actions = self._load(self.actions_path)
         self._pending_map = self._load(self.pending_path)
 
@@ -72,6 +74,20 @@ class MindOrchestrator:
     def _flush(self) -> None:
         self._save(self.actions_path, self._actions)
         self._save(self.pending_path, self._pending_map)
+
+    # -------------------------------------------------------------- autonomy
+    def autonomy_level(self) -> str:
+        """Effective autonomy level (runtime override wins over the environment)."""
+        if self._level is not None:
+            return self._level
+        return autonomy.current_level()
+
+    def set_autonomy_level(self, level: str) -> str:
+        self._level = autonomy.normalise_level(level)
+        return self._level
+
+    def autonomy(self) -> dict[str, Any]:
+        return autonomy.describe(self.autonomy_level())
 
     # ------------------------------------------------------------- capability
     def catalog(self) -> list[dict[str, Any]]:
@@ -295,7 +311,7 @@ class MindOrchestrator:
         if missing:
             raise CapabilityExecutionError(400, f"Missing required parameter(s): {', '.join(missing)}")
 
-        if operation.risk == "approval" and not confirmed:
+        if autonomy.requires_approval(self.autonomy_level(), operation.risk, capability_id, action) and not confirmed:
             pending = self._record_pending(owner, session_id, capability_id, action, params)
             if journal:
                 self._journal(
@@ -306,7 +322,7 @@ class MindOrchestrator:
                 "status": "needs_approval",
                 "capability": capability_id,
                 "action": action,
-                "risk": "approval",
+                "risk": operation.risk,
                 "params": _json_safe(params),
                 "pending_id": pending["id"],
                 "message": "This action requires explicit approval before execution.",
@@ -330,8 +346,21 @@ class MindOrchestrator:
             }
             followup = await self._followup_pending(owner, session_id, capability_id, action, result)
             if followup:
-                response["next"] = "approval_required"
-                response["pending"] = followup
+                if autonomy.requires_approval(self.autonomy_level(), "approval", capability_id, followup["action"]):
+                    response["next"] = "approval_required"
+                    response["pending"] = followup
+                else:
+                    applied = await self.execute(
+                        owner,
+                        capability_id,
+                        followup["action"],
+                        followup["params"],
+                        confirmed=True,
+                        session_id=session_id,
+                    )
+                    response["next"] = "auto_executed"
+                    response["followup"] = applied
+                    response["result"] = applied.get("result") or response.get("result")
             return response
         except CapabilityExecutionError as exc:
             if journal:

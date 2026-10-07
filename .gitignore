@@ -132,3 +132,6 @@ _tools/
 
 # Τοπικά εργαλεία
 _tools/
+
+# Mind / advisor runtime state (generated)
+.lumina/

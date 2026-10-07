@@ -34,4 +34,12 @@ describe('Executive Advisor LUMINA Mind connectors', () => {
     expect(page).toContain("if (mode === 'disabled')");
     expect(page).toContain('dry_run');
   });
+
+  test('renders the autonomy dial and persists the chosen level', () => {
+    expect(page).toContain('mind-autonomy-panel');
+    expect(page).toContain('autonomy-level-');
+    expect(page).toContain('autonomy-description');
+    expect(page).toContain("'/runtime/mind/autonomy'");
+    expect(page).toContain('selectAutonomy');
+  });
 });

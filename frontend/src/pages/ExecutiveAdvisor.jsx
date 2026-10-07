@@ -11,6 +11,7 @@ import {
   Cloud,
   Download,
   FileText,
+  Gauge,
   Globe2,
   HardDrive,
   Loader2,
@@ -329,6 +330,38 @@ function ConnectorsPanel({ connectors, loading, busyId, results, onRefresh, onTe
 
 
 
+function AutonomyPanel({ autonomy, onSelect, saving }) {
+  const levels = autonomy?.levels || [];
+  const labels = autonomy?.labels || {};
+  const descriptions = autonomy?.descriptions || {};
+  const active = autonomy?.level;
+  if (!levels.length) return null;
+  return (
+    <section className="rounded-xl border border-white/[0.08] bg-white/[0.02] p-4" data-testid="mind-autonomy-panel">
+      <div className="flex items-center gap-2"><Gauge className="h-4 w-4 text-gold" /><h2 className="text-sm text-white">Αυτονομία</h2></div>
+      <p className="mt-2 text-[11px] leading-5 text-white/35">Πόσο ελεύθερα δρα το Mind χωρίς να ρωτάει. Οι εξωτερικές αποστολές και οι διαγραφές ζητούν πάντα έγκριση.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {levels.map((level) => (
+          <button
+            key={level}
+            type="button"
+            disabled={saving}
+            onClick={() => onSelect(level)}
+            aria-pressed={active === level}
+            data-testid={`autonomy-level-${level}`}
+            className={`rounded-full border px-3 py-1.5 text-[11px] disabled:opacity-40 ${active === level ? 'border-gold/40 bg-gold/10 text-gold' : 'border-white/10 text-white/45 hover:text-white/75'}`}
+          >
+            {labels[level] || level}
+          </button>
+        ))}
+      </div>
+      {active && descriptions[active] && (
+        <p className="mt-2 text-[10px] leading-4 text-white/40" data-testid="autonomy-description">{descriptions[active]}</p>
+      )}
+    </section>
+  );
+}
+
 function Message({ item, onSpeak, onDecide, deciding }) {
   const assistant = item.role === 'assistant';
   const sources = Array.isArray(item.sources) ? item.sources : [];
@@ -394,6 +427,8 @@ export default function ExecutiveAdvisor() {
   const [connectorsLoading, setConnectorsLoading] = useState(false);
   const [connectorBusyId, setConnectorBusyId] = useState(null);
   const [connectorResults, setConnectorResults] = useState({});
+  const [autonomy, setAutonomy] = useState(null);
+  const [autonomySaving, setAutonomySaving] = useState(false);
   const documentInputRef = useRef(null);
   const recognitionRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -434,6 +469,31 @@ export default function ExecutiveAdvisor() {
   }, []);
 
   useEffect(() => { loadConnectors(); }, [loadConnectors]);
+
+  const loadAutonomy = useCallback(async () => {
+    try {
+      const data = await apiGet('/runtime/mind/autonomy', { retry: false });
+      setAutonomy(data && typeof data === 'object' ? data : null);
+    } catch {
+      setAutonomy(null);
+    }
+  }, []);
+
+  useEffect(() => { loadAutonomy(); }, [loadAutonomy]);
+
+  const selectAutonomy = async (level) => {
+    if (autonomySaving || !level) return;
+    setAutonomySaving(true);
+    setError('');
+    try {
+      const data = await apiPost('/runtime/mind/autonomy', { level });
+      setAutonomy(data && typeof data === 'object' ? data : null);
+    } catch (err) {
+      setError(err?.responseData?.detail || err?.message || 'Η αλλαγή αυτονομίας απέτυχε.');
+    } finally {
+      setAutonomySaving(false);
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -836,6 +896,7 @@ export default function ExecutiveAdvisor() {
           </section>
 
           <aside className="space-y-5">
+            <AutonomyPanel autonomy={autonomy} onSelect={selectAutonomy} saving={autonomySaving} />
             <ConnectorsPanel
               connectors={connectors}
               loading={connectorsLoading}

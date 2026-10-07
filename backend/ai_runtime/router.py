@@ -308,6 +308,20 @@ async def mind_capabilities(_: str = Depends(require_owner)) -> dict:
     return {"capabilities": executive_advisor.mind.catalog()}
 
 
+@router.get("/mind/autonomy")
+async def mind_autonomy(_: str = Depends(require_owner)) -> dict:
+    return executive_advisor.mind.autonomy()
+
+
+@router.post("/mind/autonomy")
+async def mind_set_autonomy(body: dict, _: str = Depends(require_owner)) -> dict:
+    level = str(body.get("level") or "")
+    if level and level.strip().lower() not in ("manual", "assisted", "auto"):
+        raise HTTPException(400, "Level must be one of: manual, assisted, auto")
+    executive_advisor.mind.set_autonomy_level(level)
+    return executive_advisor.mind.autonomy()
+
+
 @router.post("/mind/execute")
 async def mind_execute(body: dict, owner: str = Depends(require_owner)) -> dict:
     capability = str(body.get("capability") or "")

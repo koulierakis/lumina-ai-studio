@@ -640,7 +640,8 @@ Response format: lead with the decision/recommendation, then reasoning, risks, a
             "model_installed": any(name.casefold() == model.casefold() or name.casefold().startswith(model.casefold() + ":") for name in installed),
             "ollama": health.to_dict(),
             "roles": ADVISOR_ROLES,
-            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first", "optional_openai", "optional_web_research", "optional_sambanova"],
+            "autonomy": self.mind.autonomy(),
+            "capabilities": ["persistent_sessions", "persistent_memory", "profile_context", "automatic_role_routing", "board_mode", "deep_reasoning", "local_first", "optional_openai", "optional_web_research", "optional_sambanova", "autonomy_dial", "outbound_connectors"],
         }
 
 
