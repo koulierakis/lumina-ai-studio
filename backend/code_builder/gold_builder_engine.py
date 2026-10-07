@@ -18,7 +18,7 @@ from typing import Any, Iterator
 import httpx
 
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8010"
+DEFAULT_BASE_URL = "http://127.0.0.1:8001"
 DEFAULT_TIMEOUT = 5.0
 
 

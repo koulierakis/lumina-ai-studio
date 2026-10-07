@@ -20,7 +20,7 @@ Gold Builder is **not** copied into LUMINA. It is a separate FastAPI service
 mounting `/api/gb/*`. LUMINA talks to it through
 `backend/code_builder/gold_builder_engine.py` over HTTP:
 
-- `GOLD_BUILDER_URL` selects the service (default `http://127.0.0.1:8010`).
+- `GOLD_BUILDER_URL` selects the service (default `http://127.0.0.1:8001`).
 - The adapter only creates/inspects jobs and reads activity, preview, review and
   the final report. Applying changes is never enabled from LUMINA's side here.
 - When the service is unreachable the engine reports unavailable and LUMINA
