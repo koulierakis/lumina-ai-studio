@@ -9,7 +9,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import bcrypt
@@ -125,8 +125,8 @@ def hash_password(plain: str) -> str:
 def issue_token(email: str, hours: int = 24 * 30) -> str:
     payload = {
         "sub": email.strip().lower(),
-        "iat": datetime.now(timezone.utc),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=hours),
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(hours=hours),
     }
     return jwt.encode(payload, _secret(), algorithm="HS256")
 
@@ -164,7 +164,6 @@ async def require_owner(request: Request) -> str:
     access by the local fallback.
     """
     owner_email = _owner_email() or "owner@lumina.local"
-    e2e_email = _e2e_email()
     allowed_emails = _allowed_emails()
 
     authorization = (request.headers.get("authorization") or "").strip()

@@ -210,9 +210,8 @@ def test_media_endpoint_logs_sanitized_storage_failure_details(monkeypatch, capl
     monkeypatch.setattr(server, "_get_media", fake_get_media)
     monkeypatch.setattr(server, "read_bytes", fake_read_bytes)
 
-    with caplog.at_level("WARNING", logger="lumina"):
-        with pytest.raises(HTTPException) as exc_info:
-            asyncio.run(server.get_media_file("media-1", owner="owner@example.com"))
+    with caplog.at_level("WARNING", logger="lumina"), pytest.raises(HTTPException) as exc_info:
+        asyncio.run(server.get_media_file("media-1", owner="owner@example.com"))
 
     assert exc_info.value.status_code == 502
     assert "Media storage read failed" in caplog.text

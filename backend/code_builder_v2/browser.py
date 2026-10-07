@@ -5,13 +5,12 @@ Captures console errors, network failures, and visual state.
 """
 from __future__ import annotations
 
-import asyncio
-import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
-from playwright.async_api import async_playwright, Page, Browser, BrowserContext
+from typing import Any
+
+from playwright.async_api import Browser, BrowserContext, Page, async_playwright
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +60,7 @@ class BrowserVerifier:
         base_url: str,
         headless: bool = True,
         viewport: dict = None,
-        screenshot_dir: Optional[Path] = None,
+        screenshot_dir: Path | None = None,
     ):
         self.base_url = base_url
         self.headless = headless
@@ -70,9 +69,9 @@ class BrowserVerifier:
         self.screenshot_dir.mkdir(parents=True, exist_ok=True)
 
         self._playwright = None
-        self._browser: Optional[Browser] = None
-        self._context: Optional[BrowserContext] = None
-        self._page: Optional[Page] = None
+        self._browser: Browser | None = None
+        self._context: BrowserContext | None = None
+        self._page: Page | None = None
 
         self._console_errors: list[str] = []
         self._page_errors: list[str] = []
@@ -369,7 +368,7 @@ async def verify_application(
     url: str,
     app_type: str = "todo",
     headless: bool = True,
-    screenshot_dir: Optional[Path] = None,
+    screenshot_dir: Path | None = None,
 ) -> VerificationResult:
     """Convenience function to verify an application."""
     async with BrowserVerifier(url, headless=headless, screenshot_dir=screenshot_dir) as verifier:

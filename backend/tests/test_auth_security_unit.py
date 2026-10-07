@@ -4,7 +4,7 @@ from pathlib import Path
 
 import bcrypt
 import pytest
-from auth import verify_credentials, _allowed_emails, _is_e2e_email, _is_owner_email
+from auth import _allowed_emails, _is_e2e_email, _is_owner_email, verify_credentials
 from dotenv import dotenv_values
 from login_limiter import LoginRateLimiter
 

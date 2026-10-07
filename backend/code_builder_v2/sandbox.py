@@ -6,15 +6,15 @@ Falls back to local subprocess if SWE-ReX unavailable.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import shutil
 import subprocess
-import tempfile
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
 class SandboxError(RuntimeError):
@@ -43,7 +43,7 @@ class SandboxRuntime(ABC):
     """Abstract sandbox runtime."""
 
     @abstractmethod
-    async def create_session(self, workspace_root: Path, env: Optional[dict[str, str]] = None) -> SandboxSession:
+    async def create_session(self, workspace_root: Path, env: dict[str, str] | None = None) -> SandboxSession:
         """Create a new sandbox session with workspace."""
 
     @abstractmethod
@@ -52,7 +52,7 @@ class SandboxRuntime(ABC):
         session: SandboxSession,
         command: str,
         timeout_seconds: int = 120,
-        workdir: Optional[str] = None,
+        workdir: str | None = None,
     ) -> CommandResult:
         """Run a command in the sandbox session."""
 
@@ -83,7 +83,7 @@ class LocalSubprocessRuntime(SandboxRuntime):
 
     _sessions: dict[str, SandboxSession] = field(default_factory=dict, init=False)
 
-    async def create_session(self, workspace_root: Path, env: Optional[dict[str, str]] = None) -> SandboxSession:
+    async def create_session(self, workspace_root: Path, env: dict[str, str] | None = None) -> SandboxSession:
         session_id = f"local-{int(time.time() * 1000)}"
         session = SandboxSession(session_id=session_id, workspace_root=workspace_root)
         self._sessions[session_id] = session
@@ -94,9 +94,9 @@ class LocalSubprocessRuntime(SandboxRuntime):
         session: SandboxSession,
         command: str,
         timeout_seconds: int = 120,
-        workdir: Optional[str] = None,
+        workdir: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> CommandResult:
-        import shlex
         start = time.time()
         cwd = Path(workdir) if workdir else session.workspace_root
         try:
@@ -116,7 +116,7 @@ class LocalSubprocessRuntime(SandboxRuntime):
                 stderr=stderr.decode("utf-8", errors="replace"),
                 duration_seconds=duration,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration = time.time() - start
             return CommandResult(
                 command=command,
@@ -158,10 +158,9 @@ class SWEReXRuntime(SandboxRuntime):
     _sessions: dict[str, SandboxSession] = field(default_factory=dict, init=False)
 
     def __post_init__(self):
-        try:
-            import swe_rex
+        if importlib.util.find_spec("swe_rex") is not None:
             self._swe_rex_available = True
-        except ImportError:
+        else:
             self._swe_rex_available = False
 
     async def _ensure_deployment(self):
@@ -171,10 +170,14 @@ class SWEReXRuntime(SandboxRuntime):
         if not self._swe_rex_available:
             raise SandboxError("SWE-ReX not installed. pip install swe-rex")
 
-        from swe_rex.deployment.local import LocalDeployment
+        from swe_rex.config import (
+            DockerDeploymentConfig,
+            LocalDeploymentConfig,
+            ModalDeploymentConfig,
+        )
         from swe_rex.deployment.docker import DockerDeployment
+        from swe_rex.deployment.local import LocalDeployment
         from swe_rex.deployment.modal import ModalDeployment
-        from swe_rex.config import LocalDeploymentConfig, DockerDeploymentConfig, ModalDeploymentConfig
 
         if self.deployment_type == "local":
             config = LocalDeploymentConfig(**self.deployment_config)
@@ -191,7 +194,7 @@ class SWEReXRuntime(SandboxRuntime):
         await self._deployment.start()
         self._runtime = self._deployment.runtime
 
-    async def create_session(self, workspace_root: Path, env: Optional[dict[str, str]] = None) -> SandboxSession:
+    async def create_session(self, workspace_root: Path, env: dict[str, str] | None = None) -> SandboxSession:
         await self._ensure_deployment()
         session_id = await self._runtime.create_session()
         session = SandboxSession(session_id=session_id, workspace_root=workspace_root)
@@ -216,7 +219,7 @@ class SWEReXRuntime(SandboxRuntime):
         session: SandboxSession,
         command: str,
         timeout_seconds: int = 120,
-        workdir: Optional[str] = None,
+        workdir: str | None = None,
     ) -> CommandResult:
         await self._ensure_deployment()
         start = time.time()
@@ -233,7 +236,7 @@ class SWEReXRuntime(SandboxRuntime):
                 stderr=result.stderr,
                 duration_seconds=duration,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration = time.time() - start
             return CommandResult(
                 command=command,
@@ -284,10 +287,10 @@ class DockerSandboxRuntime(SandboxRuntime):
     """Docker-based isolated sandbox (alternative to SWE-ReX)."""
 
     image: str = "python:3.11-slim"
-    _container_name: Optional[str] = field(default=None, init=False)
+    _container_name: str | None = field(default=None, init=False)
     _workspace_volume: str = field(default="", init=False)
 
-    async def create_session(self, workspace_root: Path, env: Optional[dict[str, str]] = None) -> SandboxSession:
+    async def create_session(self, workspace_root: Path, env: dict[str, str] | None = None) -> SandboxSession:
         import uuid
         session_id = f"docker-{uuid.uuid4().hex[:8]}"
         self._container_name = f"lumina-sandbox-{session_id}"
@@ -298,9 +301,11 @@ class DockerSandboxRuntime(SandboxRuntime):
 
         # Copy files to volume using a temporary container
         tar_data = shutil.make_archive(f"/tmp/{session_id}", "tar", workspace_root)
+        with open(tar_data, "rb") as archive:
+            archive_bytes = archive.read()
         subprocess.run(
             ["docker", "run", "--rm", "-v", f"{self._workspace_volume}:/target", "alpine"],
-            input=open(tar_data, "rb").read(),
+            input=archive_bytes,
             check=True,
         )
         os.unlink(tar_data)
@@ -327,7 +332,7 @@ class DockerSandboxRuntime(SandboxRuntime):
         session: SandboxSession,
         command: str,
         timeout_seconds: int = 120,
-        workdir: Optional[str] = None,
+        workdir: str | None = None,
     ) -> CommandResult:
         if not self._container_name:
             raise SandboxError("No active container")
@@ -349,7 +354,7 @@ class DockerSandboxRuntime(SandboxRuntime):
                 stderr=stderr.decode("utf-8", errors="replace"),
                 duration_seconds=duration,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             duration = time.time() - start
             return CommandResult(
                 command=command,
@@ -397,11 +402,8 @@ def create_sandbox_runtime(prefer_isolated: bool = True) -> SandboxRuntime:
     """
     # Try SWE-ReX first
     if prefer_isolated:
-        try:
-            import swe_rex
+        if importlib.util.find_spec("swe_rex") is not None:
             return SWEReXRuntime(deployment_type="local")
-        except ImportError:
-            pass
 
     # Try Docker
     if prefer_isolated and shutil.which("docker"):
