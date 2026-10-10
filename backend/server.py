@@ -3341,6 +3341,14 @@ async def workspace_search(q: str = "", owner: str = Depends(require_owner)) -> 
     return {"media": media, "projects": projects, "jobs": jobs, "identity_packs": packs, "modules": modules}
 
 
+@api.get("/ai/health")
+async def ai_health(_: str = Depends(require_owner)) -> dict:
+    """One unified, credential-safe health view across every AI capability."""
+    from ai_health import collect_ai_health
+
+    return await collect_ai_health()
+
+
 @api.get("/settings/readiness")
 async def settings_readiness(_: str = Depends(require_owner)) -> dict:
     statuses = await provider_manager.statuses()
@@ -4375,6 +4383,9 @@ app.add_middleware(
 @app.on_event("startup")
 async def _startup() -> None:
     global persistence_provider, talking_portrait_jobs_coll, talking_portrait_installs_coll
+    from config_validation import validate_auth_config
+
+    validate_auth_config()
     await persistence_provider.initialize()
     await persistence_provider.verify()
     await persistence_provider.recover_active_jobs()
