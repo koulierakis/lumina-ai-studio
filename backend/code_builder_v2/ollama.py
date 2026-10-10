@@ -236,6 +236,7 @@ class OllamaClient:
 
         max_retries = 2
         model = self._groq_model(requested_model)
+        use_json_mode = True
 
         for attempt in range(max_retries + 1):
             try:
@@ -255,17 +256,24 @@ class OllamaClient:
                     ],
                     temperature=0.1,
                     max_tokens=8192,
-                    response_format={"type": "json_object"},
+                    **({"response_format": {"type": "json_object"}} if use_json_mode else {}),
                 )
                 raw = response.choices[0].message.content
             except GroqRateLimitError as exc:
                 retry_after = getattr(exc, 'retry_after', None)
+                if retry_after is None:
+                    headers = getattr(getattr(exc, 'response', None), 'headers', {}) or {}
+                    retry_after = headers.get('retry-after')
+                try:
+                    retry_after = max(0, min(30, int(float(retry_after)))) if retry_after is not None else None
+                except (TypeError, ValueError, OverflowError):
+                    retry_after = None
                 log.warning(
                     "Groq rate limit hit (attempt %d/%d), provider=groq, model=%s, retry_after=%s",
                     attempt + 1, max_retries + 1, model, retry_after
                 )
                 if attempt < max_retries:
-                    wait_time = retry_after if retry_after else (2 ** attempt * 5)
+                    wait_time = retry_after if retry_after is not None else min(30, 2 ** attempt * 5)
                     log.info("Waiting %ds before retry", wait_time)
                     time.sleep(wait_time)
                     continue
@@ -276,6 +284,17 @@ class OllamaClient:
                     model=model
                 ) from exc
             except GroqAPIError as exc:
+                # Groq can reject otherwise useful code as json_validate_failed
+                # before returning the response. Retry once without provider-side
+                # JSON mode, then parse/validate the returned JSON locally.
+                status_code = getattr(exc, "status_code", None)
+                if status_code == 400 and use_json_mode and attempt < max_retries:
+                    body = getattr(exc, "body", None)
+                    detail = str(body or exc).lower()
+                    if "json_validate_failed" in detail:
+                        log.warning("Groq JSON mode rejected generated content; retrying with local JSON validation")
+                        use_json_mode = False
+                        continue
                 log.warning(
                     "Groq API error (attempt %d/%d), provider=groq, model=%s, status=%s",
                     attempt + 1, max_retries + 1, model, getattr(exc, 'status_code', 'unknown')
