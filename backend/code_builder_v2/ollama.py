@@ -10,8 +10,62 @@ from typing import Any
 from .applier import ProposedFileChange
 from .models import ChangePlan, GenerationProgress, TaskRequest
 from .planner import PlannerUnavailable
+from .security import normalize_relative_path
+from .transaction import TransactionValidationError, _normalise_operation
 
 log = logging.getLogger(__name__)
+
+
+def _reconcile_changes(
+    plan: ChangePlan, proposed: list[ProposedFileChange]
+) -> tuple[list[ProposedFileChange], set[str], set[str]]:
+    """Force generated changes to match the approved plan exactly.
+
+    Returns ``(reconciled, missing, dropped)`` where:
+      * ``reconciled`` contains one change per produced planned path, in plan
+        order, with the operation coerced to the approved operation;
+      * ``missing`` is the set of planned paths the model failed to produce;
+      * ``dropped`` is the set of unplanned paths the model tried to add.
+
+    This never writes an unplanned file and never silently skips a planned one
+    — it hands ``missing`` back to the caller so the deviation is handled
+    explicitly (bounded re-generation, then a loud failure), while the strict
+    validator in transaction.py stays the single source of truth.
+    """
+    planned_ops: dict[str, str] = {}
+    order: list[str] = []
+    for item in plan.changes:
+        p = normalize_relative_path(item.path)
+        if p not in planned_ops:
+            order.append(p)
+        planned_ops[p] = _normalise_operation(item.operation)
+
+    produced: dict[str, ProposedFileChange] = {}
+    dropped: set[str] = set()
+    for ch in proposed:
+        try:
+            p = normalize_relative_path(ch.path)
+        except Exception:
+            dropped.add(ch.path)
+            continue
+        if p not in planned_ops:
+            dropped.add(ch.path)
+            continue
+        produced[p] = ch  # last write wins (dedupe)
+
+    reconciled: list[ProposedFileChange] = []
+    for p in order:
+        ch = produced.get(p)
+        if ch is None:
+            continue
+        op = planned_ops[p]
+        if _normalise_operation(ch.operation) != op:
+            ch = ProposedFileChange(path=ch.path, operation=op, content=ch.content)
+        reconciled.append(ch)
+
+    missing = {p for p in order if p not in produced}
+    return reconciled, missing, dropped
+
 
 
 class OllamaError(RuntimeError):
@@ -523,7 +577,7 @@ class OllamaPlanner:
         prompt = f"""You are the planning engine of LUMINA Code Builder V2.
 Return ONLY JSON matching this schema:
 {{"summary":"...","changes":[{{"path":"relative/path","operation":"create|modify|delete","reason":"..."}}],"validation_commands":["..."]}}
-Rules: every required file must be listed; use repository-relative paths only; do not invent unrelated files.
+Rules: every required file must be listed, INCLUDING dependency manifests (for example requirements.txt or package.json), configuration files, and any data files the application reads or writes at runtime (for example a JSON data store), so the generated project installs, runs and passes validation without adding files later; use repository-relative paths only; do not invent unrelated files.
 validation_commands must contain only executable commands with an installed program as the first word (for example, "python -m pytest -q"). Never put manual instructions such as "Open index.html in a browser" in validation_commands. For a browser-only check with no executable command, return an empty list; browser verification is handled separately.
 User request:\n{request.prompt}
 """
@@ -555,10 +609,68 @@ class OllamaChangeGenerator:
         use_incremental = len(plan.changes) >= 3
 
         if use_incremental:
-            return self._generate_incremental(request, plan, file_context, plan_json, context_json, progress)
+            changes = self._generate_incremental(request, plan, file_context, plan_json, context_json, progress)
+        else:
+            # Fast path: single provider call for small applications
+            changes = self._generate_fast_path(request, plan, file_context, plan_json, context_json, progress)
 
-        # Fast path: single provider call for small applications
-        return self._generate_fast_path(request, plan, file_context, plan_json, context_json, progress)
+        # Reconcile the model output against the APPROVED plan so the Builder
+        # creates exactly the approved files: drop unplanned additions, coerce
+        # operations, and backfill any planned file the model omitted with one
+        # bounded focused pass. Never a silent deviation.
+        return self._reconcile_with_plan(request, plan, file_context, changes, progress)
+
+    def _reconcile_with_plan(
+        self,
+        request: TaskRequest,
+        plan: ChangePlan,
+        file_context: dict[str, str],
+        changes: list[ProposedFileChange],
+        progress: GenerationProgress | None = None,
+    ) -> list[ProposedFileChange]:
+        reconciled, missing, dropped = _reconcile_changes(plan, changes)
+        if dropped:
+            log.warning(
+                "Discarding %d unplanned file(s) not in the approved plan: %s",
+                len(dropped), sorted(dropped),
+            )
+        if missing:
+            log.warning(
+                "Model omitted %d planned file(s); running one bounded focused pass: %s",
+                len(missing), sorted(missing),
+            )
+            subset_plan = plan.model_copy(update={
+                "changes": [
+                    c for c in plan.changes
+                    if normalize_relative_path(c.path) in missing
+                ]
+            })
+            subset_context = {
+                k: v for k, v in file_context.items()
+                if normalize_relative_path(k) in missing
+            }
+            extra = self._generate_fast_path(
+                request, subset_plan, subset_context,
+                subset_plan.model_dump_json(),
+                json.dumps(subset_context, ensure_ascii=False),
+                progress,
+            )
+            reconciled, missing, dropped2 = _reconcile_changes(plan, reconciled + extra)
+            if dropped2:
+                log.warning(
+                    "Focused pass produced unplanned file(s), discarded: %s",
+                    sorted(dropped2),
+                )
+        if missing:
+            # Fail loud: the approved plan was not implemented. The caller/UI
+            # can then re-plan or approve changes — but we never ship a
+            # transaction that silently diverges from the plan.
+            raise TransactionValidationError(
+                "generation did not produce the approved files: "
+                + ", ".join(sorted(missing))
+                + "; the plan was not implemented faithfully"
+            )
+        return reconciled
 
     def _generate_fast_path(
         self,
