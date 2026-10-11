@@ -211,7 +211,7 @@ def validate_contract(
     if semantic_verification_applies(request) and not any(a in MUTATIONS or a == "fill" for a in actions):
         errors.append("semantic contract has no user mutation")
     meaningful_assertions = []
-    for i, (action, step) in enumerate(zip(actions, raw_steps)):
+    for i, (action, step) in enumerate(zip(actions, raw_steps, strict=True)):
         args = step.get("args") or step
         selector = str(args.get("selector", ""))
         has_expectation = any(k in args for k in ("contains", "equals", "at_least"))
@@ -287,7 +287,7 @@ def validate_contract(
     if verifiable_ids:
         covered = set()
         linked = set()
-        for i, (action, step) in enumerate(zip(actions, raw_steps)):
+        for i, (action, step) in enumerate(zip(actions, raw_steps, strict=True)):
             if action not in ASSERTIONS and action != "assert_no_overflow":
                 continue
             req_id = _step_requirement_id(step)
