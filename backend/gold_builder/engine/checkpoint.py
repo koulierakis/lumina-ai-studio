@@ -236,6 +236,8 @@ def _write_local_monotonic(job: Job) -> None:
 
 
 def _read_local(job_id: str) -> Optional[Job]:
+    if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
+        return None
     try:
         path = _job_file(job_id)
         if not path.exists():
@@ -769,6 +771,8 @@ async def list_jobs(db: AsyncIOMotorDatabase, limit: int = 50) -> list[Job]:
 
 
 async def delete_job(db: AsyncIOMotorDatabase, job_id: str) -> None:
+    if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
+        return
     try:
         await db[COLLECTION].delete_one({"_id": job_id})
     finally:
