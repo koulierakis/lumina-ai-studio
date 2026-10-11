@@ -1,6 +1,7 @@
 """Mount the vendored Gold Builder Engine (/api/gb/*) into Lumina behind owner auth."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -85,5 +86,24 @@ def mount_gold_builder(app: FastAPI, runtime_root: Path) -> None:
                 await guardian.stop()
             except Exception:
                 logger.exception("Gold Builder guardian stop failed")
+
+    @app.get("/api/health/gold-builder-mongo", include_in_schema=False)
+    async def gold_builder_mongo_health(response: Response) -> dict:
+        """Report a real MongoDB ping without exposing the connection string."""
+        if store != "mongo":
+            response.status_code = 503
+            return {"status": "not_configured", "store": store, "mongo_ping": "SKIPPED"}
+        try:
+            await asyncio.wait_for(db.command("ping"), timeout=5.0)
+        except Exception as exc:
+            logger.warning("Gold Builder MongoDB health ping failed: %s", type(exc).__name__)
+            response.status_code = 503
+            return {
+                "status": "degraded",
+                "store": store,
+                "mongo_ping": "FAIL",
+                "error": type(exc).__name__,
+            }
+        return {"status": "ok", "store": store, "mongo_ping": "OK"}
 
     logger.info("Gold Builder Engine mounted at /api/gb (store=%s)", store)
