@@ -239,7 +239,9 @@ def _read_local(job_id: str) -> Optional[Job]:
     if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
         return None
     try:
-        path = _job_file(job_id)
+        root = _state_dir().resolve()
+        path = _job_file(job_id).resolve()
+        path.relative_to(root)
         if not path.exists():
             return None
         return Job(**json.loads(path.read_text(encoding="utf-8")))
@@ -783,7 +785,10 @@ async def delete_job(db: AsyncIOMotorDatabase, job_id: str) -> None:
             except Exception:
                 pass
         try:
-            _job_file(job_id).unlink(missing_ok=True)
-        except OSError:
+            root = _state_dir().resolve()
+            path = _job_file(job_id).resolve()
+            path.relative_to(root)
+            path.unlink(missing_ok=True)
+        except (OSError, ValueError):
             pass
         _last_archive_at.pop(job_id, None)
