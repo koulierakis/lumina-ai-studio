@@ -45,6 +45,11 @@ class GroqDirect(LLMProvider):
         }
         if req.json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+            # Groq requires GPT-OSS requests in JSON mode to choose how
+            # reasoning tokens are exposed. Hidden keeps them out of the
+            # user-facing JSON while satisfying the model API contract.
+            if self.model.startswith("openai/gpt-oss-"):
+                kwargs["reasoning_format"] = "hidden"
         try:
             resp = await client.chat.completions.create(**kwargs)
             text = resp.choices[0].message.content or ""
