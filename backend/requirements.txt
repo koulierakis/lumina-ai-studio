@@ -36,3 +36,5 @@ fal-client>=0.5.9
 edge-tts>=6.0.0
 openai>=1.0.0,<3.0.0
 mongomock-motor>=0.0.30
+groq>=0.5.0
+replicate>=0.25.0
