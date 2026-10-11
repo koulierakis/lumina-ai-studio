@@ -206,7 +206,13 @@ def _job_file(job_id: str) -> Path:
     safe = "".join(ch for ch in job_id if ch.isalnum() or ch in {"-", "_"})
     if safe != job_id or not safe:
         raise ValueError("invalid job id")
-    return _state_dir() / f"{safe}.json"
+    root = _state_dir().resolve()
+    path = (root / f"{safe}.json").resolve()
+    try:
+        path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("invalid job id") from exc
+    return path
 
 
 def _write_local(job: Job) -> None:
