@@ -155,6 +155,36 @@ describe('Code Builder voice composer', () => {
     }));
   });
 
+  test('submits the explicitly selected Gold Builder engine in task metadata', async () => {
+    apiGet.mockImplementation((url) => {
+      if (url === '/code-builder/engines') return Promise.resolve({
+        default: 'native',
+        preferred: 'gold_builder',
+        openhands_ready: false,
+        engines: [
+          { name: 'gold_builder', available: true, experimental: false, safe_mode: true, role: 'primary' },
+          { name: 'native', available: true, experimental: false, safe_mode: true, role: 'legacy_fallback' },
+        ],
+      });
+      if (url === '/code-builder/model-status') return Promise.resolve({ status: 'ready' });
+      return Promise.resolve({ items: [] });
+    });
+    await renderComposer();
+    const engine = container.querySelector('[data-testid="code-builder-engine"]');
+    const input = container.querySelector('[data-testid="code-builder-instruction"]');
+    await act(async () => {
+      engine.value = 'gold_builder';
+      engine.dispatchEvent(new Event('change', { bubbles: true }));
+      setTextareaValue(input, 'Build a landing page with Gold Builder');
+    });
+    await act(async () => container.querySelector('[data-testid="code-builder-create"]').click());
+    expect(apiPost).toHaveBeenCalledWith('/code-builder/tasks', expect.objectContaining({
+      instruction: 'Build a landing page with Gold Builder',
+      metadata: { coding_engine: 'gold_builder' },
+      require_approval: true,
+    }));
+  });
+
   test('falls back to Native when OpenHands is unavailable', async () => {
     window.localStorage.setItem('lumina_code_builder_engine', 'openhands');
     apiGet.mockImplementation((url) => {

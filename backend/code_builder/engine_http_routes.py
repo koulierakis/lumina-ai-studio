@@ -13,4 +13,5 @@ def get_code_builder_engines() -> dict[str, object]:
     """Return engine choices without changing the native-default policy."""
     status = CodingEngineRegistry().public_status()
     status["openhands_apply_enabled"] = False
+    status["gold_builder_apply_enabled"] = False
     return status

@@ -131,7 +131,7 @@ export default function CodeBuilder() {
   const [voiceState, setVoiceState] = useState('ready');
   const [voiceMessage, setVoiceMessage] = useState('');
   const [modelStatus, setModelStatus] = useState('unknown');
-  const [engineStatus, setEngineStatus] = useState({ default: 'native', engines: [{ name: 'native', available: true, experimental: false, safe_mode: true }], openhands_ready: false });
+  const [engineStatus, setEngineStatus] = useState({ default: 'native', engines: [{ name: 'gold_builder', available: false, experimental: false, safe_mode: true, role: 'primary' }, { name: 'native', available: true, experimental: false, safe_mode: true, role: 'legacy_fallback' }], openhands_ready: false });
   const [codingEngine, setCodingEngine] = useState(() => (typeof window !== 'undefined' ? window.localStorage.getItem(ENGINE_STORAGE_KEY) || 'native' : 'native'));
   const recognitionRef = useRef(null);
   const voicePrefixRef = useRef('');
@@ -158,15 +158,15 @@ export default function CodeBuilder() {
   const refreshEngineStatus = useCallback(async () => {
     try {
       const status = await apiGet('/code-builder/engines', { retry: false });
-      const engines = Array.isArray(status?.engines) && status.engines.length ? status.engines : [{ name: 'native', available: true, experimental: false, safe_mode: true }];
-      const normalized = { ...status, default: status?.default || 'native', engines };
+      const engines = Array.isArray(status?.engines) && status.engines.length ? status.engines : [{ name: 'native', available: true, experimental: false, safe_mode: true, role: 'legacy_fallback' }];
+      const normalized = { ...status, default: status?.default || 'native', preferred: status?.preferred || 'native', engines };
       setEngineStatus(normalized);
       setCodingEngine((current) => {
         const option = engines.find((item) => item.name === current);
         return current === 'native' || option?.available ? current : 'native';
       });
     } catch {
-      setEngineStatus({ default: 'native', engines: [{ name: 'native', available: true, experimental: false, safe_mode: true }], openhands_ready: false });
+      setEngineStatus({ default: 'native', preferred: 'native', engines: [{ name: 'gold_builder', available: false, experimental: false, safe_mode: true, role: 'primary' }, { name: 'openhands', available: false, experimental: true, safe_mode: true, role: 'secondary' }, { name: 'native', available: true, experimental: false, safe_mode: true, role: 'legacy_fallback' }], openhands_ready: false });
       setCodingEngine('native');
     }
   }, []);
@@ -410,10 +410,10 @@ export default function CodeBuilder() {
             <label className="flex items-center gap-3 text-sm text-white/65" htmlFor="code-builder-engine">
               <span className="font-semibold text-white/80">Coding engine</span>
               <select id="code-builder-engine" data-testid="code-builder-engine" value={codingEngine} onChange={(event) => setCodingEngine(event.target.value)} disabled={busy} className="rounded-md border border-white/10 bg-white/[0.05] px-3 py-2 text-sm text-white outline-none focus:border-gold/40">
-                {engineStatus.engines.map((engine) => <option key={engine.name} value={engine.name} disabled={!engine.available}>{engine.name === 'native' ? 'Native' : 'OpenHands'}{engine.experimental ? ' · experimental' : ''}{!engine.available ? ' · unavailable' : ''}</option>)}
+                {engineStatus.engines.map((engine) => <option key={engine.name} value={engine.name} disabled={!engine.available}>{engine.name === 'native' ? 'Native' : engine.name === 'gold_builder' ? 'Gold Builder' : 'OpenHands'}{engine.role === 'primary' ? ' · primary' : engine.experimental ? ' · experimental' : ''}{!engine.available ? ' · unavailable' : ''}</option>)}
               </select>
             </label>
-            <span className="text-xs text-white/40">{codingEngine === 'openhands' ? (engineStatus.openhands_ready ? 'OpenHands runtime validated.' : 'OpenHands proposals still require approval and runtime validation.') : 'Native remains the default Code Builder engine.'}</span>
+            <span className="text-xs text-white/40">{codingEngine === 'gold_builder' ? 'Gold Builder runs as an isolated service. LUMINA shows its activity, preview and final report.' : codingEngine === 'openhands' ? (engineStatus.openhands_ready ? 'OpenHands runtime validated.' : 'OpenHands proposals still require approval and runtime validation.') : 'Native remains the safe default Code Builder engine.'}</span>
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm text-white/55"><ShieldCheck className="h-4 w-4 text-gold" />No production writes before explicit approval.</div>

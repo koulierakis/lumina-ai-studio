@@ -700,7 +700,9 @@ def _project_document(document: dict[str, Any] | None, projection: dict[str, Any
 
 
 def _database_mode() -> str:
-    mode = os.environ.get("LUMINA_DATABASE_PROVIDER", "sqlite").strip().lower()
+    from config_validation import validate_database_config
+
+    mode = validate_database_config().strip().lower()
     if mode not in {"sqlite", "mongo", "postgres", "auto"}:
         logger.warning("Unknown LUMINA_DATABASE_PROVIDER=%s; using sqlite", mode)
         return "sqlite"
