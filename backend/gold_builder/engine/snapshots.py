@@ -21,7 +21,7 @@ from typing import List, Optional
 
 from ..models import Snapshot
 from .. import workspace
-from ..security import sandbox_env
+from ..security import is_github_remote, sandbox_env
 
 
 def _checkpoint_dir(job_id: str) -> Path:
@@ -194,7 +194,7 @@ def push_current_branch(project_dir: Path) -> Optional[str]:
         capture_output=True, text=True,
     )
     remote_url = remote.stdout.strip() if remote.returncode == 0 else ""
-    if "github.com" in remote_url.lower():
+    if is_github_remote(remote_url):
         if not token:
             return None
         nonce = uuid.uuid4().hex
