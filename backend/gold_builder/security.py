@@ -64,31 +64,17 @@ def safe_resolve(root: Path, rel_path: str) -> Path:
     if any(p == ".." for p in parts):
         raise UnsafePathError(f"path traversal not allowed: {rel_path!r}")
 
-    root_resolved = root.resolve()
-    target = (root / "/".join(parts)).resolve()
+    root_resolved = os.path.realpath(os.fspath(root))
+    target = os.path.realpath(os.path.join(root_resolved, *parts))
     try:
-        target.relative_to(root_resolved)
+        if os.path.commonpath((root_resolved, target)) != root_resolved:
+            raise ValueError("path is outside the root")
     except ValueError as e:
         raise UnsafePathError(
             f"path escapes root: {rel_path!r} → {target}"
         ) from e
 
-    # symlink-escape check on any existing ancestor
-    node: Optional[Path] = target
-    while node is not None and node != root_resolved:
-        if node.is_symlink():
-            real = node.resolve()
-            try:
-                real.relative_to(root_resolved)
-            except ValueError as e:
-                raise UnsafePathError(
-                    f"symlink escapes root: {node} → {real}"
-                ) from e
-        if node.parent == node:
-            break
-        node = node.parent
-
-    return target
+    return Path(target)
 
 
 def is_github_remote(value: str) -> bool:
