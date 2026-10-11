@@ -54,7 +54,7 @@ from .snapshots import snapshot as make_snapshot
 from .stacks import get_stack
 from .verifier import verify_url
 from .verification_planner import plan_verification_scenario
-from .repo_intelligence import build_repo_map, get_focused_cross_file_context
+from .repo_intelligence import RepoContextMap, build_repo_map, get_focused_cross_file_context
 from .review import (
     derive_strict_review,
     record_code_author_from_router,
@@ -910,7 +910,13 @@ async def _execute_repair_reverify_loop(
         )
         attempt.original_failures = failing_gates_before
 
-        def _rollback_workspace(reason: str) -> None:
+        def _rollback_workspace(
+            reason: str,
+            attempt: RepairAttempt = attempt,
+            files_before: List[GeneratedFile] = files_before,
+            gates_before: QualityGates = gates_before,
+            evidence_before: Optional[BuildEvidence] = evidence_before,
+        ) -> None:
             attempt.accepted = False
             attempt.rolled_back = True
             attempt.rollback_reason = reason
@@ -1787,7 +1793,6 @@ async def iterate_job(
     result = await _build_and_verify_with_gates(job, plan, project, artifacts, db, preferred_provider)
 
     # 6. Repair loop if gates failed; rollback if worse
-    initial_passed = sum(1 for g in job.gates if g.status == "passed")
     result = await _execute_repair_reverify_loop(job, plan, project, artifacts, db, result, preferred_provider)
 
     # 6b. Mandatory review pipeline before an iteration is considered complete.
