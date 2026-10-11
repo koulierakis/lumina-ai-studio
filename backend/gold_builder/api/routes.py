@@ -60,7 +60,7 @@ from ..models import (
     UsageMetrics,
 )
 from ..providers.router import router as provider_router
-from ..security import SecretDetectedError, UnsafePathError
+from ..security import SecretDetectedError, UnsafePathError, safe_resolve
 
 
 _ALLOWED_URL_SCHEMES = ("http://", "https://", "git://")
@@ -159,10 +159,14 @@ def _validate_source_for_remote_caller(source: str) -> None:
             "optionally GB_LOCAL_SOURCE_ROOT) to enable, or use a git URL.")
     root = Path(os.environ.get("GB_LOCAL_SOURCE_ROOT",
                                str(workspace.workspace_root()))).resolve()
-    src = Path(source).expanduser().resolve()
+    source_path = Path(source).expanduser()
     try:
-        src.relative_to(root)
-    except ValueError as e:
+        relative_source = (
+            source_path.relative_to(root) if source_path.is_absolute()
+            else source_path
+        )
+        src = safe_resolve(root, str(relative_source))
+    except (ValueError, UnsafePathError) as e:
         raise HTTPException(400,
             f"local source must live under {root} (see GB_LOCAL_SOURCE_ROOT)") from e
     if not src.exists() or not src.is_dir():
