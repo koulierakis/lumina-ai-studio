@@ -21,6 +21,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from .. import workspace
 from ..models import Job
+from ..security import safe_resolve
 
 
 logger = logging.getLogger(__name__)
@@ -206,7 +207,7 @@ def _state_dir() -> Path:
 def _job_file(job_id: str) -> Path:
     if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
         raise ValueError("invalid job id")
-    return _state_dir() / f"{job_id}.json"
+    return safe_resolve(_state_dir(), f"{job_id}.json")
 
 
 def _write_local(job: Job) -> None:
@@ -239,9 +240,7 @@ def _read_local(job_id: str) -> Optional[Job]:
     if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
         return None
     try:
-        root = _state_dir().resolve()
-        path = _job_file(job_id).resolve()
-        path.relative_to(root)
+        path = safe_resolve(_state_dir(), f"{job_id}.json")
         if not path.exists():
             return None
         return Job(**json.loads(path.read_text(encoding="utf-8")))
@@ -785,9 +784,7 @@ async def delete_job(db: AsyncIOMotorDatabase, job_id: str) -> None:
             except Exception:
                 pass
         try:
-            root = _state_dir().resolve()
-            path = _job_file(job_id).resolve()
-            path.relative_to(root)
+            path = safe_resolve(_state_dir(), f"{job_id}.json")
             path.unlink(missing_ok=True)
         except (OSError, ValueError):
             pass
