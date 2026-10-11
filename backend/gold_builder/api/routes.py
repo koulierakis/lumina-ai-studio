@@ -159,14 +159,23 @@ def _validate_source_for_remote_caller(source: str) -> None:
             "optionally GB_LOCAL_SOURCE_ROOT) to enable, or use a git URL.")
     root = Path(os.environ.get("GB_LOCAL_SOURCE_ROOT",
                                str(workspace.workspace_root()))).resolve()
-    source_path = Path(source).expanduser()
+    root_text = os.fspath(root)
+    source_text = os.path.expanduser(str(source).strip())
+    if os.path.isabs(source_text):
+        source_text = os.path.normpath(source_text)
+        root_prefix = root_text.rstrip(os.sep) + os.sep
+        if source_text == root_text:
+            relative_source = "."
+        elif source_text.startswith(root_prefix):
+            relative_source = source_text[len(root_prefix):]
+        else:
+            raise HTTPException(400,
+                f"local source must live under {root} (see GB_LOCAL_SOURCE_ROOT)")
+    else:
+        relative_source = source_text
     try:
-        relative_source = (
-            source_path.relative_to(root) if source_path.is_absolute()
-            else source_path
-        )
-        src = safe_resolve(root, str(relative_source))
-    except (ValueError, UnsafePathError) as e:
+        src = safe_resolve(root, relative_source)
+    except UnsafePathError as e:
         raise HTTPException(400,
             f"local source must live under {root} (see GB_LOCAL_SOURCE_ROOT)") from e
     if not src.exists() or not src.is_dir():
