@@ -110,6 +110,8 @@ def _validate_public_http_url(url: str) -> str:
 def _normalize_repository_source(source: str) -> str:
     """Accept GitHub owner/repo shorthand from the UI as a safe HTTPS clone URL."""
     value = source.strip()
+    if len(value) > 2048:
+        raise HTTPException(400, "repository source is too long")
     if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
         return f"https://github.com/{value}.git"
     if re.fullmatch(r"https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?", value):
