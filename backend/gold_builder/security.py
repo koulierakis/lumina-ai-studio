@@ -91,6 +91,19 @@ def safe_resolve(root: Path, rel_path: str) -> Path:
     return target
 
 
+def is_github_remote(value: str) -> bool:
+    """Return whether a remote URL targets GitHub's exact hostname."""
+    candidate = value.strip()
+    try:
+        if candidate.lower().startswith("git@"):
+            hostname = candidate[4:].partition(":")[0]
+        else:
+            hostname = urllib.parse.urlsplit(candidate).hostname or ""
+    except ValueError:
+        return False
+    return hostname.casefold() in {"github.com", "www.github.com"}
+
+
 # ---------------------- child-process environment ----------------------
 
 # Explicit allowlist of environment variables that child processes may see.
