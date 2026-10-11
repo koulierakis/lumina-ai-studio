@@ -44,7 +44,6 @@ def plan_verification_scenario(
     found_links: List[str] = []
     has_form = False
 
-    combined_req = (app_requirements or "") + " " + (plan.description if plan else "")
 
     for fname, text in source_texts:
         if "<form" in text.lower():
