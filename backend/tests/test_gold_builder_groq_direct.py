@@ -1,16 +1,12 @@
+import asyncio
+import sys
 from types import SimpleNamespace
-
-import pytest
 
 from gold_builder.providers.base import CompletionRequest, Message
 from gold_builder.providers.groq_direct import GroqDirect
 
 
-@pytest.mark.asyncio
-async def test_gpt_oss_json_mode_sets_hidden_reasoning_format(monkeypatch):
-    monkeypatch.setenv("GROQ_API_KEY", "test-key")
-    captured = {}
-
+def _fake_openai_module(captured):
     async def create(**kwargs):
         captured.update(kwargs)
         return SimpleNamespace(
@@ -25,23 +21,25 @@ async def test_gpt_oss_json_mode_sets_hidden_reasoning_format(monkeypatch):
 
     class FakeClient:
         def __init__(self, **kwargs):
-            self.chat = SimpleNamespace(
-                completions=SimpleNamespace(create=create)
-            )
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=create))
 
         async def close(self):
             pass
 
-    monkeypatch.setitem(
-        __import__("sys").modules,
-        "openai",
-        SimpleNamespace(AsyncOpenAI=FakeClient),
-    )
+    return SimpleNamespace(AsyncOpenAI=FakeClient)
 
-    response = await GroqDirect().complete(
-        CompletionRequest(
-            messages=[Message(role="user", content="Return JSON.")],
-            json_mode=True,
+
+def test_gpt_oss_json_mode_sets_hidden_reasoning_format(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    captured = {}
+    monkeypatch.setitem(sys.modules, "openai", _fake_openai_module(captured))
+
+    response = asyncio.run(
+        GroqDirect().complete(
+            CompletionRequest(
+                messages=[Message(role="user", content="Return JSON.")],
+                json_mode=True,
+            )
         )
     )
 
@@ -50,42 +48,17 @@ async def test_gpt_oss_json_mode_sets_hidden_reasoning_format(monkeypatch):
     assert response.text == '{"ok": true}'
 
 
-@pytest.mark.asyncio
-async def test_non_gpt_oss_json_mode_does_not_send_reasoning_format(monkeypatch):
+def test_non_gpt_oss_json_mode_does_not_send_reasoning_format(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "test-key")
     captured = {}
+    monkeypatch.setitem(sys.modules, "openai", _fake_openai_module(captured))
 
-    async def create(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content='{"ok": true}'),
-                    finish_reason="stop",
-                )
-            ],
-            usage=SimpleNamespace(prompt_tokens=2, completion_tokens=3),
-        )
-
-    class FakeClient:
-        def __init__(self, **kwargs):
-            self.chat = SimpleNamespace(
-                completions=SimpleNamespace(create=create)
+    asyncio.run(
+        GroqDirect(model="llama-3.3-70b-versatile").complete(
+            CompletionRequest(
+                messages=[Message(role="user", content="Return JSON.")],
+                json_mode=True,
             )
-
-        async def close(self):
-            pass
-
-    monkeypatch.setitem(
-        __import__("sys").modules,
-        "openai",
-        SimpleNamespace(AsyncOpenAI=FakeClient),
-    )
-
-    await GroqDirect(model="llama-3.3-70b-versatile").complete(
-        CompletionRequest(
-            messages=[Message(role="user", content="Return JSON.")],
-            json_mode=True,
         )
     )
 
