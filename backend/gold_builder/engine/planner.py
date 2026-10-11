@@ -277,8 +277,6 @@ async def _ensure_verifiable_plan(
                 final_requirements,
             )
         if not final_ok:
-            import os as _dbg_os; _p = _dbg_os.environ.get("GB_DEBUG_REJECTED_PLAN")  # TEMP-DEBUG
-            if _p: open(_p, "w").write(json.dumps(final_data, ensure_ascii=False, indent=1))  # TEMP-DEBUG
             raise ValueError(
                 "planner produced an unverifiable acceptance contract after semantic recovery: "
                 + "; ".join(final_errors)
