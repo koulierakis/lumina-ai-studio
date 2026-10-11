@@ -112,10 +112,39 @@ def _normalize_repository_source(source: str) -> str:
     value = source.strip()
     if len(value) > 2048:
         raise HTTPException(400, "repository source is too long")
-    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value):
+
+    def is_repo_segment(segment: str) -> bool:
+        return bool(segment) and all(
+            char.isascii() and (char.isalnum() or char in "_.-")
+            for char in segment
+        )
+
+    parts = value.split("/")
+    if len(parts) == 2 and all(is_repo_segment(part) for part in parts):
         return f"https://github.com/{value}.git"
-    if re.fullmatch(r"https://github\\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/?", value):
-        return value.rstrip("/") + ("" if value.endswith(".git") else ".git")
+
+    try:
+        parsed = urlparse(value)
+        is_github_https = (
+            parsed.scheme.lower() == "https"
+            and parsed.hostname == "github.com"
+            and parsed.port in (None, 443)
+            and parsed.username is None
+            and parsed.password is None
+            and not parsed.query
+            and not parsed.fragment
+        )
+    except ValueError:
+        is_github_https = False
+        parsed = None
+    if is_github_https and parsed is not None:
+        path_parts = parsed.path.strip("/").split("/")
+        if len(path_parts) == 2:
+            owner, repository = path_parts
+            if repository.endswith(".git"):
+                repository = repository[:-4]
+            if is_repo_segment(owner) and is_repo_segment(repository):
+                return f"https://github.com/{owner}/{repository}.git"
     return value
 
 
