@@ -11,6 +11,7 @@ import io
 import json
 import logging
 import os
+import re
 import tarfile
 import time
 from pathlib import Path
@@ -203,16 +204,9 @@ def _state_dir() -> Path:
 
 
 def _job_file(job_id: str) -> Path:
-    safe = "".join(ch for ch in job_id if ch.isalnum() or ch in {"-", "_"})
-    if safe != job_id or not safe:
+    if not isinstance(job_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", job_id):
         raise ValueError("invalid job id")
-    root = _state_dir().resolve()
-    path = (root / f"{safe}.json").resolve()
-    try:
-        path.relative_to(root)
-    except ValueError as exc:
-        raise ValueError("invalid job id") from exc
-    return path
+    return _state_dir() / f"{job_id}.json"
 
 
 def _write_local(job: Job) -> None:
