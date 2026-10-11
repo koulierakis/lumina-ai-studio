@@ -30,7 +30,7 @@ async def require_gold_builder_access(request: Request) -> str:
 def _gold_db():
     mongo_url = (os.environ.get("GOLD_BUILDER_MONGO_URL") or os.environ.get("MONGO_URL") or "").strip()
     db_name = os.environ.get("GOLD_BUILDER_DB_NAME") or os.environ.get("DB_NAME") or "lumina_gold_builder"
-    if mongo_url:
+    if mongo_url and not mongo_url.startswith("mongomock://"):
         from motor.motor_asyncio import AsyncIOMotorClient
 
         return AsyncIOMotorClient(mongo_url)[db_name], "mongo"
