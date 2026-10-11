@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
 
-from ..security import sandbox_env
+from ..security import is_github_remote, sandbox_env
 from .stacks import detect_stack
 from .repo_intelligence import RepoContextMap, build_repo_map, format_repo_architecture_summary
 
@@ -47,7 +47,7 @@ async def clone_or_copy(source: str, dest: Path) -> Path:
         env = sandbox_env({"GIT_TERMINAL_PROMPT": "0"})
         askpass = token_file = None
         token = (os.environ.get("GB_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN") or "").strip()
-        if token and "github.com" in source.lower():
+        if token and is_github_remote(source):
             nonce = uuid.uuid4().hex
             askpass = dest.parent / f".gb-askpass-{nonce}.sh"
             token_file = dest.parent / f".gb-token-{nonce}"
