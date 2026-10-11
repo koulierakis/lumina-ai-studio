@@ -60,12 +60,6 @@ class GeminiImageProvider(ImageProvider):
         else:
             interaction_input = req.prompt
 
-        output_mime = {
-            "jpg": "image/jpeg",
-            "jpeg": "image/jpeg",
-            "webp": "image/webp",
-            "png": "image/png",
-        }.get((req.output_format or "png").lower(), "image/png")
         payload = {
             "model": self.model,
             "input": interaction_input,
