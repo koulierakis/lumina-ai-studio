@@ -714,28 +714,20 @@ async def _verify_playwright(
 
 
 async def _verify_http_fallback(url: str, error: str) -> VerificationResult:
-    import urllib.request
-    http_status = None
-    passed = False
-    rendered_text = ""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": "GoldBuilder/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            http_status = resp.status
-            # An HTTP response cannot prove browser or semantic behaviour.
-            passed = False
-            rendered_text = resp.read(2000).decode("utf-8", errors="replace")
-    except Exception as exc:
-        rendered_text = f"HTTP check failed: {exc}"
+    """Fail closed when browser verification is unavailable.
 
+    A server-side HTTP response cannot establish browser or semantic behavior,
+    and fetching a caller-provided URL from the backend would create an SSRF
+    path. Keep the failure details without making a second network request.
+    """
     return VerificationResult(
-        passed=passed,
-        http_status=http_status,
+        passed=False,
+        http_status=None,
         console_errors=[f"Browser verification fallback: {error}"],
         page_errors=[],
         network_errors=[],
         screenshot_path=None,
-        rendered_text=rendered_text,
+        rendered_text="HTTP fallback skipped; browser verification is unavailable.",
         error=f"Browser verification unavailable: {error}",
         media_loaded=[],
         media_broken=[],
