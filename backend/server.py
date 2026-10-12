@@ -108,7 +108,6 @@ from code_builder_v2.router import router as code_builder_v2_router
 from code_builder_v2.service import CodeBuilderService  # noqa: E402
 from code_builder_v2.store import JsonTaskStore  # noqa: E402
 from code_builder_v2.validation import ValidationRunner as ValidationRunnerV2  # noqa: E402
-from gold_builder_mount import mount_gold_builder  # noqa: E402
 from code_creator import create_project as code_create_project  # noqa: E402
 from code_creator import generate_project as code_generate_project
 from code_creator import get_project as code_get_project
@@ -4306,7 +4305,6 @@ async def code_creator_check(project_id: str, _: str = Depends(require_owner)) -
 app.include_router(api)
 app.include_router(code_builder_router)
 app.include_router(code_builder_v2_router)
-mount_gold_builder(app, ROOT_DIR.parent / ".lumina-runtime")
 app.include_router(document_studio_router)
 app.include_router(runtime_router)
 

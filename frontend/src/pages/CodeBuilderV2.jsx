@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { GoldBuilderPanel } from './codeBuilderV2/GoldBuilderPanel';
 
 const API = '/api/code-builder-v2';
 
@@ -19,19 +18,6 @@ function StatusBadge({ status }) {
 }
 
 export default function CodeBuilderV2() {
-  const [engine, setEngine] = useState('gold');
-  return (
-    <div className="mx-auto w-full max-w-7xl px-4 pt-6 text-zinc-100 sm:px-6 lg:px-8">
-      <div className="flex gap-2" data-testid="code-builder-engine-switch">
-        <button data-testid="engine-gold-btn" onClick={() => setEngine('gold')} className={`rounded-full border px-4 py-1.5 text-xs ${engine === 'gold' ? 'border-amber-400/60 bg-amber-400/10 text-amber-200' : 'border-white/10 text-zinc-400'}`}>Gold Builder Engine</button>
-        <button data-testid="engine-legacy-btn" onClick={() => setEngine('legacy')} className={`rounded-full border px-4 py-1.5 text-xs ${engine === 'legacy' ? 'border-cyan-400/60 bg-cyan-400/10 text-cyan-200' : 'border-white/10 text-zinc-400'}`}>Legacy V2 (Ollama)</button>
-      </div>
-      {engine === 'gold' ? <div className="py-6"><GoldBuilderPanel /></div> : <LegacyCodeBuilderV2 />}
-    </div>
-  );
-}
-
-function LegacyCodeBuilderV2() {
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('qwen2.5-coder:7b');
   const [task, setTask] = useState(null);

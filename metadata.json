@@ -1,0 +1,7 @@
+{
+  "name": "LUMINA AI Studio",
+  "description": "AI workspace for documents, images, video, code and voice assistance.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -102,7 +102,7 @@ playable_release_evidence/
 backups/
 docker-compose-error.txt
 
-# Μεγάλα και προσωρινά τοπικά αρχεία
+# οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½ οΏ½οΏ½οΏ½ οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½ οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½ οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½
 _tools/ffmpeg/
 _local_models/
 .lumina/runtime/
@@ -112,23 +112,23 @@ runtime/
 playable_release_evidence/
 *.bak_*
 
-# Backup αρχεία
+# Backup οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½
 *.backup_*
 *.bak_*
 
 # Windows null file
 
 
-# Τοπικά εργαλεία
+# οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½ οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½
 _tools/
 
 
-# Backup αρχεία
+# Backup οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½
 *.backup_*
 *.bak_*
 
 # Windows null file
 
 
-# Τοπικά εργαλεία
+# οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½ οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½οΏ½
 _tools/
