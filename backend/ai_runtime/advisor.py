@@ -25,6 +25,13 @@ ADVISOR_ROLES = {
     "ceo": "Chief Executive Officer",
     "cfo": "Chief Financial Officer",
     "cmo": "Chief Marketing Officer",
+    "gym_marketer": "Athletico Gym Marketing Specialist",
+    "legal": "Legal Information Assistant",
+    "accountant": "Accounting Assistant",
+    "assistant": "Personal Assistant & Secretary",
+    "designer": "Creative Designer",
+    "developer": "Software Developer",
+    "life_coach": "Personal Life Coach",
     "strategy": "Chief Strategy Officer",
     "investment": "Investment Director",
     "operations": "Chief Operating Officer",
@@ -33,13 +40,83 @@ ADVISOR_ROLES = {
 }
 
 ROLE_KEYWORDS = {
+    "accountant": (
+        "accountant", "bookkeeping", "invoice", "invoices", "ledger", "vat", "mydata",
+        "tax return", "λογιστ", "τιμολόγ", "παραστατικ", "φπα", "mydata", "βιβλί",
+        "φορολογική δήλωση",
+    ),
+    "legal": (
+        "legal advice", "lawyer", "contract", "agreement", "nda", "gdpr", "clause",
+        "νομικ", "δικηγόρ", "σύμβασ", "συμφωνητικ", "ρήτρα", "όροι",
+    ),
+    "gym_marketer": (
+        "athletico", "gym", "fitness", "gym membership", "personal training", "gym campaign",
+        "γυμναστήρ", "συνδρομ", "αθλούμεν", "μέλη γυμναστηρίου",
+    ),
+    "designer": (
+        "designer", "design", "graphic", "flyer", "poster", "logo", "visual", "banner",
+        "σχεδιαστ", "γραφιστ", "αφίσ", "λογότυπ", "δημιουργικό",
+    ),
+    "developer": (
+        "developer", "software", "code", "coding", "programming", "debug", "repository",
+        "κώδικ", "προγραμματιστ", "προγραμματισ", "σφάλμα κώδικα", "repo",
+    ),
+    "assistant": (
+        "personal assistant", "secretary", "schedule", "appointment", "reminder", "organize",
+        "email", "γραμματέ", "βοηθ", "υπενθύμ", "ραντεβού", "οργάνωσ", "συντόνισ",
+    ),
+    "life_coach": (
+        "life coach", "personal development", "habits", "wellbeing", "life goals",
+        "life coaching", "προσωπική ανάπτυξη", "στόχοι ζωής", "συνήθειες", "ισορροπία ζωής",
+        "άγχος", "κίνητρο",
+    ),
     "cfo": ("cash", "revenue", "profit", "cost", "budget", "tax", "finance", "financial", "bank", "liquidity", "margin", "έσοδα", "κέρδος", "κόστος", "προϋπολογ", "φόρο", "οικονομ", "τράπεζ", "ρευστότητα", "περιθώριο", "€", "$"),
-    "cmo": ("marketing", "brand", "campaign", "sales funnel", "social", "advertising", "positioning", "customer acquisition", "μάρκετινγκ", "καμπάνια", "διαφήμιση", "πωλήσ", "πελάτ", "επωνυμία"),
+    "cmo": ("marketing", "marketer", "marketers", "brand", "campaign", "sales funnel", "social", "advertising", "positioning", "customer acquisition", "μάρκετινγκ", "καμπάνια", "διαφήμιση", "πωλήσ", "πελάτ", "επωνυμία"),
     "strategy": ("strategy", "competitor", "market entry", "expansion", "business model", "partnership", "deal", "στρατηγ", "ανταγωνισ", "επέκταση", "συνεργασία", "συμφωνία", "αγορά"),
     "investment": ("invest", "investment", "portfolio", "return", "roi", "valuation", "asset", "property", "stock", "επένδυ", "απόδοση", "αποτίμηση", "ακίνητ", "μετοχ"),
     "operations": ("operations", "workflow", "process", "team", "staff", "supplier", "logistics", "execution", "λειτουργ", "διαδικασία", "ομάδα", "προσωπικό", "προμηθευ", "μεταφορ", "εκτέλεση"),
-    "risk": ("risk", "compliance", "kyc", "aml", "legal", "regulation", "audit", "exposure", "ρίσκο", "κίνδυν", "συμμόρφωση", "νομικ", "κανονισ", "έλεγχος", "έκθεση"),
+    "risk": ("risk", "compliance", "kyc", "aml", "regulatory", "audit", "exposure", "ρίσκο", "κίνδυν", "συμμόρφωση", "κανονισ", "έλεγχος", "έκθεση"),
     "mentor": ("mentor", "personal", "decision", "stress", "habit", "motivation", "career", "life", "προσωπ", "απόφαση", "άγχος", "συνήθεια", "κίνητρο", "καριέρα", "ζωή"),
+}
+
+
+ROLE_GUIDANCE = {
+    "cmo": (
+        "Develop practical marketing strategy, positioning, audience, channels, and measurable tests. "
+        "Do not invent campaign results or business facts."
+    ),
+    "gym_marketer": (
+        "Act as the owner’s marketer for Athletico Gym in Greece. Create ready-to-use Greek campaigns, "
+        "offers, social posts, and member-retention ideas. Use only confirmed prices, dates, and terms; "
+        "mark placeholders when details are missing."
+    ),
+    "legal": (
+        "Provide plain-language legal information, issue-spotting, and document summaries. Do not claim "
+        "to be a lawyer, give a definitive legal opinion, or invent current law. Cite reliable sources "
+        "when web research is available and identify what a qualified lawyer should verify."
+    ),
+    "accountant": (
+        "Help organize invoices, expenses, cash records, and questions for the user’s accountant. "
+        "Show calculations and assumptions. Do not claim to file taxes or certify Greek tax treatment."
+    ),
+    "assistant": (
+        "Organize tasks, appointments, notes, and correspondence; prepare drafts and clear action lists. "
+        "Do not claim to send messages, book appointments, or change external data unless a real approved "
+        "LUMINA action result confirms it."
+    ),
+    "designer": (
+        "Turn the brief into a clear visual concept, layout, copy, and production instructions. "
+        "Do not claim an image or design file was created unless a real LUMINA tool result confirms it."
+    ),
+    "developer": (
+        "Explain and inspect software changes in concrete terms. Use Code Builder only through its real "
+        "connected action and report its actual build, test, and browser evidence. Never claim code was "
+        "changed, tested, committed, or deployed without matching action results."
+    ),
+    "life_coach": (
+        "Support the owner’s personal goals, habits, motivation, time balance, and everyday decisions "
+        "with practical, nonjudgmental steps. Do not present yourself as a therapist or diagnose a condition."
+    ),
 }
 
 
@@ -236,10 +313,12 @@ class ExecutiveAdvisorService:
             for entry in recent_actions
         ) or "- none"
         role_name = ADVISOR_ROLES.get(role, ADVISOR_ROLES["ceo"])
+        specialist_guidance = ROLE_GUIDANCE.get(role, "")
         board_instruction = ""
         if role == "board":
             board_instruction = (
-                "Internally evaluate the issue from CEO, CFO, CMO, strategy, investment, operations, risk/compliance, and mentor perspectives. "
+                "Evaluate the issue through only the relevant perspectives: CEO, CFO, general marketing, Athletico gym marketing, "
+                "legal, accounting, strategy, investment, operations, risk/compliance, design, software development, and life coaching. "
                 "Return one unified recommendation; surface material disagreements and trade-offs without simulating a theatrical conversation."
             )
         depth = "Use deliberate multi-step analysis before answering." if deep_reasoning else "Prefer a concise operational answer."
@@ -248,6 +327,7 @@ You are an exacting advisor, not a passive assistant. Challenge weak assumptions
 Always answer in the language used by the owner in the latest message. When the owner writes in Greek, use clear natural Greek and keep unavoidable technical terms simple.
 Never invent facts, financial figures, legal status, source documents, or completed actions. Ask for missing facts only when they are essential; otherwise make bounded assumptions and label them.
 For financial, legal, medical, tax, compliance, or investment matters, explicitly flag uncertainty and the need for professional verification when material.
+Specialist guidance for the selected role: {specialist_guidance or 'Use the role’s normal professional focus while following all safety and factual-integrity rules above.'}
 {depth}
 {board_instruction}
 
