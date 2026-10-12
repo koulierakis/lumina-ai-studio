@@ -67,7 +67,7 @@ ROLE_KEYWORDS = {
     ),
     "life_coach": (
         "life coach", "personal development", "habits", "wellbeing", "life goals",
-        "life coaching", "προσωπική ανάπτυξη", "στόχοι ζωής", "συνήθειες", "ισορροπία ζωής",
+        "life coaching", "προσωπική ανάπτυξη", "στόχοι ζωής", "στόχους ζωής", "συνήθειες", "ισορροπία ζωής",
         "άγχος", "κίνητρο",
     ),
     "cfo": ("cash", "revenue", "profit", "cost", "budget", "tax", "finance", "financial", "bank", "liquidity", "margin", "έσοδα", "κέρδος", "κόστος", "προϋπολογ", "φόρο", "οικονομ", "τράπεζ", "ρευστότητα", "περιθώριο", "€", "$"),
