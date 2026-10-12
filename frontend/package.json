@@ -107,7 +107,7 @@
     "tailwindcss": "3.4.17"
   },
   "overrides": {
-    "react-router": "7.15.1",
+    "react-router": "7.18.3",
     "node-forge": "1.4.0",
     "fast-uri": "3.1.2",
     "flatted": "3.4.2",
