@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { apiGet, apiPost } from '../lib/api';
 import AuthImage from '../components/AuthImage';
 import { toast } from 'sonner';
-import { Sparkles, Loader2, Download, ImageIcon } from 'lucide-react';
+import {
+  ArrowLeft, Download, ImageIcon, Loader2, Mic, MicOff, Sparkles, Volume2, VolumeX,
+} from 'lucide-react';
 import { handoffForTarget } from '../platform/studioHandoff';
+import { useVoiceGuidance } from '../lib/useVoiceGuidance';
 
 const PROMPT_ONLY_PACK = { id: 'none', name: 'None / Prompt Only (Γενικό)' };
 
@@ -179,243 +182,336 @@ export default function Generate() {
   const gridCols = outputMediaIds.length === 1 ? 'grid-cols-1' : 'grid-cols-2';
   const activePack = promptOnly ? PROMPT_ONLY_PACK : packs.find((p) => p.id === packId);
   const showResults = job?.status === 'completed' && outputMediaIds.length > 0;
+  const [showOptions, setShowOptions] = useState(false);
+
+  const voiceGuide = useVoiceGuidance({
+    onTranscript: (transcript) => {
+      setPrompt((prev) => (prev ? `${prev} ${transcript}` : transcript));
+    },
+  });
 
   return (
-    <div className="h-full w-full flex">
-      <div className="flex-1 h-full overflow-y-auto p-10">
-        <div className="flex items-baseline justify-between mb-8">
-          <div>
-            <h2 className="font-display text-4xl text-white tracking-tight">New Generation</h2>
-            <p className="text-white/50 text-sm mt-1">
-              {promptOnly ? 'General text-to-image generation through ' : 'Identity-preserving photography through '}
-              <span className="text-gold">{provider || 'automatic provider selection'}</span>
-            </p>
+    <div className="h-screen w-full flex flex-col lg:flex-row overflow-hidden bg-ink-950 text-foreground" data-testid="generate-page">
+      {/* ─── ΑΡΙΣΤΕΡΗ ΣΤΗΛΗ ΕΛΕΓΧΟΥ (LEFT CONTROL PANEL) ─── */}
+      <aside className="w-full lg:w-[420px] lg:min-w-[380px] lg:max-w-[450px] h-full flex flex-col border-r border-white/10 bg-ink-950/95 overflow-y-auto shrink-0 z-20 p-4 sm:p-5 space-y-4">
+        {/* Row 1: Back to Home + Tool Badge */}
+        <div className="flex items-center justify-between gap-2 border-b border-white/[0.08] pb-3">
+          <Link
+            to="/studio/dashboard"
+            data-testid="generate-back-home"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-gold/40 bg-gold/15 px-3 py-1.5 text-xs font-bold text-gold hover:bg-gold hover:text-black transition shadow-sm"
+            title="Επιστροφή στην Αρχική Οθόνη"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <span>← Επιστροφή στην Αρχική</span>
+          </Link>
+          <span className="flex items-center gap-1.5 text-xs font-semibold text-white/90">
+            <Sparkles className="h-4 w-4 text-gold" />
+            <span>Image Studio</span>
+          </span>
+        </div>
+
+        {/* Row 2: Φωνητική Καθοδήγηση & Φωνητική Υπαγόρευση */}
+        <div className="rounded-xl border border-white/10 bg-black/40 p-3 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gold flex items-center gap-1.5">
+              <Volume2 className="h-3.5 w-3.5" />
+              <span>Φωνητική Καθοδήγηση</span>
+            </span>
+            <span className="text-[10px] text-white/40">Voice Assistant</span>
           </div>
-          {activePack && (
-            <div className="text-right">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-white/40">{promptOnly ? 'Mode' : 'Active identity'}</div>
-              <div className="text-white text-sm" data-testid="active-pack-label">{activePack.name}</div>
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (voiceGuide.isSpeaking) {
+                  voiceGuide.stopSpeaking();
+                } else {
+                  voiceGuide.speak('Καλώς ήρθατε στο Image Studio. Στην αριστερή στήλη μπορείτε να γράψετε αναλυτικά την περιγραφή της εικόνας που θέλετε να δημιουργήσει η τεχνητή νοημοσύνη, ή να πατήσετε το μικρόφωνο για φωνητική υπαγόρευση. Επιλέξτε αναλογία και πατήστε το χρυσό κουμπί Δημιουργία Εικόνας. Η εικόνα θα εμφανιστεί στο κεντρικό παράθυρο.');
+                }
+              }}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium transition ${
+                voiceGuide.isSpeaking
+                  ? 'border-amber-400 bg-amber-400/20 text-amber-200 animate-pulse'
+                  : 'border-white/10 bg-white/[0.04] text-white/80 hover:bg-white/10 hover:text-white'
+              }`}
+              title="Ακούστε οδηγίες χρήσης στα Ελληνικά"
+            >
+              {voiceGuide.isSpeaking ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5 text-gold" />}
+              <span>{voiceGuide.isSpeaking ? 'Διακοπή' : 'Ακρόαση Οδηγιών'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={voiceGuide.toggleListening}
+              className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium transition ${
+                voiceGuide.isListening
+                  ? 'border-red-400 bg-red-400/20 text-red-200 animate-pulse'
+                  : 'border-white/10 bg-white/[0.04] text-white/80 hover:bg-white/10 hover:text-white'
+              }`}
+              title="Φωνητική υπαγόρευση περιγραφής"
+            >
+              {voiceGuide.isListening ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5 text-red-400" />}
+              <span>{voiceGuide.isListening ? 'Ακρόαση…' : 'Υπαγόρευση'}</span>
+            </button>
+          </div>
+          {voiceGuide.voiceMessage && (
+            <p className="text-[11px] text-amber-300/90 font-mono bg-amber-400/10 rounded-md p-1.5">
+              {voiceGuide.voiceMessage}
+            </p>
           )}
         </div>
 
-        {!job && (
-          <div className="h-[60vh] rounded-lg lumina-glass flex items-center justify-center">
-            <div className="text-center max-w-md px-8">
-              <ImageIcon strokeWidth={1} className="w-12 h-12 mx-auto text-white/20 mb-4" />
-              <h3 className="font-display text-2xl text-white mb-2">Your canvas awaits</h3>
-              <p className="text-white/50 text-sm">
-                {promptOnly ? (
-                  <>Describe any image you want in the prompt, then press <span className="text-gold">Generate</span>.</>
-                ) : (
-                  <>Set your prompt on the right, then press <span className="text-gold">Generate</span> to place your identity into a scene.</>
-                )}
-              </p>
-            </div>
+        {/* Row 3: Άνετο Μεγάλο Κουτί Prompt */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <label htmlFor="image-prompt" className="text-xs font-semibold text-white/90">
+              Περιγραφή Εικόνας / Prompt:
+            </label>
+            <span className="text-[10px] text-white/40">{prompt.length} χαρακτήρες</span>
           </div>
-        )}
-
-        {job && !showResults && (
-          <div className="h-[60vh] rounded-lg lumina-glass flex flex-col items-center justify-center relative overflow-hidden">
-            <div className="absolute inset-0 opacity-30" style={{
-              background: 'radial-gradient(circle at 50% 50%, rgba(212,175,55,0.18) 0%, transparent 60%)',
-            }} />
-            <Loader2 strokeWidth={1.25} className="w-10 h-10 text-gold animate-spin mb-6" />
-            <p className="font-display text-2xl text-white mb-1" data-testid="job-status">{
-              job.status === 'processing' ? 'Rendering your scene…' :
-              job.status === 'failed' ? 'Generation failed' :
-              'Preparing generation…'
-            }</p>
-            <p className="text-white/40 text-sm">Generation time depends on provider availability</p>
+          <div className="relative rounded-xl border border-white/15 bg-black/60 focus-within:border-gold/60 shadow-inner">
+            <textarea
+              id="image-prompt"
+              data-testid="prompt-input"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={6}
+              placeholder="Περιγράψτε με λεπτομέρεια την εικόνα (π.χ. cinematic portrait in natural lighting, sharp focus, 8k, Mediterranean atmosphere, fine art photography)..."
+              className="w-full bg-transparent p-3.5 text-sm text-white placeholder:text-white/30 outline-none resize-y leading-relaxed"
+            />
           </div>
-        )}
-
-        {showResults && (
-          <div className={`grid ${gridCols} gap-4`} data-testid="results-grid">
-            {outputMediaIds.map((mid, i) => (
-              <div key={mid} className="relative group rounded-lg overflow-hidden bg-white/[0.02] border border-white/[0.06]">
-                <AuthImage mediaId={mid} className="w-full h-auto block" alt={`result-${i}`} />
-                <div className="absolute inset-x-0 bottom-0 p-3 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-end">
-                  <button
-                    onClick={() => download(mid, `lumina-${job.id}-${i + 1}.png`)}
-                    data-testid={`download-${mid}`}
-                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-white/10 hover:bg-gold hover:text-black text-white transition-colors"
-                  >
-                    <Download strokeWidth={1.5} className="w-3.5 h-3.5" /> Download
-                  </button>
-                </div>
-              </div>
+          {/* Quick template chips */}
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {[
+              'Cinematic lighting, 8k',
+              'Venetian harbor sunset',
+              'Minimal modern studio',
+              'Photorealistic portrait',
+            ].map((tmpl) => (
+              <button
+                key={tmpl}
+                type="button"
+                onClick={() => setPrompt((prev) => (prev ? `${prev}, ${tmpl}` : tmpl))}
+                className="text-[10px] rounded-md border border-white/10 bg-white/[0.03] px-2 py-0.5 text-white/60 hover:text-gold hover:border-gold/30 transition"
+              >
+                + {tmpl}
+              </button>
             ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      <div className="w-96 shrink-0 border-l border-white/[0.06] h-full overflow-y-auto bg-ink-950">
-        <div className="p-6 space-y-6">
-          <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">AI Provider</label>
+        {/* Row 4: Αναλογία Διαστάσεων (Aspect Ratio) */}
+        <div className="space-y-1.5">
+          <label className="text-xs text-white/60 block font-medium">Αναλογία Διαστάσεων (Aspect Ratio):</label>
+          <div className="grid grid-cols-5 gap-1.5 text-xs">
+            {RATIOS.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setAspect(r)}
+                data-testid={`ratio-${r.replace(':', 'x')}`}
+                className={`py-2 rounded-lg text-center transition font-semibold ${
+                  aspect === r ? 'bg-gold text-black shadow' : 'bg-white/[0.04] text-white/70 hover:bg-white/[0.08] hover:text-white'
+                }`}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Row 5: AI Engine & Pack */}
+        <div className="rounded-xl border border-white/10 bg-black/30 p-3 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-white/60">AI Engine:</span>
             <select
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
               data-testid="provider-select"
-              className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none"
+              className="rounded-lg border border-white/10 bg-black/60 px-2.5 py-1.5 text-xs text-white outline-none focus:border-gold/40"
             >
-              <option value="">Automatic fallback</option>
+              <option value="">Auto Provider</option>
               {providers.map((item) => (
                 <option key={item.name} value={item.name} disabled={item.name !== 'flux' && !item.configured}>
-                  {item.name}{item.name === 'flux' ? ' — ready' : (item.configured ? (item.healthy ? ' — ready' : ' — unavailable') : ' — no credentials')}
+                  {item.name}{item.name === 'flux' ? ' (Flux Ready)' : (item.configured ? ' (Online)' : ' (Offline)')}
                 </option>
               ))}
             </select>
           </div>
 
-          <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Identity Pack</label>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-white/60">Identity Pack:</span>
             <select
               value={packId}
               onChange={(e) => setPackId(e.target.value)}
               data-testid="pack-select"
-              className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none"
+              className="rounded-lg border border-white/10 bg-black/60 px-2.5 py-1.5 text-xs text-white outline-none focus:border-gold/40"
             >
-              <option value="none">None / Prompt Only (Γενικό)</option>
+              <option value="none">Prompt Only (Γενικό)</option>
               {packs.map((p) => (
                 <option key={p.id} value={p.id}>{p.name} ({p.photo_ids.length} refs)</option>
               ))}
             </select>
           </div>
+        </div>
 
-          <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Prompt</label>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              data-testid="prompt-input"
-              rows={5}
-              className="w-full bg-black/50 border border-white/10 rounded px-3 py-2.5 text-sm text-white placeholder:text-white/30 focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none resize-none"
-              placeholder={promptOnly ? 'Describe any image you want…' : 'Describe the complete scene, clothing and style…'}
-            />
-          </div>
+        {/* Row 6: Ρυθμίσεις (Negative prompt, scenes, count) */}
+        <div className="space-y-2 border-t border-white/10 pt-3">
+          <button
+            type="button"
+            onClick={() => setShowOptions((v) => !v)}
+            className="w-full flex items-center justify-between text-xs text-white/70 hover:text-gold"
+          >
+            <span>Επιπλέον Επιλογές & Φίλτρα</span>
+            <span>{showOptions ? '▲' : '▼'}</span>
+          </button>
 
-          <div>
-            <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Negative</label>
-            <input
-              value={negative}
-              onChange={(e) => setNegative(e.target.value)}
-              data-testid="negative-input"
-              className="w-full bg-black/50 border border-white/10 rounded px-3 py-2 text-sm text-white placeholder:text-white/30 focus:border-gold/50 focus:ring-1 focus:ring-gold/40 outline-none"
-              placeholder="things to avoid"
-            />
-          </div>
-
-          {!promptOnly && (
-            <>
+          {showOptions && (
+            <div className="space-y-3 pt-2 text-xs">
               <div>
-                <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Scene <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => setScene('')}
-                    data-testid="scene-prompt-only"
-                    className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                      scene === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                    }`}
-                  >Prompt only</button>
-                  {SCENES.map((s) => (
+                <label className="text-white/60 block mb-1">Negative Prompt:</label>
+                <input
+                  value={negative}
+                  onChange={(e) => setNegative(e.target.value)}
+                  data-testid="negative-input"
+                  className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-xs text-white placeholder:text-white/30 outline-none focus:border-gold/40"
+                  placeholder="cartoon, deformed, extra fingers, blurry..."
+                />
+              </div>
+
+              {!promptOnly && (
+                <div>
+                  <span className="text-white/60 block mb-1">Scenes:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {SCENES.slice(0, 8).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setScene(scene === s ? '' : s)}
+                        className={`px-2 py-0.5 rounded text-[10px] border ${
+                          scene === s ? 'bg-gold text-black font-semibold border-gold' : 'border-white/10 bg-white/[0.02] text-white/60 hover:text-white'
+                        }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <span className="text-white/60 block mb-1">Αριθμός Εικόνων:</span>
+                <div className="flex gap-2">
+                  {[1, 2, 4].map((n) => (
                     <button
-                      key={s}
-                      onClick={() => setScene(s)}
-                      data-testid={`scene-${s.replace(/\s+/g, '-').toLowerCase()}`}
-                      className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                        scene === s
-                          ? 'bg-gold/15 border-gold/60 text-gold'
-                          : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
+                      key={n}
+                      type="button"
+                      onClick={() => setCount(n)}
+                      className={`px-3 py-1 rounded text-xs border ${
+                        count === n ? 'bg-gold text-black font-bold border-gold' : 'border-white/10 text-white/60'
                       }`}
                     >
-                      {s}
+                      {n}
                     </button>
                   ))}
                 </div>
               </div>
-
-              <div>
-                <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Outfit <span className="normal-case tracking-normal text-white/30">(optional)</span></label>
-                <div className="flex flex-wrap gap-1.5">
-                  <button
-                    onClick={() => setOutfit('')}
-                    data-testid="outfit-prompt-only"
-                    className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                      outfit === '' ? 'bg-gold/15 border-gold/60 text-gold' : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                    }`}
-                  >Prompt only</button>
-                  {OUTFITS.map((o) => (
-                    <button
-                      key={o}
-                      onClick={() => setOutfit(o)}
-                      className={`text-[11px] px-2.5 py-1.5 rounded border transition-colors ${
-                        outfit === o
-                          ? 'bg-gold/15 border-gold/60 text-gold'
-                          : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white hover:border-white/20'
-                      }`}
-                    >
-                      {o}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
+            </div>
           )}
+        </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Aspect</label>
-              <div className="flex flex-wrap gap-1.5">
-                {RATIOS.map((r) => (
-                  <button
-                    key={r}
-                    onClick={() => setAspect(r)}
-                    data-testid={`ratio-${r.replace(':', 'x')}`}
-                    className={`text-xs px-2 py-1.5 rounded border transition-colors ${
-                      aspect === r
-                        ? 'bg-gold/15 border-gold/60 text-gold'
-                        : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white'
-                    }`}
-                  >
-                    {r}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-[11px] uppercase tracking-[0.2em] text-white/50 mb-2">Outputs</label>
-              <div className="flex gap-1.5">
-                {[1, 2, 3, 4].map((n) => (
-                  <button
-                    key={n}
-                    onClick={() => setCount(n)}
-                    data-testid={`count-${n}`}
-                    className={`flex-1 text-sm py-1.5 rounded border transition-colors ${
-                      count === n
-                        ? 'bg-gold/15 border-gold/60 text-gold'
-                        : 'bg-white/[0.02] border-white/10 text-white/60 hover:text-white'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
+        {/* Row 7: Primary Action Button */}
+        <div className="pt-2">
           <button
             onClick={run}
-            disabled={running}
+            disabled={running || !prompt.trim()}
             data-testid="generate-btn"
-            className="w-full flex items-center justify-center gap-2 bg-gold text-black font-medium py-3 rounded hover:bg-gold-soft disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-gold px-4 py-3.5 text-sm font-bold text-black transition hover:bg-gold-soft hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-40"
           >
-            {running ? <Loader2 strokeWidth={1.5} className="w-4 h-4 animate-spin" /> : <Sparkles strokeWidth={1.5} className="w-4 h-4" />}
-            {running ? 'Generating…' : 'Generate'}
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4 fill-current" />}
+            <span>{running ? 'Δημιουργία σε εξέλιξη…' : '✨ Δημιουργία Εικόνας'}</span>
           </button>
         </div>
-      </div>
+      </aside>
+
+      {/* ─── ΚΕΝΤΡΟ: ΠΑΡΑΘΥΡΟ ΖΩΝΤΑΝΗΣ ΠΡΟΕΠΙΣΚΟΠΗΣΗΣ ΕΙΚΟΝΑΣ (CENTER CANVAS) ─── */}
+      <section className="flex-1 h-full flex flex-col bg-black/70 overflow-hidden">
+        {/* Top Header for Canvas */}
+        <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.03] px-4 py-2.5 text-xs shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-300">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+              <span>LIVE IMAGE CANVAS</span>
+            </span>
+            <span className="text-white/50 text-[11px]">
+              {provider ? `Μοντέλο: ${provider}` : 'Flux Image Engine'} · Αναλογία: {aspect}
+            </span>
+          </div>
+          {showResults && (
+            <span className="text-xs text-gold font-semibold">
+              {outputMediaIds.length} {outputMediaIds.length === 1 ? 'αρχείο' : 'αρχεία'} έτοιμα
+            </span>
+          )}
+        </div>
+
+        {/* Canvas Body */}
+        <div className="flex-1 h-full overflow-y-auto p-4 sm:p-8 flex flex-col justify-center items-center">
+          {!job && (
+            <div className="w-full max-w-4xl h-[70vh] rounded-2xl lumina-glass flex items-center justify-center border border-white/10 shadow-2xl">
+              <div className="text-center max-w-md px-8">
+                <ImageIcon strokeWidth={1} className="w-16 h-16 mx-auto text-gold/30 mb-4" />
+                <h3 className="font-display text-2xl text-white mb-2">Live Image Studio Canvas</h3>
+                <p className="text-white/50 text-sm leading-relaxed">
+                  Γράψτε την περιγραφή σας στην αριστερή στήλη και πατήστε <span className="text-gold font-semibold">✨ Δημιουργία Εικόνας</span>. Η προεπισκόπηση της εικόνας θα εμφανιστεί εδώ σε υψηλή ανάλυση.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {job && !showResults && (
+            <div className="w-full max-w-4xl h-[70vh] rounded-2xl lumina-glass flex flex-col items-center justify-center relative overflow-hidden border border-white/10 shadow-2xl">
+              <div
+                className="absolute inset-0 opacity-30"
+                style={{
+                  background: 'radial-gradient(circle at 50% 50%, rgba(212,175,55,0.18) 0%, transparent 60%)',
+                }}
+              />
+              <Loader2 strokeWidth={1.25} className="w-12 h-12 text-gold animate-spin mb-6" />
+              <p className="font-display text-2xl text-white mb-1" data-testid="job-status">
+                {job.status === 'processing'
+                  ? 'Rendering your scene…'
+                  : job.status === 'failed'
+                  ? 'Generation failed'
+                  : 'Preparing generation…'}
+              </p>
+              <p className="text-white/40 text-sm">Ζωντανή παραγωγή μέσω {provider || 'Flux AI'}...</p>
+            </div>
+          )}
+
+          {showResults && (
+            <div className="w-full max-w-6xl mx-auto py-4">
+              <div className={`grid ${gridCols} gap-6`} data-testid="results-grid">
+                {outputMediaIds.map((mid, i) => (
+                  <div key={mid} className="relative group rounded-2xl overflow-hidden bg-black/50 border border-white/15 shadow-2xl">
+                    <AuthImage mediaId={mid} className="w-full h-auto block object-contain max-h-[75vh]" alt={`result-${i}`} />
+                    <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/90 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex justify-between items-center">
+                      <span className="text-xs text-white/80 font-medium">Image #{i + 1} · {aspect}</span>
+                      <button
+                        onClick={() => download(mid, `lumina-${job.id}-${i + 1}.png`)}
+                        data-testid={`download-${mid}`}
+                        className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-lg bg-gold text-black font-bold hover:bg-gold-soft transition-colors shadow-lg"
+                      >
+                        <Download strokeWidth={1.5} className="w-4 h-4" />
+                        <span>Λήψη</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

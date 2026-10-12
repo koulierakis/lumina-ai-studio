@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Bot, CheckCircle2, ChevronRight, CircleAlert, FileText, Film, Globe2,
-  ImageIcon, Loader2, Mic2, Plus, RefreshCw, Settings2, Sparkles, Wallet,
+  Bot, BrainCircuit, CheckCircle2, ChevronRight, CircleAlert, Code2, FileText, Film, Globe2,
+  ImageIcon, Loader2, Mic2, MonitorPlay, Plus, RefreshCw, Settings2, Sparkles, Wallet,
   Workflow, Zap,
 } from 'lucide-react';
 import { apiGet } from '../lib/api';
 import AuthImage from '../components/AuthImage';
+import LiveAppPreviewModal from '../components/LiveAppPreviewModal';
 import { CONTROL_CENTER_TOOLS, activeJobs, buildMessages, formatRelativeTime, suggestedActions } from '../dashboard/model';
 
-const TOOL_ICONS = { image: ImageIcon, video: Film, voice: Mic2, document: FileText, finance: Wallet, research: Globe2, automation: Workflow, settings: Settings2 };
+const TOOL_ICONS = { code: Code2, mind: BrainCircuit, image: ImageIcon, video: Film, voice: Mic2, document: FileText, finance: Wallet, research: Globe2, automation: Workflow, settings: Settings2 };
 
 function ToolCard({ tool, onOpen }) {
   const Icon = TOOL_ICONS[tool.icon] || Sparkles;
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const [data, setData] = useState(emptyData);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [showLivePreview, setShowLivePreview] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(false);
@@ -80,7 +82,21 @@ export default function Dashboard() {
     <div className="mx-auto max-w-[1540px] p-6 sm:p-10">
       <header className="flex flex-col gap-5 border-b border-white/[0.07] pb-8 sm:flex-row sm:items-end sm:justify-between">
         <div><p className="text-sm font-semibold uppercase tracking-[0.24em] text-gold">Control center</p><h2 className="mt-2 font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">Good to see you.</h2><p className="mt-3 text-base text-white/60">Everything important in your Lumina workspace, in one calm view.</p></div>
-        <div className="flex gap-2"><button onClick={load} disabled={loading} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm font-semibold text-white/70 hover:border-white/20 hover:text-white disabled:opacity-40"><RefreshCw className={`mr-2 inline h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />Refresh</button><button onClick={() => navigate('/studio/generate')} data-testid="dashboard-new-image" className="rounded-lg bg-gold px-4 py-2.5 text-sm font-semibold text-black hover:bg-gold-soft"><Plus className="mr-1.5 inline h-4 w-4" />New image</button></div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowLivePreview(true)}
+            data-testid="dashboard-live-preview-btn"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-400/40 bg-emerald-500/15 px-4 py-2.5 text-sm font-semibold text-emerald-300 hover:bg-emerald-500 hover:text-black transition shadow-sm"
+            title="Άνοιγμα της ζωντανής προεπισκόπησης της εφαρμογής"
+          >
+            <MonitorPlay className="h-4 w-4 text-emerald-400" />
+            <span>Ζωντανή Προεπισκόπηση</span>
+            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+          </button>
+          <button onClick={load} disabled={loading} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm font-semibold text-white/70 hover:border-white/20 hover:text-white disabled:opacity-40"><RefreshCw className={`mr-2 inline h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />Refresh</button>
+          <button onClick={() => navigate('/studio/generate')} data-testid="dashboard-new-image" className="rounded-lg bg-gold px-4 py-2.5 text-sm font-semibold text-black hover:bg-gold-soft"><Plus className="mr-1.5 inline h-4 w-4" />New image</button>
+        </div>
       </header>
 
       {error && <div className="mt-5 flex items-center gap-2 rounded-lg border border-amber-300/20 bg-amber-300/5 px-4 py-3 text-xs text-amber-100"><CircleAlert className="h-4 w-4" />Some workspace data could not be refreshed. The available information is shown below.</div>}
@@ -109,5 +125,11 @@ export default function Dashboard() {
 
       <section className="mt-6 grid gap-6 xl:grid-cols-2"><div className="lumina-glass rounded-xl p-6"><div className="flex items-center gap-2"><Bot className="h-4 w-4 text-gold" /><h3 className="font-display text-3xl text-white">Recent messages</h3></div><div className="mt-5 space-y-3">{messages.map((message) => <div key={message.title} className="flex items-center gap-3 rounded-lg bg-white/[0.025] px-3 py-3"><span className={`h-2 w-2 rounded-full ${message.tone === 'green' ? 'bg-emerald-400' : message.tone === 'gold' ? 'bg-gold' : 'bg-white/35'}`} /><span className="text-xs text-white/65">{message.title}</span></div>)}{!messages.length && <p className="text-xs text-white/45">No system messages right now.</p>}</div></div><div className="lumina-glass rounded-xl p-6"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-gold" /><h3 className="font-display text-3xl text-white">Suggested next actions</h3></div><div className="mt-5 space-y-2">{actions.map((action) => <button key={action.title} onClick={() => navigate(action.to)} className="group flex w-full items-center justify-between rounded-lg bg-white/[0.025] px-3 py-3 text-left hover:bg-white/[0.05]"><span><span className="block text-xs text-white/80">{action.title}</span><span className="mt-0.5 block text-[11px] text-white/40">{action.description}</span></span><ChevronRight className="h-4 w-4 text-white/25 group-hover:text-gold" /></button>)}</div></div></section>
     </div>
+
+    <LiveAppPreviewModal
+      isOpen={showLivePreview}
+      onClose={() => setShowLivePreview(false)}
+      initialPath="/studio/dashboard"
+    />
   </main>;
 }

@@ -1,12 +1,11 @@
 export const CONTROL_CENTER_TOOLS = [
-  { key: 'image', label: 'Image Studio', description: 'Create and edit visual content.', to: '/studio/generate', icon: 'image' },
-  { key: 'video', label: 'Video Studio', description: 'Build polished video projects.', to: '/studio/video-studio', icon: 'video' },
-  { key: 'voice', label: 'Voice Studio', description: 'Record and shape voice-over.', to: '/studio/video-studio', icon: 'voice' },
-  { key: 'documents', label: 'Documents', description: 'Create refined client documents.', to: '/studio/documents', icon: 'document' },
-  { key: 'finance', label: 'JSA Finance', description: 'Review financial workflows.', to: '/studio/finance', icon: 'finance' },
-  { key: 'research', label: 'Internet Research', description: 'Gather focused research.', to: '/studio/research', icon: 'research' },
-  { key: 'automations', label: 'Automations', description: 'Set up repeatable workflows.', to: '/studio/automations', icon: 'automation' },
-  { key: 'settings', label: 'Settings', description: 'Manage your Lumina workspace.', to: '/studio/settings', icon: 'settings' },
+  { key: 'code-builder', label: 'Google Code Builder', description: 'Δημιουργία & εξέλιξη εφαρμογών με AI agent & ζωντανή προεπισκόπηση.', to: '/studio/code-builder', icon: 'code' },
+  { key: 'mind', label: 'LUMINA Mind', description: 'Στρατηγικός σύμβουλος, Life Coach & Orchestrator.', to: '/studio/mind', icon: 'mind' },
+  { key: 'image', label: 'Image Studio', description: 'Δημιουργία εικόνων υψηλής πιστότητας.', to: '/studio/generate', icon: 'image' },
+  { key: 'video', label: 'Video Studio', description: 'Παραγωγή & επεξεργασία AI βίντεο και motion.', to: '/studio/video-studio', icon: 'video' },
+  { key: 'voice', label: 'Voice Studio', description: 'Ηχογράφηση φωνής, απομαγνητοφώνηση & Voice AI.', to: '/studio/voice-studio', icon: 'voice' },
+  { key: 'documents', label: 'Document Studio', description: 'Σύνταξη & διαμόρφωση εγγράφων με AI.', to: '/studio/documents', icon: 'document' },
+  { key: 'settings', label: 'Workspace Settings', description: 'Διαχείριση περιβάλλοντος και ρυθμίσεων Lumina.', to: '/studio/settings', icon: 'settings' },
 ];
 
 export function activeJobs(jobs = []) {

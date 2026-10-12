@@ -1,5 +1,13 @@
 import { apiDelete, apiGet, apiPatch, apiPost, apiPut, uploadFormData, API_BASE } from '../lib/api';
-import { runtimeStudioJobPayload } from '../runtime/model';
+
+export function runtimeStudioJobPayload(studio, jobType, payload = {}) {
+  return {
+    studio: studio || 'documents',
+    job_type: jobType || 'llm',
+    payload: payload || {},
+    created_at: new Date().toISOString(),
+  };
+}
 
 export const DOCUMENT_TYPES = [
   'Contracts', 'Commercial Agreements', 'Sales Agreements', 'Purchase Agreements', 'Service Agreements', 'Master Agreements', 'Framework Agreements', 'Non Disclosure Agreements', 'NCNDA', 'IMFPA', 'Memorandum of Understanding', 'Letters of Intent', 'Invoices', 'Proforma Invoices', 'Corporate Letters', 'Business Letters', 'Bank Correspondence', 'Compliance Documents', 'Corporate Resolutions', 'Certificates', 'Declarations', 'Power of Attorney', 'Minutes', 'Policies', 'Reports', 'Manuals', 'Executive Summaries', 'Business Proposals', 'Investment Proposals', 'Pitch Deck Documents', 'Tender Documents', 'Employment Documents', 'Legal Documents', 'Custom Documents',
