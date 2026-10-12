@@ -142,13 +142,13 @@
       "ws": "8.21.0"
     },
     "postcss-load-config": {
-      "yaml": "8.5.3"
+      "yaml": "2.9.1"
     },
     "cosmiconfig": {
-      "yaml": "8.5.3"
+      "yaml": "2.9.1"
     },
     "cssnano": {
-      "yaml": "8.5.3"
+      "yaml": "2.9.1"
     },
     "eslint": {
       "js-yaml": "4.2.0"
