@@ -7,6 +7,8 @@ The Executive Advisor is the single advisory intelligence surface for LUMINA. It
 - Auto: routes each request to the most relevant executive discipline.
 - Board: evaluates the request across CEO, CFO, CMO, strategy, investment, operations, risk/compliance, and mentor perspectives and returns one unified recommendation.
 - CEO / CFO / CMO / Strategy / Investment / Operations / Risk / Mentor: explicit role selection.
+- Gym Marketing / Legal Information / Accounting / Personal Assistant & Secretary / Designer / Developer / Personal Life Coach: explicit specialist roles.
+- Auto routing recognizes Greek and English requests for the new specialists, with task-specific instructions and safe boundaries.
 - Deep reasoning: requests a higher deliberation level from the selected provider.
 
 ## Providers
