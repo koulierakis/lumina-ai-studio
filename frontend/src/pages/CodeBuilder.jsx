@@ -422,6 +422,9 @@ export default function CodeBuilder() {
           {task && (
             <div className="flex items-center gap-1.5">
               <StatusPill phase={task.phase} />
+              <span data-testid="code-builder-elapsed-time" className="font-mono text-[10px] text-white/50">
+                <ElapsedTime startedAt={task.started_at_epoch} createdAt={task.created_at_epoch} finishedAt={task.finished_at_epoch} phase={task.phase} />
+              </span>
               <button
                 data-testid="code-builder-refresh"
                 onClick={() => refresh()}
@@ -446,6 +449,7 @@ export default function CodeBuilder() {
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
+              data-testid="code-builder-voice-help"
               onClick={() => {
                 if (voiceGuide.isSpeaking) {
                   voiceGuide.stopSpeaking();
@@ -466,6 +470,7 @@ export default function CodeBuilder() {
             <button
               type="button"
               onClick={voiceGuide.toggleListening}
+              data-testid="code-builder-voice"
               className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-2.5 py-2 text-xs font-medium transition ${
                 voiceGuide.isListening
                   ? 'border-red-400 bg-red-400/20 text-red-200 animate-pulse'

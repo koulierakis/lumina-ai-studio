@@ -227,3 +227,31 @@ def test_sambanova_failure_is_sanitized_and_unavailable(tmp_path: Path, monkeypa
     assert result["provider_status"] == "unavailable"
     assert "SambaNova cloud mode is currently unavailable" in result["answer"]
     assert "secret-failure-sn" not in json.dumps(result)
+
+def test_requested_specialist_roles_route_greek_requests_and_use_distinct_guidance(tmp_path: Path) -> None:
+    service = ExecutiveAdvisorService(root=tmp_path / "advisor", ollama=FakeOllama())
+    cases = [
+        ("Φτιάξε προσφορά συνδρομής για το Athletico Gym", "gym_marketer"),
+        ("Έλεγξε τη σύμβαση και τις ρήτρες ευθύνης", "legal"),
+        ("Οργάνωσε τα τιμολόγια και τον ΦΠΑ για τον λογιστή", "accountant"),
+        ("Γράψε υπενθύμιση και οργάνωσε το ραντεβού", "assistant"),
+        ("Σχεδίασε αφίσα και λογότυπο για την προσφορά", "designer"),
+        ("Έλεγξε τον κώδικα και διόρθωσε το σφάλμα στο repository", "developer"),
+        ("Χρειάζομαι βοήθεια με στόχους ζωής και προσωπικές συνήθειες", "life_coach"),
+    ]
+    for message, expected_role in cases:
+        assert service.route_role(message, "auto") == expected_role
+        assert service.route_role(message, expected_role) == expected_role
+
+    expected_guidance = {
+        "gym_marketer": "Athletico Gym in Greece",
+        "legal": "plain-language legal information",
+        "accountant": "organize invoices",
+        "assistant": "prepare drafts",
+        "designer": "visual concept",
+        "developer": "actual build, test, and browser evidence",
+        "life_coach": "personal goals, habits, motivation",
+    }
+    for role, expected_text in expected_guidance.items():
+        prompt = service._system_prompt("owner@example.com", role, deep_reasoning=False)
+        assert expected_text in prompt
