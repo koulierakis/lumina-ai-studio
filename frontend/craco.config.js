@@ -46,6 +46,64 @@ let webpackConfig = {
     configure: (jestConfig) => ({
       ...jestConfig,
       resolver: path.resolve(__dirname, 'jest.lexical-resolver.js'),
+      transformIgnorePatterns: [
+        '[/\\\\]node_modules[/\\\\](?!(react-router-dom|react-router)[/\\\\]).+\\\\.(js|jsx|mjs|cjs|ts|tsx)    }),
+  },
+  webpack: {
+    alias: { '@': path.resolve(__dirname, 'src') },
+    configure: (webpackConfig) => {
+      webpackConfig.watchOptions = { ...webpackConfig.watchOptions, ignored: ['**/node_modules/**','**/.git/**','**/build/**','**/dist/**','**/coverage/**','**/public/**'] };
+      if (config.enableHealthCheck && healthPluginInstance) webpackConfig.plugins.push(healthPluginInstance);
+      return webpackConfig;
+    },
+  },
+};
+
+webpackConfig.devServer = (devServerConfig) => {
+  if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
+    const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
+    devServerConfig.setupMiddlewares = (middlewares, devServer) => {
+      if (originalSetupMiddlewares) middlewares = originalSetupMiddlewares(middlewares, devServer);
+      setupHealthEndpoints(devServer, healthPluginInstance);
+      return middlewares;
+    };
+  }
+  return devServerConfig;
+};
+
+const configureDevServer = webpackConfig.devServer;
+webpackConfig.devServer = (devServerConfig) => makeDevServerV5Compatible(configureDevServer(devServerConfig));
+module.exports = webpackConfig;
+,
+        '^.+\\\\.module\\\\.(css|sass|scss)    }),
+  },
+  webpack: {
+    alias: { '@': path.resolve(__dirname, 'src') },
+    configure: (webpackConfig) => {
+      webpackConfig.watchOptions = { ...webpackConfig.watchOptions, ignored: ['**/node_modules/**','**/.git/**','**/build/**','**/dist/**','**/coverage/**','**/public/**'] };
+      if (config.enableHealthCheck && healthPluginInstance) webpackConfig.plugins.push(healthPluginInstance);
+      return webpackConfig;
+    },
+  },
+};
+
+webpackConfig.devServer = (devServerConfig) => {
+  if (config.enableHealthCheck && setupHealthEndpoints && healthPluginInstance) {
+    const originalSetupMiddlewares = devServerConfig.setupMiddlewares;
+    devServerConfig.setupMiddlewares = (middlewares, devServer) => {
+      if (originalSetupMiddlewares) middlewares = originalSetupMiddlewares(middlewares, devServer);
+      setupHealthEndpoints(devServer, healthPluginInstance);
+      return middlewares;
+    };
+  }
+  return devServerConfig;
+};
+
+const configureDevServer = webpackConfig.devServer;
+webpackConfig.devServer = (devServerConfig) => makeDevServerV5Compatible(configureDevServer(devServerConfig));
+module.exports = webpackConfig;
+,
+      ],
     }),
   },
   webpack: {
