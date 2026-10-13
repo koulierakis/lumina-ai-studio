@@ -1,6 +1,7 @@
 import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import CodeBuilder from './CodeBuilder';
 import { apiGet } from '../lib/api';
 
@@ -61,7 +62,7 @@ describe('Code Builder page recovery', () => {
     });
 
     await act(async () => {
-      root.render(<CodeBuilder />);
+      root.render(<MemoryRouter><CodeBuilder /></MemoryRouter>);
       await flushEffects();
     });
 
