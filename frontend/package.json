@@ -107,7 +107,7 @@
     "tailwindcss": "3.4.17"
   },
   "overrides": {
-    "react-router": "7.15.1",
+    "react-router": "7.18.3",
     "node-forge": "1.4.0",
     "fast-uri": "3.1.2",
     "flatted": "3.4.2",
@@ -124,8 +124,9 @@
     "serialize-javascript": "7.0.5",
     "uuid": "11.1.1",
     "@tootallnate/once": "2.0.1",
-    "webpack-dev-server": "5.2.5",
-    "resolve-url-loader": "5.0.0",
+    "webpack-dev-server": {
+      "ws": "8.21.0"
+    },
     "resolve-url-loader": {
       "postcss": "8.5.10"
     },
@@ -137,9 +138,6 @@
     },
     "postcss-svgo": {
       "svgo": "2.8.1"
-    },
-    "webpack-dev-server": {
-      "ws": "8.21.0"
     },
     "postcss-load-config": {
       "yaml": "8.5.3"
