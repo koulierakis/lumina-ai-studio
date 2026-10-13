@@ -226,7 +226,7 @@ class ExecutiveAdvisorService:
             return normalized
         text = message.casefold()
         scores = {
-            role: sum(1 for keyword in keywords if keyword in text)
+            role: sum(1 for keyword in keywords if keyword.casefold() in text)
             for role, keywords in ROLE_KEYWORDS.items()
         }
         winner = max(scores, key=scores.get, default="ceo")
@@ -317,7 +317,7 @@ class ExecutiveAdvisorService:
         board_instruction = ""
         if role == "board":
             board_instruction = (
-                "Evaluate the issue through only the relevant perspectives: CEO, CFO, general marketing, Athletico gym marketing, "
+                "Evaluate the issue through only the relevant perspectives: CEO, CFO, CMO/general marketing, Athletico gym marketing, "
                 "legal, accounting, strategy, investment, operations, risk/compliance, design, software development, and life coaching. "
                 "Return one unified recommendation; surface material disagreements and trade-offs without simulating a theatrical conversation."
             )
