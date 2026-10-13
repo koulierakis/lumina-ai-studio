@@ -74,12 +74,12 @@ describe('Code Builder runtime status controls', () => {
     });
 
     await act(async () => root.render(<MemoryRouter><CodeBuilder /></MemoryRouter>));
-    expect(container.textContent).toContain('0:00');
+    expect(container.querySelector('[data-testid="code-builder-elapsed-time"]').textContent).toContain('0:00');
 
     await act(async () => {
       jest.advanceTimersByTime(2000);
     });
 
-    expect(container.textContent).toContain('0:02');
+    expect(container.querySelector('[data-testid="code-builder-elapsed-time"]').textContent).toContain('0:02');
   });
 });
