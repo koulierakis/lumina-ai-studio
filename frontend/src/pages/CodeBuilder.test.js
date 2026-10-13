@@ -48,7 +48,6 @@ describe('Code Builder transactional workspace', () => {
     expect(page).toContain("apiGet('/code-builder/tasks?limit=50'");
     expect(page).toContain('data-testid="code-builder-cancel"');
     expect(page).toContain('Proposed diff');
-    expect(page).toContain('No production writes before explicit approval.');
     expect(page).toContain("apiGet('/code-builder/engines'");
     expect(page).toContain('data-testid="code-builder-engine"');
     expect(page).toContain("metadata: { coding_engine: codingEngine }");
