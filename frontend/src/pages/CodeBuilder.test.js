@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import CodeBuilder from './CodeBuilder';
 import { apiGet, apiPost } from '../lib/api';
 
@@ -31,7 +32,7 @@ describe('Code Builder transactional workspace', () => {
     const app = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8');
     const registry = fs.readFileSync(path.join(__dirname, '..', 'platform', 'moduleRegistry.js'), 'utf8');
 
-    expect(app).toContain('<Route path="code-builder" element={<CodeBuilder />} />');
+    expect(app).toContain('<Route path="code-builder" element={<MemoryRouter><CodeBuilder /></MemoryRouter>} />');
     expect(registry).toContain("id: 'code-builder'");
     expect(registry).toContain("route: '/studio/code-builder'");
 
@@ -78,7 +79,7 @@ describe('Code Builder voice composer', () => {
   });
 
   async function renderComposer() {
-    await act(async () => root.render(<CodeBuilder />));
+    await act(async () => root.render(<MemoryRouter><CodeBuilder /></MemoryRouter>));
   }
 
   function setTextareaValue(input, value) {
