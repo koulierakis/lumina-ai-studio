@@ -107,7 +107,7 @@
     "tailwindcss": "3.4.17"
   },
   "overrides": {
-    "react-router": "7.15.1",
+    "react-router": "7.18.3",
     "node-forge": "1.4.0",
     "fast-uri": "3.1.2",
     "flatted": "3.4.2",
@@ -142,13 +142,13 @@
       "ws": "8.21.0"
     },
     "postcss-load-config": {
-      "yaml": "8.5.3"
+      "yaml": "2.9.1"
     },
     "cosmiconfig": {
-      "yaml": "8.5.3"
+      "yaml": "2.9.1"
     },
     "cssnano": {
-      "yaml": "8.5.3"
+      "yaml": "2.9.1"
     },
     "eslint": {
       "js-yaml": "4.2.0"
