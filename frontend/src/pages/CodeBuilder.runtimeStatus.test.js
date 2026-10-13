@@ -1,5 +1,6 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { MemoryRouter } from 'react-router-dom';
 import CodeBuilder from './CodeBuilder';
 import { apiGet, apiPost } from '../lib/api';
 
@@ -43,7 +44,7 @@ describe('Code Builder runtime status controls', () => {
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    await act(async () => root.render(<CodeBuilder />));
+    await act(async () => root.render(<MemoryRouter><CodeBuilder /></MemoryRouter>));
     apiGet.mockClear();
 
     await act(async () => container.querySelector('[data-testid="code-builder-refresh"]').click());
@@ -72,7 +73,7 @@ describe('Code Builder runtime status controls', () => {
       throw new Error(`Unexpected URL: ${url}`);
     });
 
-    await act(async () => root.render(<CodeBuilder />));
+    await act(async () => root.render(<MemoryRouter><CodeBuilder /></MemoryRouter>));
     expect(container.textContent).toContain('0:00');
 
     await act(async () => {
