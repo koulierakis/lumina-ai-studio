@@ -53,23 +53,6 @@ jobs:
         with:
           node-version: "20"
       - run: npm install --no-audit --no-fund
-      - name: Diagnose installed React Router entry points
-        run: |
-          node - <<'NODE'
-          const fs = require('fs');
-          const path = require('path');
-          for (const name of ['react-router-dom', 'react-router']) {
-            const pkgPath = require.resolve(`${name}/package.json`);
-            const pkg = require(pkgPath);
-            const dir = path.dirname(pkgPath);
-            console.log(JSON.stringify({name, version: pkg.version, main: pkg.main, module: pkg.module, exports: pkg.exports}, null, 2));
-            for (const subdir of ['dist', 'dist/development']) {
-              const target = path.join(dir, subdir);
-              if (fs.existsSync(target)) console.log(subdir, fs.readdirSync(target).slice(0, 80));
-            }
-            try { console.log('resolved', require.resolve(name)); } catch (error) { console.log('resolve-error', error.message); }
-          }
-          NODE
       - name: Run full frontend test suite
         run: CI=true npm test -- --watchAll=false --runInBand
       - run: npm run build
