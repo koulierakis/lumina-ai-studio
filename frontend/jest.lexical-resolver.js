@@ -10,6 +10,7 @@ module.exports = (request, options) => {
   if (request === 'react-router-dom') {
     return path.resolve(
       options.rootDir || __dirname,
+      '..',
       'node_modules/react-router-dom/dist/index.js',
     );
   }
@@ -17,6 +18,7 @@ module.exports = (request, options) => {
   if (request === 'react-router') {
     return path.resolve(
       options.rootDir || __dirname,
+      '..',
       'node_modules/react-router/dist/development/index.js',
     );
   }
@@ -24,6 +26,7 @@ module.exports = (request, options) => {
   if (request === 'react-router/dom') {
     return path.resolve(
       options.rootDir || __dirname,
+      '..',
       'node_modules/react-router/dist/development/dom-export.js',
     );
   }
