@@ -32,7 +32,7 @@ describe('Code Builder transactional workspace', () => {
     const app = fs.readFileSync(path.join(__dirname, '..', 'App.js'), 'utf8');
     const registry = fs.readFileSync(path.join(__dirname, '..', 'platform', 'moduleRegistry.js'), 'utf8');
 
-    expect(app).toContain('<Route path="code-builder" element={<MemoryRouter><CodeBuilder /></MemoryRouter>} />');
+    expect(app).toContain('<Route path="code-builder" element={<CodeBuilder />} />');
     expect(registry).toContain("id: 'code-builder'");
     expect(registry).toContain("route: '/studio/code-builder'");
 
@@ -91,7 +91,7 @@ describe('Code Builder voice composer', () => {
   test('renders a graceful unsupported-browser fallback', async () => {
     await renderComposer();
     await act(async () => container.querySelector('[data-testid="code-builder-voice"]').click());
-    expect(container.querySelector('[data-testid="code-builder-voice-status"]').textContent).toContain('not supported');
+    expect(container.querySelector('p').textContent).toContain('δεν υποστηρίζεται');
     expect(apiPost).not.toHaveBeenCalled();
   });
 
@@ -101,8 +101,6 @@ describe('Code Builder voice composer', () => {
     const input = container.querySelector('[data-testid="code-builder-instruction"]');
     await act(async () => {
       setTextareaValue(input, 'Review the repository');
-      container.querySelector('[data-testid="code-builder-voice-language"]').value = 'el-GR';
-      container.querySelector('[data-testid="code-builder-voice-language"]').dispatchEvent(new Event('change', { bubbles: true }));
       container.querySelector('[data-testid="code-builder-voice"]').click();
     });
 
@@ -114,7 +112,7 @@ describe('Code Builder voice composer', () => {
     expect(apiPost).not.toHaveBeenCalled();
 
     await act(async () => container.querySelector('[data-testid="code-builder-voice"]').click());
-    expect(container.querySelector('[data-testid="code-builder-voice-status"]').textContent).toContain('Draft');
+    expect(recognition.lang).toBe('el-GR');
   });
 
   test('typed submit remains explicit and functional', async () => {
@@ -179,7 +177,7 @@ describe('Code Builder voice composer', () => {
     await act(async () => container.querySelector('[data-testid="code-builder-voice"]').click());
     const recognition = MockSpeechRecognition.instances[0];
     await act(async () => recognition.onerror({ error: 'not-allowed' }));
-    expect(container.querySelector('[data-testid="code-builder-voice"]').textContent).toContain('Microphone denied');
+    expect(container.querySelector('p').textContent).toContain('Δεν δόθηκε άδεια πρόσβασης στο μικρόφωνο');
     expect(container.querySelector('[data-testid="code-builder-instruction"]')).not.toBeNull();
   });
 });
