@@ -8,10 +8,16 @@ const path = require('path');
  */
 module.exports = (request, options) => {
   if (request === 'react-router-dom') {
-    return path.resolve(
-      options.rootDir || __dirname,
-      'node_modules/react-router-dom/dist/index.js',
-    );
+    try {
+      return require.resolve(request, {
+        paths: [
+          options.basedir,
+          path.resolve(options.rootDir || __dirname, 'node_modules'),
+        ],
+      });
+    } catch {
+      // Let Jest report its standard module-resolution error.
+    }
   }
 
   if (request === 'react-router') {
