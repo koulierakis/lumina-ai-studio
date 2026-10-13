@@ -47,7 +47,10 @@ let webpackConfig = {
       ...jestConfig,
       resolver: path.resolve(__dirname, 'jest.lexical-resolver.js'),
       transformIgnorePatterns: [
-        '[/\\\\]node_modules[/\\\\](?!(react-router-dom|react-router)[/\\\\]).+\\\\.(js|jsx|mjs|cjs|ts|tsx)    }),
+        '[/\\\\]node_modules[/\\\\](?!(react-router-dom|react-router)[/\\\\]).+\\\\.(js|jsx|mjs|cjs|ts|tsx)$',
+        '^.+\\\\.module\\\\.(css|sass|scss)$',
+      ],
+    }),
   },
   webpack: {
     alias: { '@': path.resolve(__dirname, 'src') },
