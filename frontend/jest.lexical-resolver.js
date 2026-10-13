@@ -7,7 +7,7 @@ const path = require('path');
  * keep Jest's resolver for every other dependency.
  */
 module.exports = (request, options) => {
-  if (request === 'react-router-dom') {
+  if (request === 'react-router-dom' || request === 'react-router' || request === 'react-router/dom') {
     try {
       return require.resolve(request, {
         paths: [
@@ -19,21 +19,6 @@ module.exports = (request, options) => {
       // Let Jest report its standard module-resolution error.
     }
   }
-
-  if (request === 'react-router') {
-    return path.resolve(
-      options.rootDir || __dirname,
-      'node_modules/react-router/dist/development/index.js',
-    );
-  }
-
-  if (request === 'react-router/dom') {
-    return path.resolve(
-      options.rootDir || __dirname,
-      'node_modules/react-router/dist/development/dom-export.js',
-    );
-  }
-
   if (
     request.startsWith('@lexical/')
   ) {
